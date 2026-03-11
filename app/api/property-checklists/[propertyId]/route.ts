@@ -1,29 +1,14 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import {
+  requireApiAppAccess,
+  canAccessOrganization,
+} from "@/lib/route-access"
 
 type RouteContext = {
   params: Promise<{
     propertyId: string
   }>
-}
-
-function toNullableString(value: unknown) {
-  if (value === undefined || value === null) return null
-  const text = String(value).trim()
-  return text === "" ? null : text
-}
-
-function toBoolean(value: unknown, fallback = false) {
-  if (typeof value === "boolean") return value
-  if (value === "true") return true
-  if (value === "false") return false
-  return fallback
-}
-
-function toInt(value: unknown, fallback = 0) {
-  const num = Number(value)
-  if (Number.isNaN(num)) return fallback
-  return Math.trunc(num)
 }
 
 type ChecklistItemInput = {
@@ -38,14 +23,107 @@ type ChecklistItemInput = {
   optionsText?: unknown
 }
 
+function toNullableString(value: unknown) {
+  if (value === undefined || value === null) return null
+  const text = String(value).trim()
+  return text === "" ? null : text
+}
+
+function toStringValue(value: unknown, fallback = "") {
+  if (typeof value !== "string") return fallback
+  return value.trim()
+}
+
+function toBoolean(value: unknown, fallback = false) {
+  if (typeof value === "boolean") return value
+  if (typeof value === "string") {
+    if (value.toLowerCase() === "true") return true
+    if (value.toLowerCase() === "false") return false
+  }
+  return fallback
+}
+
+function toNumberValue(value: unknown, fallback = 0) {
+  const num = Number(value)
+  return Number.isFinite(num) ? num : fallback
+}
+
+function normalizeItems(items: unknown): Array<{
+  label: string
+  description: string | null
+  itemType: string
+  isRequired: boolean
+  sortOrder: number
+  category: string | null
+  requiresPhoto: boolean
+  opensIssueOnFail: boolean
+  optionsText: string | null
+}> {
+  if (!Array.isArray(items)) return []
+
+  return items
+    .map((item, index) => {
+      const input = (item ?? {}) as ChecklistItemInput
+      const label = toStringValue(input.label)
+      if (!label) return null
+
+      return {
+        label,
+        description: toNullableString(input.description),
+        itemType: toNullableString(input.itemType) ?? "CHECK",
+        isRequired: toBoolean(input.isRequired, true),
+        sortOrder: toNumberValue(input.sortOrder, index),
+        category: toNullableString(input.category),
+        requiresPhoto: toBoolean(input.requiresPhoto, false),
+        opensIssueOnFail: toBoolean(input.opensIssueOnFail, false),
+        optionsText: toNullableString(input.optionsText),
+      }
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== null)
+}
+
 export async function GET(_req: NextRequest, context: RouteContext) {
   try {
+    const access = await requireApiAppAccess()
+
+    if (!access.ok) {
+      return access.response
+    }
+
+    const { auth } = access
     const { propertyId } = await context.params
+
+    const property = await prisma.property.findUnique({
+      where: { id: propertyId },
+      select: {
+        id: true,
+        organizationId: true,
+      },
+    })
+
+    if (!property) {
+      return NextResponse.json(
+        { error: "Το ακίνητο δεν βρέθηκε." },
+        { status: 404 }
+      )
+    }
+
+    if (!canAccessOrganization(auth, property.organizationId)) {
+      return NextResponse.json(
+        { error: "Δεν έχετε πρόσβαση σε αυτό το ακίνητο." },
+        { status: 403 }
+      )
+    }
 
     const templates = await prisma.propertyChecklistTemplate.findMany({
       where: {
         propertyId,
+        ...(auth.isSuperAdmin ? {} : { organizationId: auth.organizationId }),
       },
+      orderBy: [
+        { isPrimary: "desc" },
+        { createdAt: "desc" },
+      ],
       include: {
         items: {
           orderBy: {
@@ -53,16 +131,11 @@ export async function GET(_req: NextRequest, context: RouteContext) {
           },
         },
       },
-      orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
     })
 
-    return NextResponse.json({
-      templates,
-      primaryTemplate: templates.find((x) => x.isPrimary) || null,
-    })
+    return NextResponse.json(templates)
   } catch (error) {
-    console.error("GET /api/property-checklists/[propertyId] error:", error)
-
+    console.error("Property checklist templates GET error:", error)
     return NextResponse.json(
       { error: "Αποτυχία φόρτωσης προτύπων checklist." },
       { status: 500 }
@@ -72,51 +145,74 @@ export async function GET(_req: NextRequest, context: RouteContext) {
 
 export async function POST(req: NextRequest, context: RouteContext) {
   try {
+    const access = await requireApiAppAccess()
+
+    if (!access.ok) {
+      return access.response
+    }
+
+    const { auth } = access
     const { propertyId } = await context.params
     const body = await req.json()
 
-    const title = String(body?.title ?? "").trim()
-    const description = toNullableString(body?.description)
-    const templateType = String(body?.templateType ?? "main").trim() || "main"
-    const isPrimary = toBoolean(body?.isPrimary, false)
-    const isActive = toBoolean(body?.isActive, true)
-    const items = Array.isArray(body?.items) ? body.items : []
+    const property = await prisma.property.findUnique({
+      where: { id: propertyId },
+      select: {
+        id: true,
+        organizationId: true,
+      },
+    })
 
-    if (!title) {
+    if (!property) {
       return NextResponse.json(
-        { error: "Ο τίτλος προτύπου checklist είναι υποχρεωτικός." },
+        { error: "Το ακίνητο δεν βρέθηκε." },
+        { status: 404 }
+      )
+    }
+
+    if (!canAccessOrganization(auth, property.organizationId)) {
+      return NextResponse.json(
+        { error: "Δεν έχετε πρόσβαση σε αυτό το ακίνητο." },
+        { status: 403 }
+      )
+    }
+
+    const name = toStringValue(body.name)
+    const description = toNullableString(body.description)
+    const isPrimary = toBoolean(body.isPrimary, false)
+    const items = normalizeItems(body.items)
+    const organizationId = property.organizationId
+
+    if (!name) {
+      return NextResponse.json(
+        { error: "Το όνομα προτύπου είναι υποχρεωτικό." },
         { status: 400 }
       )
     }
 
-    const result = await prisma.$transaction(async (tx) => {
+    const template = await prisma.$transaction(async (tx) => {
       if (isPrimary) {
         await tx.propertyChecklistTemplate.updateMany({
-          where: { propertyId, isPrimary: true },
-          data: { isPrimary: false },
+          where: {
+            propertyId,
+            organizationId,
+            isPrimary: true,
+          },
+          data: {
+            isPrimary: false,
+          },
         })
       }
 
-      const created = await tx.propertyChecklistTemplate.create({
+      return tx.propertyChecklistTemplate.create({
         data: {
+          organizationId,
           propertyId,
-          title,
+          name,
           description,
-          templateType,
           isPrimary,
-          isActive,
           items: {
-            create: (items as ChecklistItemInput[]).map((item, index) => ({
-              label: String(item?.label ?? "").trim() || `Βήμα ${index + 1}`,
-              description: toNullableString(item?.description),
-              itemType: String(item?.itemType ?? "boolean").trim() || "boolean",
-              isRequired: toBoolean(item?.isRequired, true),
-              sortOrder: toInt(item?.sortOrder, index + 1),
-              category: toNullableString(item?.category) ?? "inspection",
-              requiresPhoto: toBoolean(item?.requiresPhoto, false),
-              opensIssueOnFail: toBoolean(item?.opensIssueOnFail, false),
-              optionsText: toNullableString(item?.optionsText),
-            })),
+            create: items,
           },
         },
         include: {
@@ -127,21 +223,13 @@ export async function POST(req: NextRequest, context: RouteContext) {
           },
         },
       })
-
-      return created
     })
 
-    return NextResponse.json(result, { status: 201 })
+    return NextResponse.json(template, { status: 201 })
   } catch (error) {
-    console.error("POST /api/property-checklists/[propertyId] error:", error)
-
+    console.error("Property checklist template POST error:", error)
     return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Αποτυχία δημιουργίας προτύπου checklist.",
-      },
+      { error: "Αποτυχία δημιουργίας προτύπου checklist." },
       { status: 500 }
     )
   }

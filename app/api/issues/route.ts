@@ -1,235 +1,219 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import {
+  requireApiAppAccess,
+  buildTenantWhere,
+  canAccessOrganization,
+} from "@/lib/route-access"
 
-export async function GET(request: NextRequest) {
+function toNullableString(value: unknown) {
+  if (value === undefined || value === null) return null
+  const text = String(value).trim()
+  return text === "" ? null : text
+}
+
+function toStringValue(value: unknown, fallback = "") {
+  if (typeof value !== "string") return fallback
+  return value.trim()
+}
+
+export async function GET() {
   try {
-    const { searchParams } = new URL(request.url)
+    const access = await requireApiAppAccess()
 
-    const propertyId = searchParams.get("propertyId")
-    const taskId = searchParams.get("taskId")
-    const bookingId = searchParams.get("bookingId")
-    const status = searchParams.get("status")
-    const issueType = searchParams.get("issueType")
-    const severity = searchParams.get("severity")
+    if (!access.ok) {
+      return access.response
+    }
+
+    const { auth } = access
 
     const issues = await prisma.issue.findMany({
-      where: {
-        ...(propertyId ? { propertyId } : {}),
-        ...(taskId ? { taskId } : {}),
-        ...(bookingId ? { bookingId } : {}),
-        ...(status ? { status } : {}),
-        ...(issueType ? { issueType } : {}),
-        ...(severity ? { severity } : {}),
-      },
-      include: {
-        property: {
-          select: {
-            id: true,
-            code: true,
-            name: true,
-            city: true,
-            address: true,
-          },
-        },
-        task: {
-          select: {
-            id: true,
-            title: true,
-            status: true,
-            scheduledDate: true,
-          },
-        },
-        booking: {
-          select: {
-            id: true,
-            guestName: true,
-            checkInDate: true,
-            checkOutDate: true,
-            status: true,
-          },
-        },
-        taskPhotos: {
-          select: {
-            id: true,
-            category: true,
-            fileUrl: true,
-            fileName: true,
-            caption: true,
-            uploadedAt: true,
-          },
-          orderBy: {
-            uploadedAt: "desc",
-          },
-        },
-      },
+      where: buildTenantWhere(auth),
       orderBy: {
         createdAt: "desc",
+      },
+      include: {
+        property: true,
+        task: true,
+        event: true,
       },
     })
 
     return NextResponse.json(issues)
   } catch (error) {
-    console.error("GET /api/issues error:", error)
-
+    console.error("Issues GET error:", error)
     return NextResponse.json(
-      { error: "Αποτυχία φόρτωσης συμβάντων." },
+      { error: "Αποτυχία φόρτωσης ζητημάτων." },
       { status: 500 }
     )
   }
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(req: NextRequest) {
   try {
-    const body = await request.json()
+    const access = await requireApiAppAccess()
 
-    const propertyId = String(body.propertyId || "").trim()
-    const taskId =
-      body.taskId && String(body.taskId).trim() !== ""
-        ? String(body.taskId).trim()
-        : null
-    const bookingId =
-      body.bookingId && String(body.bookingId).trim() !== ""
-        ? String(body.bookingId).trim()
-        : null
-
-    const issueType = String(body.issueType || "").trim()
-    const title = String(body.title || "").trim()
-    const description =
-      body.description !== undefined ? String(body.description || "").trim() : ""
-    const severity = String(body.severity || "medium").trim()
-    const status = String(body.status || "open").trim()
-    const reportedBy =
-      body.reportedBy !== undefined ? String(body.reportedBy || "").trim() : ""
-
-    if (!propertyId) {
-      return NextResponse.json(
-        { error: "Το propertyId είναι υποχρεωτικό." },
-        { status: 400 }
-      )
+    if (!access.ok) {
+      return access.response
     }
 
-    if (!issueType) {
+    const { auth } = access
+    const body = await req.json()
+
+    const title = toStringValue(body.title)
+    const description = toNullableString(body.description)
+    const status = toNullableString(body.status) ?? "OPEN"
+    const severity = toNullableString(body.severity)
+    const propertyId = toNullableString(body.propertyId)
+    const taskId = toNullableString(body.taskId)
+    const eventId = toNullableString(body.eventId)
+    const requestedOrganizationId = toNullableString(body.organizationId)
+
+    let organizationId: string | null = null
+
+    if (auth.isSuperAdmin) {
+      organizationId = requestedOrganizationId
+    } else {
+      organizationId = auth.organizationId
+    }
+
+    if (!organizationId) {
       return NextResponse.json(
-        { error: "Ο τύπος συμβάντος είναι υποχρεωτικός." },
+        { error: "Το organizationId είναι υποχρεωτικό." },
         { status: 400 }
       )
     }
 
     if (!title) {
       return NextResponse.json(
-        { error: "Ο τίτλος συμβάντος είναι υποχρεωτικός." },
+        { error: "Ο τίτλος ζητήματος είναι υποχρεωτικός." },
         { status: 400 }
       )
     }
 
-    const property = await prisma.property.findUnique({
-      where: { id: propertyId },
-      select: { id: true },
-    })
-
-    if (!property) {
+    if (!propertyId && !taskId && !eventId) {
       return NextResponse.json(
-        { error: "Το ακίνητο δεν βρέθηκε." },
-        { status: 404 }
+        { error: "Το ζήτημα πρέπει να συνδέεται με ακίνητο, εργασία ή συμβάν." },
+        { status: 400 }
       )
+    }
+
+    if (propertyId) {
+      const property = await prisma.property.findUnique({
+        where: { id: propertyId },
+        select: {
+          id: true,
+          organizationId: true,
+        },
+      })
+
+      if (!property) {
+        return NextResponse.json(
+          { error: "Το ακίνητο δεν βρέθηκε." },
+          { status: 404 }
+        )
+      }
+
+      if (!canAccessOrganization(auth, property.organizationId)) {
+        return NextResponse.json(
+          { error: "Δεν έχετε πρόσβαση στο συγκεκριμένο ακίνητο." },
+          { status: 403 }
+        )
+      }
+
+      if (property.organizationId !== organizationId) {
+        return NextResponse.json(
+          { error: "Το ακίνητο ανήκει σε διαφορετικό οργανισμό." },
+          { status: 400 }
+        )
+      }
     }
 
     if (taskId) {
       const task = await prisma.task.findUnique({
         where: { id: taskId },
-        select: { id: true },
+        select: {
+          id: true,
+          organizationId: true,
+        },
       })
 
       if (!task) {
         return NextResponse.json(
-          { error: "Η συνδεδεμένη εργασία δεν βρέθηκε." },
+          { error: "Η εργασία δεν βρέθηκε." },
           { status: 404 }
+        )
+      }
+
+      if (!canAccessOrganization(auth, task.organizationId)) {
+        return NextResponse.json(
+          { error: "Δεν έχετε πρόσβαση στη συγκεκριμένη εργασία." },
+          { status: 403 }
+        )
+      }
+
+      if (task.organizationId !== organizationId) {
+        return NextResponse.json(
+          { error: "Η εργασία ανήκει σε διαφορετικό οργανισμό." },
+          { status: 400 }
         )
       }
     }
 
-    if (bookingId) {
-      const booking = await prisma.booking.findUnique({
-        where: { id: bookingId },
-        select: { id: true },
+    if (eventId) {
+      const event = await prisma.event.findUnique({
+        where: { id: eventId },
+        select: {
+          id: true,
+          organizationId: true,
+        },
       })
 
-      if (!booking) {
+      if (!event) {
         return NextResponse.json(
-          { error: "Η συνδεδεμένη κράτηση δεν βρέθηκε." },
+          { error: "Το συμβάν δεν βρέθηκε." },
           { status: 404 }
+        )
+      }
+
+      if (!canAccessOrganization(auth, event.organizationId)) {
+        return NextResponse.json(
+          { error: "Δεν έχετε πρόσβαση στο συγκεκριμένο συμβάν." },
+          { status: 403 }
+        )
+      }
+
+      if (event.organizationId !== organizationId) {
+        return NextResponse.json(
+          { error: "Το συμβάν ανήκει σε διαφορετικό οργανισμό." },
+          { status: 400 }
         )
       }
     }
 
     const issue = await prisma.issue.create({
       data: {
+        organizationId,
+        title,
+        description,
+        status,
+        severity,
         propertyId,
         taskId,
-        bookingId,
-        issueType,
-        title,
-        description: description || null,
-        severity,
-        status,
-        reportedBy: reportedBy || null,
+        eventId,
       },
       include: {
-        property: {
-          select: {
-            id: true,
-            code: true,
-            name: true,
-            city: true,
-            address: true,
-          },
-        },
-        task: {
-          select: {
-            id: true,
-            title: true,
-            status: true,
-            scheduledDate: true,
-          },
-        },
-        booking: {
-          select: {
-            id: true,
-            guestName: true,
-            checkInDate: true,
-            checkOutDate: true,
-            status: true,
-          },
-        },
-      },
-    })
-
-    await prisma.activityLog.create({
-      data: {
-        propertyId: issue.propertyId,
-        taskId: issue.taskId,
-        bookingId: issue.bookingId,
-        issueId: issue.id,
-        entityType: "ISSUE",
-        entityId: issue.id,
-        action: "ISSUE_CREATED",
-        message: `Δημιουργήθηκε νέο συμβάν: ${issue.title}`,
-        actorType: "manager",
-        actorName: reportedBy || "Διαχειριστής",
-        metadata: {
-          issueType: issue.issueType,
-          severity: issue.severity,
-          status: issue.status,
-        },
+        property: true,
+        task: true,
+        event: true,
       },
     })
 
     return NextResponse.json(issue, { status: 201 })
   } catch (error) {
-    console.error("POST /api/issues error:", error)
-
+    console.error("Issues POST error:", error)
     return NextResponse.json(
-      { error: "Αποτυχία δημιουργίας συμβάντος." },
+      { error: "Αποτυχία δημιουργίας ζητήματος." },
       { status: 500 }
     )
   }
