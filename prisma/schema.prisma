@@ -1,0 +1,401 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Property {
+  id               String      @id @default(cuid())
+  code             String      @unique
+  name             String
+  address          String
+  city             String
+  region           String
+  postalCode       String
+  country          String
+  type             String
+  status           String
+  bedrooms         Int         @default(0)
+  bathrooms        Int         @default(0)
+  maxGuests        Int         @default(0)
+  notes            String?
+  defaultPartnerId String?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  defaultPartner      Partner?                    @relation("PropertyDefaultPartner", fields: [defaultPartnerId], references: [id], onDelete: SetNull)
+  bookings            Booking[]
+  tasks               Task[]
+  checklistTemplates  PropertyChecklistTemplate[]
+  issues              Issue[]
+  propertySupplies    PropertySupply[]
+  taskPhotos          TaskPhoto[]
+  activityLogs        ActivityLog[]
+
+  @@index([defaultPartnerId])
+}
+
+model Booking {
+  id                String      @id @default(cuid())
+  propertyId        String
+  sourcePlatform    String
+  externalBookingId String?
+  guestName         String?
+  guestPhone        String?
+  guestEmail        String?
+  checkInDate       DateTime
+  checkOutDate      DateTime
+  checkInTime       String?
+  checkOutTime      String?
+  adults            Int?        @default(1)
+  children          Int?        @default(0)
+  infants           Int?        @default(0)
+  status            String      @default("confirmed")
+  notes             String?
+  importedAt        DateTime?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  property          Property    @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  tasks             Task[]
+  issues            Issue[]
+  activityLogs      ActivityLog[]
+
+  @@index([propertyId])
+  @@index([sourcePlatform])
+  @@index([status])
+  @@index([checkInDate])
+  @@index([checkOutDate])
+  @@unique([sourcePlatform, externalBookingId])
+}
+
+model Partner {
+  id              String           @id @default(cuid())
+  code            String           @unique
+  name            String
+  email           String           @unique
+  phone           String?
+  specialty       String
+  status          String           @default("active")
+  notes           String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  defaultProperties Property[]      @relation("PropertyDefaultPartner")
+  taskAssignments   TaskAssignment[]
+  activityLogs      ActivityLog[]
+
+  @@index([status])
+  @@index([specialty])
+  @@index([name])
+}
+
+model Task {
+  id                 String             @id @default(cuid())
+  propertyId         String
+  bookingId          String?
+  title              String
+  description        String?
+  taskType           String
+  source             String             @default("manual")
+  priority           String             @default("normal")
+  status             String             @default("pending")
+  scheduledDate      DateTime
+  scheduledStartTime String?
+  scheduledEndTime   String?
+  dueDate            DateTime?
+  completedAt        DateTime?
+  requiresPhotos     Boolean            @default(false)
+  requiresChecklist  Boolean            @default(false)
+  requiresApproval   Boolean            @default(false)
+  notes              String?
+  resultNotes        String?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  property           Property           @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  booking            Booking?           @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  assignments        TaskAssignment[]
+  issues             Issue[]
+  taskPhotos         TaskPhoto[]
+  supplyConsumptions SupplyConsumption[]
+  activityLogs       ActivityLog[]
+  checklistRun       TaskChecklistRun?
+
+  @@index([propertyId])
+  @@index([bookingId])
+  @@index([status])
+  @@index([taskType])
+  @@index([source])
+  @@index([priority])
+  @@index([scheduledDate])
+}
+
+model TaskAssignment {
+  id                     String    @id @default(cuid())
+  taskId                 String
+  partnerId              String
+  assignedAt             DateTime  @default(now())
+  acceptedAt             DateTime?
+  rejectedAt             DateTime?
+  startedAt              DateTime?
+  completedAt            DateTime?
+  status                 String    @default("assigned")
+  rejectionReason        String?
+  notes                  String?
+  responseToken          String?   @unique
+  responseTokenExpiresAt DateTime?
+  checklistToken         String?   @unique
+  checklistTokenExpiresAt DateTime?
+  assignmentEmailSentAt  DateTime?
+  checklistEmailSentAt   DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  task                   Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  partner                Partner   @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@index([partnerId])
+  @@index([status])
+}
+
+model Issue {
+  id              String      @id @default(cuid())
+  propertyId      String
+  taskId          String?
+  bookingId       String?
+  issueType       String
+  title           String
+  description     String?
+  severity        String      @default("medium")
+  status          String      @default("open")
+  reportedBy      String?
+  resolutionNotes String?
+  resolvedAt      DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  property        Property    @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  task            Task?       @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  booking         Booking?    @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  taskPhotos      TaskPhoto[]
+  activityLogs    ActivityLog[]
+
+  @@index([propertyId])
+  @@index([taskId])
+  @@index([bookingId])
+  @@index([issueType])
+  @@index([severity])
+  @@index([status])
+}
+
+model SupplyItem {
+  id               String              @id @default(cuid())
+  code             String              @unique
+  name             String
+  category         String
+  unit             String
+  minimumStock     Float?              @default(0)
+  isActive         Boolean             @default(true)
+  notes            String?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  propertySupplies PropertySupply[]
+  consumptions     SupplyConsumption[]
+
+  @@index([category])
+  @@index([isActive])
+  @@index([name])
+}
+
+model PropertySupply {
+  id               String      @id @default(cuid())
+  propertyId       String
+  supplyItemId     String
+  currentStock     Float       @default(0)
+  targetStock      Float?
+  reorderThreshold Float?
+  lastUpdatedAt    DateTime    @default(now())
+  notes            String?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  property         Property    @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  supplyItem       SupplyItem  @relation(fields: [supplyItemId], references: [id], onDelete: Cascade)
+
+  @@unique([propertyId, supplyItemId])
+  @@index([propertyId])
+  @@index([supplyItemId])
+}
+
+model SupplyConsumption {
+  id           String    @id @default(cuid())
+  taskId       String
+  supplyItemId String
+  quantity     Float
+  unit         String
+  notes        String?
+  createdAt    DateTime  @default(now())
+
+  task         Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  supplyItem   SupplyItem @relation(fields: [supplyItemId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@index([supplyItemId])
+}
+
+model TaskPhoto {
+  id         String    @id @default(cuid())
+  propertyId String
+  taskId     String?
+  issueId    String?
+  category   String
+  fileUrl    String
+  fileName   String?
+  caption    String?
+  takenAt    DateTime?
+  uploadedAt DateTime  @default(now())
+
+  property   Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  task       Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  issue      Issue?    @relation(fields: [issueId], references: [id], onDelete: SetNull)
+
+  @@index([propertyId])
+  @@index([taskId])
+  @@index([issueId])
+  @@index([category])
+}
+
+model PropertyChecklistTemplate {
+  id           String   @id @default(cuid())
+  propertyId   String
+  title        String
+  description  String?
+  templateType String   @default("main")
+  isPrimary    Boolean  @default(false)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  property      Property                      @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  items         PropertyChecklistTemplateItem[]
+  checklistRuns TaskChecklistRun[]
+
+  @@index([propertyId])
+  @@index([propertyId, templateType])
+  @@index([propertyId, isPrimary])
+}
+
+model PropertyChecklistTemplateItem {
+  id               String   @id @default(cuid())
+  templateId       String
+  label            String
+  description      String?
+  itemType         String
+  isRequired       Boolean  @default(true)
+  sortOrder        Int
+  category         String?  @default("inspection")
+  requiresPhoto    Boolean  @default(false)
+  opensIssueOnFail Boolean  @default(false)
+  optionsText      String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  template         PropertyChecklistTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  answers          TaskChecklistAnswer[]
+
+  @@index([templateId])
+  @@index([templateId, sortOrder])
+}
+
+model TaskChecklistRun {
+  id           String   @id @default(cuid())
+  taskId       String   @unique
+  templateId   String
+  status       String   @default("pending")
+  startedAt    DateTime?
+  completedAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  task         Task                      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  template     PropertyChecklistTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  answers      TaskChecklistAnswer[]
+
+  @@index([templateId])
+  @@index([status])
+}
+
+model TaskChecklistAnswer {
+  id              String   @id @default(cuid())
+  checklistRunId   String
+  templateItemId   String
+  valueBoolean     Boolean?
+  valueText        String?
+  valueNumber      Float?
+  valueSelect      String?
+  notes            String?
+  photoUrls        Json?
+  issueCreated     Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  checklistRun     TaskChecklistRun @relation(fields: [checklistRunId], references: [id], onDelete: Cascade)
+  templateItem     PropertyChecklistTemplateItem @relation(fields: [templateItemId], references: [id], onDelete: Cascade)
+
+  @@index([checklistRunId])
+  @@index([templateItemId])
+}
+
+model ActivityLog {
+  id         String    @id @default(cuid())
+  propertyId String?
+  bookingId  String?
+  taskId     String?
+  issueId    String?
+  partnerId  String?
+  entityType String
+  entityId   String
+  action     String
+  message    String?
+  actorType  String?
+  actorName  String?
+  metadata   Json?
+  createdAt  DateTime  @default(now())
+
+  property   Property? @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+  booking    Booking?  @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  task       Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  issue      Issue?    @relation(fields: [issueId], references: [id], onDelete: SetNull)
+  partner    Partner?  @relation(fields: [partnerId], references: [id], onDelete: SetNull)
+
+  @@index([propertyId])
+  @@index([bookingId])
+  @@index([taskId])
+  @@index([issueId])
+  @@index([partnerId])
+  @@index([entityType])
+  @@index([entityId])
+  @@index([action])
+  @@index([createdAt])
+}
+model Settings {
+  id                   String   @id @default(cuid())
+  companyName          String
+  companyEmail         String
+  companyPhone         String   @default("")
+  companyAddress       String   @default("")
+  defaultTaskStatus    String   @default("pending")
+  defaultPartnerStatus String   @default("active")
+  timezone             String   @default("Europe/Athens")
+  language             String   @default("el")
+  notificationsEnabled Boolean  @default(true)
+  calendarDefaultView  String   @default("month")
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
