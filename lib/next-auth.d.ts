@@ -7,6 +7,8 @@ declare module "next-auth" {
       systemRole: "SUPER_ADMIN" | "USER"
       organizationId: string | null
       organizationRole: "ORG_ADMIN" | "MANAGER" | "PARTNER" | null
+      organizationName: string | null
+      organizationSlug: string | null
     } & DefaultSession["user"]
   }
 
@@ -15,6 +17,8 @@ declare module "next-auth" {
     systemRole: "SUPER_ADMIN" | "USER"
     organizationId: string | null
     organizationRole: "ORG_ADMIN" | "MANAGER" | "PARTNER" | null
+    organizationName: string | null
+    organizationSlug: string | null
   }
 }
 
@@ -24,5 +28,7 @@ declare module "next-auth/jwt" {
     systemRole?: "SUPER_ADMIN" | "USER"
     organizationId?: string | null
     organizationRole?: "ORG_ADMIN" | "MANAGER" | "PARTNER" | null
+    organizationName?: string | null
+    organizationSlug?: string | null
   }
 }

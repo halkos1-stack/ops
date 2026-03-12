@@ -37,7 +37,9 @@ export const authOptions: NextAuthOptions = {
           where: { email },
           include: {
             memberships: {
-              where: { isActive: true },
+              where: {
+                isActive: true,
+              },
               include: {
                 organization: true,
               },
@@ -48,7 +50,15 @@ export const authOptions: NextAuthOptions = {
           },
         })
 
-        if (!user || !user.passwordHash || !user.isActive) {
+        if (!user) {
+          return null
+        }
+
+        if (!user.passwordHash) {
+          return null
+        }
+
+        if (!user.isActive) {
           return null
         }
 
@@ -58,7 +68,26 @@ export const authOptions: NextAuthOptions = {
           return null
         }
 
-        const membership = user.memberships[0] ?? null
+        if (user.systemRole === "SUPER_ADMIN") {
+          return {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            image: user.image ?? null,
+            systemRole: user.systemRole,
+            organizationId: null,
+            organizationRole: null,
+            organizationName: null,
+            organizationSlug: null,
+          }
+        }
+
+        const membership =
+          user.memberships.find((item) => item.organization.isActive) ?? null
+
+        if (!membership) {
+          return null
+        }
 
         return {
           id: user.id,
@@ -66,10 +95,10 @@ export const authOptions: NextAuthOptions = {
           email: user.email,
           image: user.image ?? null,
           systemRole: user.systemRole,
-          organizationId: membership?.organizationId ?? null,
-          organizationRole: membership?.role ?? null,
-          organizationName: membership?.organization?.name ?? null,
-          organizationSlug: membership?.organization?.slug ?? null,
+          organizationId: membership.organizationId,
+          organizationRole: membership.role,
+          organizationName: membership.organization.name,
+          organizationSlug: membership.organization.slug,
         }
       },
     }),
@@ -85,17 +114,74 @@ export const authOptions: NextAuthOptions = {
         ;(token as any).organizationSlug = (user as any).organizationSlug ?? null
       }
 
+      if ((token as any).id) {
+        const dbUser = await prisma.user.findUnique({
+          where: { id: String((token as any).id) },
+          include: {
+            memberships: {
+              where: {
+                isActive: true,
+              },
+              include: {
+                organization: true,
+              },
+              orderBy: {
+                createdAt: "asc",
+              },
+            },
+          },
+        })
+
+        if (!dbUser || !dbUser.isActive) {
+          return {}
+        }
+
+        ;(token as any).systemRole = dbUser.systemRole
+
+        if (dbUser.systemRole === "SUPER_ADMIN") {
+          ;(token as any).organizationId = null
+          ;(token as any).organizationRole = null
+          ;(token as any).organizationName = null
+          ;(token as any).organizationSlug = null
+          return token
+        }
+
+        const membership =
+          dbUser.memberships.find((item) => item.organization.isActive) ?? null
+
+        if (!membership) {
+          return {}
+        }
+
+        ;(token as any).organizationId = membership.organizationId
+        ;(token as any).organizationRole = membership.role
+        ;(token as any).organizationName = membership.organization.name
+        ;(token as any).organizationSlug = membership.organization.slug
+      }
+
       return token
     },
+
     async session({ session, token }) {
-      if (session.user) {
-        ;(session.user as any).id = (token as any).id
-        ;(session.user as any).systemRole = (token as any).systemRole
-        ;(session.user as any).organizationId = (token as any).organizationId
-        ;(session.user as any).organizationRole = (token as any).organizationRole
-        ;(session.user as any).organizationName = (token as any).organizationName
-        ;(session.user as any).organizationSlug = (token as any).organizationSlug
+      if (!session.user) {
+        return session
       }
+
+      if (!(token as any).id) {
+        session.expires = new Date(0).toISOString()
+        return session
+      }
+
+      ;(session.user as any).id = (token as any).id
+      ;(session.user as any).systemRole = (token as any).systemRole ?? "USER"
+      ;(session.user as any).organizationId =
+        (token as any).organizationId ?? null
+      ;(session.user as any).organizationRole =
+        (token as any).organizationRole ?? null
+      ;(session.user as any).organizationName =
+        (token as any).organizationName ?? null
+      ;(session.user as any).organizationSlug =
+        (token as any).organizationSlug ?? null
 
       return session
     },

@@ -26,20 +26,28 @@ function getTaskStatusLabel(status: string | null | undefined) {
 
   switch (status) {
     case "PENDING":
+    case "pending":
       return "Σε αναμονή"
     case "ASSIGNED":
+    case "assigned":
       return "Ανατέθηκε"
     case "WAITING_ACCEPTANCE":
+    case "waiting_acceptance":
       return "Αναμονή αποδοχής"
     case "ACCEPTED":
+    case "accepted":
       return "Αποδεκτή"
     case "REJECTED":
+    case "rejected":
       return "Απορρίφθηκε"
     case "IN_PROGRESS":
+    case "in_progress":
       return "Σε εξέλιξη"
     case "COMPLETED":
+    case "completed":
       return "Ολοκληρωμένη"
     case "CANCELLED":
+    case "cancelled":
       return "Ακυρωμένη"
     default:
       return status
@@ -86,7 +94,7 @@ export default async function SuperAdminOrganizationDetailPage({
         take: 8,
         select: {
           id: true,
-          fullName: true,
+          name: true,
           phone: true,
           email: true,
           status: true,
@@ -101,7 +109,7 @@ export default async function SuperAdminOrganizationDetailPage({
         select: {
           id: true,
           title: true,
-          type: true,
+          taskType: true,
           status: true,
           createdAt: true,
           property: {
@@ -126,11 +134,11 @@ export default async function SuperAdminOrganizationDetailPage({
 
   return (
     <div className="space-y-6">
-      <section className="rounded-3xl border bg-white p-6 shadow-sm">
+      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">
-              Organization Detail
+              Λεπτομέρεια οργανισμού
             </p>
             <h1 className="mt-2 text-3xl font-bold text-slate-900">
               {organization.name}
@@ -151,56 +159,74 @@ export default async function SuperAdminOrganizationDetailPage({
                   : "bg-amber-100 text-amber-700"
               }`}
             >
-              {organization.isActive ? "Ενεργός οργανισμός" : "Ανενεργός οργανισμός"}
+              {organization.isActive
+                ? "Ενεργός οργανισμός"
+                : "Ανενεργός οργανισμός"}
             </span>
 
-            <Link
-              href="/super-admin/organizations"
-              className="inline-flex rounded-2xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-            >
-              Επιστροφή στους οργανισμούς
-            </Link>
+            <div className="flex flex-wrap gap-2">
+              <Link
+                href={`/super-admin/organizations/${organization.id}/overview`}
+                className="inline-flex rounded-2xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
+              >
+                Κεντρικό οργανισμού
+              </Link>
+
+              <Link
+                href={`/super-admin/organizations/${organization.id}/users`}
+                className="inline-flex rounded-2xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+              >
+                Χρήστες οργανισμού
+              </Link>
+
+              <Link
+                href="/super-admin/organizations"
+                className="inline-flex rounded-2xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+              >
+                Επιστροφή στους οργανισμούς
+              </Link>
+            </div>
           </div>
         </div>
       </section>
 
       <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-6">
-        <div className="rounded-3xl border bg-white p-5 shadow-sm">
+        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-slate-500">Μέλη</p>
           <p className="mt-2 text-3xl font-bold text-slate-900">
             {organization._count.memberships}
           </p>
         </div>
 
-        <div className="rounded-3xl border bg-white p-5 shadow-sm">
+        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-slate-500">Ακίνητα</p>
           <p className="mt-2 text-3xl font-bold text-slate-900">
             {organization._count.properties}
           </p>
         </div>
 
-        <div className="rounded-3xl border bg-white p-5 shadow-sm">
+        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-slate-500">Συνεργάτες</p>
           <p className="mt-2 text-3xl font-bold text-slate-900">
             {organization._count.partners}
           </p>
         </div>
 
-        <div className="rounded-3xl border bg-white p-5 shadow-sm">
+        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-slate-500">Εργασίες</p>
           <p className="mt-2 text-3xl font-bold text-slate-900">
             {organization._count.tasks}
           </p>
         </div>
 
-        <div className="rounded-3xl border bg-white p-5 shadow-sm">
+        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-slate-500">Ζητήματα</p>
           <p className="mt-2 text-3xl font-bold text-slate-900">
             {organization._count.issues}
           </p>
         </div>
 
-        <div className="rounded-3xl border bg-white p-5 shadow-sm">
+        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-slate-500">Συμβάντα</p>
           <p className="mt-2 text-3xl font-bold text-slate-900">
             {organization._count.events}
@@ -209,7 +235,7 @@ export default async function SuperAdminOrganizationDetailPage({
       </section>
 
       <section className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-        <div className="rounded-3xl border bg-white p-6 shadow-sm">
+        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
               <h2 className="text-xl font-bold text-slate-900">
@@ -258,7 +284,7 @@ export default async function SuperAdminOrganizationDetailPage({
           )}
         </div>
 
-        <div className="rounded-3xl border bg-white p-6 shadow-sm">
+        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="mb-4">
             <h2 className="text-xl font-bold text-slate-900">
               Πρόσφατοι συνεργάτες
@@ -282,7 +308,7 @@ export default async function SuperAdminOrganizationDetailPage({
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <p className="font-semibold text-slate-900">
-                        {partner.fullName}
+                        {partner.name}
                       </p>
                       <p className="mt-1 text-xs text-slate-500">
                         Email: {partner.email ?? "—"}
@@ -306,15 +332,24 @@ export default async function SuperAdminOrganizationDetailPage({
         </div>
       </section>
 
-      <section className="rounded-3xl border bg-white p-6 shadow-sm">
-        <div className="mb-4">
-          <h2 className="text-xl font-bold text-slate-900">
-            Πρόσφατες εργασίες οργανισμού
-          </h2>
-          <p className="mt-1 text-sm text-slate-600">
-            Γρήγορη επιχειρησιακή εικόνα του οργανισμού από το επίπεδο της
-            πλατφόρμας.
-          </p>
+      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h2 className="text-xl font-bold text-slate-900">
+              Πρόσφατες εργασίες οργανισμού
+            </h2>
+            <p className="mt-1 text-sm text-slate-600">
+              Γρήγορη επιχειρησιακή εικόνα του οργανισμού από το επίπεδο της
+              πλατφόρμας.
+            </p>
+          </div>
+
+          <Link
+            href={`/super-admin/organizations/${organization.id}/overview`}
+            className="inline-flex rounded-2xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+          >
+            Άνοιγμα κεντρικού οργανισμού
+          </Link>
         </div>
 
         {organization.tasks.length === 0 ? (
@@ -322,7 +357,7 @@ export default async function SuperAdminOrganizationDetailPage({
             Δεν υπάρχουν εργασίες.
           </div>
         ) : (
-          <div className="overflow-hidden rounded-2xl border">
+          <div className="overflow-hidden rounded-2xl border border-slate-200">
             <div className="overflow-x-auto">
               <table className="min-w-full text-left text-sm">
                 <thead className="bg-slate-50 text-slate-600">
@@ -337,7 +372,7 @@ export default async function SuperAdminOrganizationDetailPage({
 
                 <tbody>
                   {organization.tasks.map((task) => (
-                    <tr key={task.id} className="border-t">
+                    <tr key={task.id} className="border-t border-slate-200">
                       <td className="px-4 py-4 align-top">
                         <div>
                           <p className="font-semibold text-slate-900">
@@ -350,7 +385,7 @@ export default async function SuperAdminOrganizationDetailPage({
                       </td>
 
                       <td className="px-4 py-4 align-top text-slate-700">
-                        {task.type ?? "—"}
+                        {task.taskType ?? "—"}
                       </td>
 
                       <td className="px-4 py-4 align-top">

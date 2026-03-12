@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
-import { requireSuperAdmin } from "@/lib/auth"
+import { requireApiSuperAdmin } from "@/lib/route-access"
 
 type RouteContext = {
   params: Promise<{
@@ -10,31 +10,69 @@ type RouteContext = {
 
 function toNullableString(value: unknown) {
   if (value === undefined || value === null) return null
+
   const text = String(value).trim()
   return text === "" ? null : text
 }
 
-function toBoolean(value: unknown, fallback = true) {
-  if (typeof value === "boolean") return value
-  if (typeof value === "string") {
-    if (value.toLowerCase() === "true") return true
-    if (value.toLowerCase() === "false") return false
-  }
-  return fallback
-}
-
-function slugify(input: string) {
-  return input
+function slugify(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
 }
 
-export async function GET(_req: NextRequest, context: RouteContext) {
+async function createUniqueSlug(baseValue: string, excludeId?: string) {
+  const baseSlug = slugify(baseValue)
+
+  if (!baseSlug) {
+    throw new Error("Δεν ήταν δυνατή η δημιουργία έγκυρου slug.")
+  }
+
+  const existing = await prisma.organization.findFirst({
+    where: {
+      slug: baseSlug,
+      ...(excludeId ? { id: { not: excludeId } } : {}),
+    },
+    select: { id: true },
+  })
+
+  if (!existing) {
+    return baseSlug
+  }
+
+  let counter = 2
+
+  while (true) {
+    const candidate = `${baseSlug}-${counter}`
+
+    const found = await prisma.organization.findFirst({
+      where: {
+        slug: candidate,
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+      },
+      select: { id: true },
+    })
+
+    if (!found) {
+      return candidate
+    }
+
+    counter += 1
+  }
+}
+
+export async function GET(_request: NextRequest, context: RouteContext) {
   try {
-    await requireSuperAdmin()
+    const access = await requireApiSuperAdmin()
+
+    if (!access.ok) {
+      return access.response
+    }
+
     const { id } = await context.params
 
     const organization = await prisma.organization.findUnique({
@@ -48,6 +86,9 @@ export async function GET(_req: NextRequest, context: RouteContext) {
             tasks: true,
             issues: true,
             events: true,
+            bookings: true,
+            checklistTemplates: true,
+            settings: true,
           },
         },
       },
@@ -62,7 +103,8 @@ export async function GET(_req: NextRequest, context: RouteContext) {
 
     return NextResponse.json(organization)
   } catch (error) {
-    console.error("Super admin organization GET by id error:", error)
+    console.error("GET /api/super-admin/organizations/[id] error:", error)
+
     return NextResponse.json(
       { error: "Αποτυχία φόρτωσης οργανισμού." },
       { status: 500 }
@@ -70,77 +112,176 @@ export async function GET(_req: NextRequest, context: RouteContext) {
   }
 }
 
-export async function PATCH(req: NextRequest, context: RouteContext) {
+export async function PATCH(request: NextRequest, context: RouteContext) {
   try {
-    await requireSuperAdmin()
-    const { id } = await context.params
-    const body = await req.json()
+    const access = await requireApiSuperAdmin()
 
-    const organization = await prisma.organization.findUnique({
+    if (!access.ok) {
+      return access.response
+    }
+
+    const { id } = await context.params
+    const body = await request.json()
+
+    const existing = await prisma.organization.findUnique({
       where: { id },
       select: {
         id: true,
+        name: true,
+        slug: true,
+        isActive: true,
       },
     })
 
-    if (!organization) {
+    if (!existing) {
       return NextResponse.json(
         { error: "Ο οργανισμός δεν βρέθηκε." },
         { status: 404 }
       )
     }
 
-    const name = toNullableString(body.name)
-    const slugInput = toNullableString(body.slug)
-    const isActive =
-      body.isActive === undefined ? undefined : toBoolean(body.isActive, true)
+    const name =
+      body?.name !== undefined ? String(body.name).trim() : existing.name
 
-    let nextSlug: string | undefined
-
-    if (slugInput !== null && slugInput !== undefined) {
-      nextSlug = slugify(slugInput)
-
-      if (!nextSlug) {
-        return NextResponse.json(
-          { error: "Μη έγκυρο slug οργανισμού." },
-          { status: 400 }
-        )
-      }
-
-      const slugExists = await prisma.organization.findFirst({
-        where: {
-          slug: nextSlug,
-          NOT: {
-            id,
-          },
-        },
-        select: {
-          id: true,
-        },
-      })
-
-      if (slugExists) {
-        return NextResponse.json(
-          { error: "Το slug χρησιμοποιείται ήδη από άλλον οργανισμό." },
-          { status: 400 }
-        )
-      }
+    if (!name) {
+      return NextResponse.json(
+        { error: "Το όνομα οργανισμού είναι υποχρεωτικό." },
+        { status: 400 }
+      )
     }
+
+    const requestedSlug = toNullableString(body?.slug)
+    const isActive =
+      body?.isActive !== undefined ? Boolean(body.isActive) : existing.isActive
+
+    const finalSlug =
+      requestedSlug !== null
+        ? await createUniqueSlug(requestedSlug, id)
+        : existing.slug
 
     const updated = await prisma.organization.update({
       where: { id },
       data: {
-        ...(name !== null && name !== undefined ? { name } : {}),
-        ...(nextSlug !== undefined ? { slug: nextSlug } : {}),
-        ...(isActive !== undefined ? { isActive } : {}),
+        name,
+        slug: finalSlug,
+        isActive,
+      },
+      include: {
+        _count: {
+          select: {
+            memberships: true,
+            properties: true,
+            partners: true,
+            tasks: true,
+            issues: true,
+            events: true,
+            bookings: true,
+            checklistTemplates: true,
+            settings: true,
+          },
+        },
       },
     })
 
     return NextResponse.json(updated)
   } catch (error) {
-    console.error("Super admin organization PATCH error:", error)
+    console.error("PATCH /api/super-admin/organizations/[id] error:", error)
+
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Αποτυχία ενημέρωσης οργανισμού."
+
+    return NextResponse.json({ error: message }, { status: 500 })
+  }
+}
+
+export async function DELETE(_request: NextRequest, context: RouteContext) {
+  try {
+    const access = await requireApiSuperAdmin()
+
+    if (!access.ok) {
+      return access.response
+    }
+
+    const { id } = await context.params
+
+    const existing = await prisma.organization.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        name: true,
+      },
+    })
+
+    if (!existing) {
+      return NextResponse.json(
+        { error: "Ο οργανισμός δεν βρέθηκε." },
+        { status: 404 }
+      )
+    }
+
+    const membershipUsers = await prisma.membership.findMany({
+      where: {
+        organizationId: id,
+      },
+      select: {
+        userId: true,
+      },
+    })
+
+    const affectedUserIds = membershipUsers.map((item) => item.userId)
+
+    await prisma.$transaction(async (tx) => {
+      await tx.organization.delete({
+        where: {
+          id,
+        },
+      })
+
+      if (affectedUserIds.length > 0) {
+        const usersMembershipCount = await tx.membership.groupBy({
+          by: ["userId"],
+          where: {
+            userId: {
+              in: affectedUserIds,
+            },
+          },
+          _count: {
+            userId: true,
+          },
+        })
+
+        const usersStillLinked = new Set(
+          usersMembershipCount.map((item) => item.userId)
+        )
+
+        const orphanUserIds = affectedUserIds.filter(
+          (userId) => !usersStillLinked.has(userId)
+        )
+
+        if (orphanUserIds.length > 0) {
+          await tx.user.deleteMany({
+            where: {
+              id: {
+                in: orphanUserIds,
+              },
+              systemRole: "USER",
+            },
+          })
+        }
+      }
+    })
+
+    return NextResponse.json({
+      success: true,
+      message: `Ο οργανισμός "${existing.name}" διαγράφηκε επιτυχώς.`,
+    })
+  } catch (error) {
+    console.error("DELETE /api/super-admin/organizations/[id] error:", error)
+
     return NextResponse.json(
-      { error: "Αποτυχία ενημέρωσης οργανισμού." },
+      { error: "Αποτυχία διαγραφής οργανισμού." },
       { status: 500 }
     )
   }

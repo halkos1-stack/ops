@@ -1,40 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
-
-type AuthContext = {
-  systemRole?: "SUPER_ADMIN" | "USER"
-  organizationId?: string | null
-}
-
-function getMockAuthFromRequest(req: NextRequest): AuthContext {
-  const systemRole = req.headers.get("x-system-role") as
-    | "SUPER_ADMIN"
-    | "USER"
-    | null
-
-  const organizationId = req.headers.get("x-organization-id")
-
-  return {
-    systemRole: systemRole || "SUPER_ADMIN",
-    organizationId: organizationId || null,
-  }
-}
-
-function buildTenantWhere(auth: AuthContext) {
-  if (auth.systemRole === "SUPER_ADMIN") {
-    return {}
-  }
-
-  if (auth.organizationId) {
-    return {
-      organizationId: auth.organizationId,
-    }
-  }
-
-  return {
-    id: "__no_results__",
-  }
-}
+import { requireApiAppAccess } from "@/lib/route-access"
 
 function toNullableString(value: unknown) {
   if (value === undefined || value === null) return null
@@ -73,34 +39,6 @@ function normalizePropertyStatus(value: unknown) {
   }
 
   return "active"
-}
-
-async function getAccessibleOrganizationId(req: NextRequest, auth: AuthContext) {
-  if (auth.systemRole === "SUPER_ADMIN") {
-    const bodyClone = req.clone()
-
-    try {
-      const body = await bodyClone.json()
-      const bodyOrganizationId = toNullableString(body?.organizationId)
-
-      if (bodyOrganizationId) return bodyOrganizationId
-    } catch {
-      // ignore
-    }
-
-    const queryOrganizationId = req.nextUrl.searchParams.get("organizationId")
-    if (queryOrganizationId) return queryOrganizationId
-
-    const firstOrg = await prisma.organization.findFirst({
-      where: { isActive: true },
-      orderBy: { createdAt: "asc" },
-      select: { id: true },
-    })
-
-    return firstOrg?.id || null
-  }
-
-  return auth.organizationId || null
 }
 
 async function getFullPropertyList(where: Record<string, unknown>) {
@@ -173,7 +111,13 @@ async function getFullPropertyList(where: Record<string, unknown>) {
 
 export async function GET(req: NextRequest) {
   try {
-    const auth = getMockAuthFromRequest(req)
+    const access = await requireApiAppAccess()
+
+    if (!access.ok) {
+      return access.response
+    }
+
+    const auth = access.auth
     const { searchParams } = new URL(req.url)
 
     const requestedOrganizationId = searchParams.get("organizationId")
@@ -182,16 +126,20 @@ export async function GET(req: NextRequest) {
     const type = searchParams.get("type")
     const search = searchParams.get("search")
 
-    let organizationFilter: string | null = null
+    let organizationId: string | null = null
 
-    if (auth.systemRole === "SUPER_ADMIN") {
-      organizationFilter = requestedOrganizationId || null
+    if (auth.isSuperAdmin) {
+      organizationId = requestedOrganizationId ? requestedOrganizationId : null
     } else {
-      organizationFilter = auth.organizationId || null
+      organizationId = auth.organizationId
+    }
+
+    if (!organizationId) {
+      return NextResponse.json([])
     }
 
     const where: Record<string, unknown> = {
-      ...(organizationFilter ? { organizationId: organizationFilter } : {}),
+      organizationId,
       ...(status && status !== "all" ? { status } : {}),
       ...(city && city !== "all" ? { city } : {}),
       ...(type && type !== "all" ? { type } : {}),
@@ -225,24 +173,40 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const auth = getMockAuthFromRequest(req)
+    const access = await requireApiAppAccess()
+
+    if (!access.ok) {
+      return access.response
+    }
+
+    const auth = access.auth
     const body = await req.json()
 
-    const organizationId =
-      auth.systemRole === "SUPER_ADMIN"
-        ? toNullableString(body.organizationId) ||
-          (await prisma.organization.findFirst({
-            where: { isActive: true },
-            orderBy: { createdAt: "asc" },
-            select: { id: true },
-          }))?.id ||
-          null
-        : auth.organizationId || null
+    const requestedOrganizationId = toNullableString(body.organizationId)
+
+    const organizationId = auth.isSuperAdmin
+      ? requestedOrganizationId
+      : auth.organizationId
 
     if (!organizationId) {
       return NextResponse.json(
         { error: "Δεν βρέθηκε organizationId για δημιουργία ακινήτου." },
         { status: 400 }
+      )
+    }
+
+    const organization = await prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: {
+        id: true,
+        isActive: true,
+      },
+    })
+
+    if (!organization) {
+      return NextResponse.json(
+        { error: "Ο οργανισμός δεν βρέθηκε." },
+        { status: 404 }
       )
     }
 

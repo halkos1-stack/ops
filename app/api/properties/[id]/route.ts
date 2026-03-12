@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import { requireApiAppAccess, canAccessOrganization } from "@/lib/route-access"
 
 type RouteContext = {
   params: Promise<{
@@ -195,7 +196,30 @@ async function getFullProperty(id: string) {
 
 export async function GET(_req: NextRequest, context: RouteContext) {
   try {
+    const access = await requireApiAppAccess()
+
+    if (!access.ok) {
+      return access.response
+    }
+
+    const auth = access.auth
     const { id } = await context.params
+
+    const base = await getPropertyBase(id)
+
+    if (!base) {
+      return NextResponse.json(
+        { error: "Το ακίνητο δεν βρέθηκε." },
+        { status: 404 }
+      )
+    }
+
+    if (!canAccessOrganization(auth, base.organizationId)) {
+      return NextResponse.json(
+        { error: "Δεν έχετε πρόσβαση σε αυτό το ακίνητο." },
+        { status: 403 }
+      )
+    }
 
     const property = await getFullProperty(id)
 
@@ -219,6 +243,13 @@ export async function GET(_req: NextRequest, context: RouteContext) {
 
 export async function PUT(req: NextRequest, context: RouteContext) {
   try {
+    const access = await requireApiAppAccess()
+
+    if (!access.ok) {
+      return access.response
+    }
+
+    const auth = access.auth
     const { id } = await context.params
     const body = await req.json()
 
@@ -228,6 +259,13 @@ export async function PUT(req: NextRequest, context: RouteContext) {
       return NextResponse.json(
         { error: "Το ακίνητο δεν βρέθηκε." },
         { status: 404 }
+      )
+    }
+
+    if (!canAccessOrganization(auth, existing.organizationId)) {
+      return NextResponse.json(
+        { error: "Δεν έχετε πρόσβαση σε αυτό το ακίνητο." },
+        { status: 403 }
       )
     }
 
@@ -325,6 +363,13 @@ export async function PUT(req: NextRequest, context: RouteContext) {
 
 export async function PATCH(req: NextRequest, context: RouteContext) {
   try {
+    const access = await requireApiAppAccess()
+
+    if (!access.ok) {
+      return access.response
+    }
+
+    const auth = access.auth
     const { id } = await context.params
     const body = await req.json()
 
@@ -334,6 +379,13 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       return NextResponse.json(
         { error: "Το ακίνητο δεν βρέθηκε." },
         { status: 404 }
+      )
+    }
+
+    if (!canAccessOrganization(auth, existing.organizationId)) {
+      return NextResponse.json(
+        { error: "Δεν έχετε πρόσβαση σε αυτό το ακίνητο." },
+        { status: 403 }
       )
     }
 

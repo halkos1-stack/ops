@@ -101,6 +101,40 @@ export async function requireApiSuperAdmin(): Promise<
   return result
 }
 
+export async function requireApiOrgAdminOnly(): Promise<
+  { ok: true; auth: RouteAccessContext } | { ok: false; response: NextResponse }
+> {
+  const result = await requireApiUser()
+
+  if (!result.ok) {
+    return result
+  }
+
+  const { auth } = result
+
+  if (!auth.organizationId) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: "Δεν βρέθηκε οργανισμός χρήστη." },
+        { status: 403 }
+      ),
+    }
+  }
+
+  if (auth.organizationRole !== "ORG_ADMIN") {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: "Η πρόσβαση επιτρέπεται μόνο σε ORG_ADMIN." },
+        { status: 403 }
+      ),
+    }
+  }
+
+  return result
+}
+
 export function buildTenantWhere<T extends Record<string, unknown>>(
   auth: RouteAccessContext,
   extraWhere?: T

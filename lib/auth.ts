@@ -12,6 +12,8 @@ export type AuthContext = {
   systemRole: SessionSystemRole
   organizationId: string | null
   organizationRole: SessionOrganizationRole
+  organizationName: string | null
+  organizationSlug: string | null
 }
 
 function normalizeSystemRole(value: unknown): SessionSystemRole {
@@ -40,6 +42,8 @@ export async function getAuthContext(): Promise<AuthContext | null> {
     systemRole?: unknown
     organizationId?: string | null
     organizationRole?: unknown
+    organizationName?: string | null
+    organizationSlug?: string | null
   }
 
   if (!user.id || !user.email) {
@@ -53,6 +57,8 @@ export async function getAuthContext(): Promise<AuthContext | null> {
     systemRole: normalizeSystemRole(user.systemRole),
     organizationId: user.organizationId ?? null,
     organizationRole: normalizeOrganizationRole(user.organizationRole),
+    organizationName: user.organizationName ?? null,
+    organizationSlug: user.organizationSlug ?? null,
   }
 }
 
