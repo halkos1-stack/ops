@@ -37,9 +37,66 @@ export async function GET(_req: NextRequest, context: RouteContext) {
     const issue = await prisma.issue.findFirst({
       where: buildTenantWhere(auth, { id }),
       include: {
-        property: true,
-        task: true,
-        event: true,
+        property: {
+          select: {
+            id: true,
+            code: true,
+            name: true,
+            address: true,
+            city: true,
+            region: true,
+            postalCode: true,
+            country: true,
+            status: true,
+          },
+        },
+        task: {
+          select: {
+            id: true,
+            title: true,
+            status: true,
+            taskType: true,
+            scheduledDate: true,
+          },
+        },
+        booking: {
+          select: {
+            id: true,
+            guestName: true,
+            sourcePlatform: true,
+            checkInDate: true,
+            checkOutDate: true,
+            status: true,
+          },
+        },
+        taskPhotos: {
+          orderBy: {
+            uploadedAt: "desc",
+          },
+          take: 12,
+          select: {
+            id: true,
+            category: true,
+            fileUrl: true,
+            fileName: true,
+            caption: true,
+            uploadedAt: true,
+          },
+        },
+        activityLogs: {
+          orderBy: {
+            createdAt: "desc",
+          },
+          take: 20,
+          select: {
+            id: true,
+            action: true,
+            message: true,
+            actorType: true,
+            actorName: true,
+            createdAt: true,
+          },
+        },
       },
     })
 
@@ -98,6 +155,9 @@ export async function PUT(req: NextRequest, context: RouteContext) {
     const description = toNullableString(body.description)
     const status = toNullableString(body.status)
     const severity = toNullableString(body.severity)
+    const issueType = toNullableString(body.issueType)
+    const reportedBy = toNullableString(body.reportedBy)
+    const resolutionNotes = toNullableString(body.resolutionNotes)
 
     if (!title) {
       return NextResponse.json(
@@ -111,13 +171,76 @@ export async function PUT(req: NextRequest, context: RouteContext) {
       data: {
         title,
         description,
+        issueType: issueType ?? undefined,
         ...(status !== null ? { status } : {}),
         ...(severity !== null ? { severity } : {}),
+        ...(reportedBy !== null ? { reportedBy } : {}),
+        ...(resolutionNotes !== null ? { resolutionNotes } : {}),
+        ...(status?.toLowerCase() === "resolved" || status?.toLowerCase() === "closed"
+          ? { resolvedAt: new Date() }
+          : {}),
       },
       include: {
-        property: true,
-        task: true,
-        event: true,
+        property: {
+          select: {
+            id: true,
+            code: true,
+            name: true,
+            address: true,
+            city: true,
+            region: true,
+            postalCode: true,
+            country: true,
+            status: true,
+          },
+        },
+        task: {
+          select: {
+            id: true,
+            title: true,
+            status: true,
+            taskType: true,
+            scheduledDate: true,
+          },
+        },
+        booking: {
+          select: {
+            id: true,
+            guestName: true,
+            sourcePlatform: true,
+            checkInDate: true,
+            checkOutDate: true,
+            status: true,
+          },
+        },
+        taskPhotos: {
+          orderBy: {
+            uploadedAt: "desc",
+          },
+          take: 12,
+          select: {
+            id: true,
+            category: true,
+            fileUrl: true,
+            fileName: true,
+            caption: true,
+            uploadedAt: true,
+          },
+        },
+        activityLogs: {
+          orderBy: {
+            createdAt: "desc",
+          },
+          take: 20,
+          select: {
+            id: true,
+            action: true,
+            message: true,
+            actorType: true,
+            actorName: true,
+            createdAt: true,
+          },
+        },
       },
     })
 
@@ -168,19 +291,86 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     const data: Record<string, unknown> = {}
 
     if (body.title !== undefined) data.title = toStringValue(body.title)
-    if (body.description !== undefined) {
-      data.description = toNullableString(body.description)
-    }
+    if (body.description !== undefined) data.description = toNullableString(body.description)
     if (body.status !== undefined) data.status = toNullableString(body.status)
     if (body.severity !== undefined) data.severity = toNullableString(body.severity)
+    if (body.issueType !== undefined) data.issueType = toNullableString(body.issueType)
+    if (body.reportedBy !== undefined) data.reportedBy = toNullableString(body.reportedBy)
+    if (body.resolutionNotes !== undefined) {
+      data.resolutionNotes = toNullableString(body.resolutionNotes)
+    }
+
+    const normalizedStatus =
+      typeof data.status === "string" ? data.status.toLowerCase() : null
+
+    if (normalizedStatus === "resolved" || normalizedStatus === "closed") {
+      data.resolvedAt = new Date()
+    }
 
     const updatedIssue = await prisma.issue.update({
       where: { id },
       data,
       include: {
-        property: true,
-        task: true,
-        event: true,
+        property: {
+          select: {
+            id: true,
+            code: true,
+            name: true,
+            address: true,
+            city: true,
+            region: true,
+            postalCode: true,
+            country: true,
+            status: true,
+          },
+        },
+        task: {
+          select: {
+            id: true,
+            title: true,
+            status: true,
+            taskType: true,
+            scheduledDate: true,
+          },
+        },
+        booking: {
+          select: {
+            id: true,
+            guestName: true,
+            sourcePlatform: true,
+            checkInDate: true,
+            checkOutDate: true,
+            status: true,
+          },
+        },
+        taskPhotos: {
+          orderBy: {
+            uploadedAt: "desc",
+          },
+          take: 12,
+          select: {
+            id: true,
+            category: true,
+            fileUrl: true,
+            fileName: true,
+            caption: true,
+            uploadedAt: true,
+          },
+        },
+        activityLogs: {
+          orderBy: {
+            createdAt: "desc",
+          },
+          take: 20,
+          select: {
+            id: true,
+            action: true,
+            message: true,
+            actorType: true,
+            actorName: true,
+            createdAt: true,
+          },
+        },
       },
     })
 

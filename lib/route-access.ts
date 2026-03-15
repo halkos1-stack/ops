@@ -138,25 +138,27 @@ export async function requireApiOrgAdminOnly(): Promise<
 export function buildTenantWhere<T extends Record<string, unknown>>(
   auth: RouteAccessContext,
   extraWhere?: T
-): T {
+): T & { organizationId?: string | null } {
   if (auth.isSuperAdmin) {
     return {
       ...(extraWhere ?? {}),
-    } as T
+    }
   }
 
   return {
-    organizationId: auth.organizationId,
     ...(extraWhere ?? {}),
-  } as T
+    organizationId: auth.organizationId,
+  }
 }
 
 export function buildTenantCreateData<T extends Record<string, unknown>>(
   auth: RouteAccessContext,
   data: T
-): T {
+): T & { organizationId?: string | null } {
   if (auth.isSuperAdmin) {
-    return data
+    return {
+      ...data,
+    }
   }
 
   return {

@@ -1,28 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
-
-type AuthContext = {
-  systemRole?: "SUPER_ADMIN" | "USER"
-  organizationId?: string | null
-}
-
-function getMockAuthFromRequest(req: NextRequest): AuthContext {
-  const systemRole = req.headers.get("x-system-role") as
-    | "SUPER_ADMIN"
-    | "USER"
-    | null
-
-  const organizationId = req.headers.get("x-organization-id")
-
-  return {
-    systemRole: systemRole || "SUPER_ADMIN",
-    organizationId: organizationId || null,
-  }
-}
+import { requireApiAppAccess, canAccessOrganization } from "@/lib/route-access"
 
 function normalizeString(value: unknown) {
-  const text = String(value ?? "").trim()
-  return text
+  return String(value ?? "").trim()
 }
 
 function toNullableString(value: unknown) {
@@ -30,9 +11,51 @@ function toNullableString(value: unknown) {
   return text === "" ? null : text
 }
 
+function normalizePartnerStatus(value: unknown) {
+  const text = String(value ?? "").trim().toLowerCase()
+
+  if (text === "inactive") return "inactive"
+  return "active"
+}
+
+function buildPartnerCodeFromNumber(nextNumber: number) {
+  return `PRT-${String(nextNumber).padStart(4, "0")}`
+}
+
+async function generateNextPartnerCode(tx: typeof prisma, organizationId: string) {
+  const existingPartners = await tx.partner.findMany({
+    where: {
+      organizationId,
+    },
+    select: {
+      code: true,
+    },
+  })
+
+  let maxNumber = 0
+
+  for (const partner of existingPartners) {
+    const match = /^PRT-(\d+)$/.exec(String(partner.code || "").trim())
+    if (!match) continue
+
+    const parsed = Number(match[1])
+    if (Number.isFinite(parsed) && parsed > maxNumber) {
+      maxNumber = parsed
+    }
+  }
+
+  return buildPartnerCodeFromNumber(maxNumber + 1)
+}
+
 export async function GET(req: NextRequest) {
   try {
-    const auth = getMockAuthFromRequest(req)
+    const access = await requireApiAppAccess()
+
+    if (!access.ok) {
+      return access.response
+    }
+
+    const { auth } = access
     const { searchParams } = new URL(req.url)
 
     const status = searchParams.get("status")
@@ -41,10 +64,17 @@ export async function GET(req: NextRequest) {
 
     let organizationFilter: string | null = null
 
-    if (auth.systemRole === "SUPER_ADMIN") {
-      organizationFilter = organizationIdParam || null
+    if (auth.isSuperAdmin) {
+      organizationFilter = organizationIdParam || auth.organizationId || null
     } else {
       organizationFilter = auth.organizationId || null
+    }
+
+    if (!auth.isSuperAdmin && !organizationFilter) {
+      return NextResponse.json(
+        { error: "Δεν βρέθηκε οργανισμός χρήστη." },
+        { status: 403 }
+      )
     }
 
     const partners = await prisma.partner.findMany({
@@ -88,30 +118,44 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const auth = getMockAuthFromRequest(req)
+    const access = await requireApiAppAccess()
+
+    if (!access.ok) {
+      return access.response
+    }
+
+    const { auth } = access
     const body = await req.json()
 
-    const organizationId =
-      body.organizationId || auth.organizationId || null
+    let organizationId: string | null = null
+
+    if (auth.isSuperAdmin) {
+      organizationId =
+        normalizeString(body.organizationId) || auth.organizationId || null
+    } else {
+      organizationId = auth.organizationId || null
+    }
 
     if (!organizationId) {
       return NextResponse.json(
-        { error: "Λείπει organizationId για δημιουργία συνεργάτη." },
+        { error: "Δεν βρέθηκε organizationId για δημιουργία συνεργάτη." },
         { status: 400 }
       )
     }
 
-    const code = normalizeString(body.code)
-    const name = normalizeString(body.name)
-    const email = normalizeString(body.email)
-    const specialty = normalizeString(body.specialty)
-
-    if (!code) {
+    if (auth.organizationId && !canAccessOrganization(auth, organizationId)) {
       return NextResponse.json(
-        { error: "Το πεδίο code είναι υποχρεωτικό." },
-        { status: 400 }
+        { error: "Δεν έχετε πρόσβαση σε αυτόν τον οργανισμό." },
+        { status: 403 }
       )
     }
+
+    const name = normalizeString(body.name)
+    const email = normalizeString(body.email).toLowerCase()
+    const specialty = normalizeString(body.specialty)
+    const phone = toNullableString(body.phone)
+    const notes = toNullableString(body.notes)
+    const status = normalizePartnerStatus(body.status)
 
     if (!name) {
       return NextResponse.json(
@@ -134,23 +178,6 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const existingByCode = await prisma.partner.findFirst({
-      where: {
-        organizationId,
-        code,
-      },
-      select: {
-        id: true,
-      },
-    })
-
-    if (existingByCode) {
-      return NextResponse.json(
-        { error: "Υπάρχει ήδη συνεργάτης με αυτόν τον κωδικό." },
-        { status: 400 }
-      )
-    }
-
     const existingByEmail = await prisma.partner.findFirst({
       where: {
         organizationId,
@@ -168,34 +195,38 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const partner = await prisma.partner.create({
-      data: {
-        organizationId,
-        code,
-        name,
-        email,
-        phone: toNullableString(body.phone),
-        specialty,
-        status: normalizeString(body.status) || "active",
-        notes: toNullableString(body.notes),
-      },
-      include: {
-        organization: {
-          select: {
-            id: true,
-            name: true,
-            slug: true,
+    const partner = await prisma.$transaction(async (tx) => {
+      const code = await generateNextPartnerCode(tx, organizationId!)
+
+      return tx.partner.create({
+        data: {
+          organizationId: organizationId!,
+          code,
+          name,
+          email,
+          phone,
+          specialty,
+          status,
+          notes,
+        },
+        include: {
+          organization: {
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+            },
+          },
+          _count: {
+            select: {
+              defaultProperties: true,
+              taskAssignments: true,
+              activityLogs: true,
+              events: true,
+            },
           },
         },
-        _count: {
-          select: {
-            defaultProperties: true,
-            taskAssignments: true,
-            activityLogs: true,
-            events: true,
-          },
-        },
-      },
+      })
     })
 
     return NextResponse.json(

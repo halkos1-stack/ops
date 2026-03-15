@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import {
   requireApiAppAccess,
-  buildTenantWhere,
   canAccessOrganization,
 } from "@/lib/route-access"
 
@@ -14,13 +13,154 @@ type RouteContext = {
 
 function toNullableString(value: unknown) {
   if (value === undefined || value === null) return null
+
   const text = String(value).trim()
   return text === "" ? null : text
 }
 
-function toStringValue(value: unknown, fallback = "") {
-  if (typeof value !== "string") return fallback
-  return value.trim()
+function toRequiredString(value: unknown, fieldName: string) {
+  const text = String(value ?? "").trim()
+
+  if (!text) {
+    throw new Error(`Το πεδίο "${fieldName}" είναι υποχρεωτικό.`)
+  }
+
+  return text
+}
+
+function toBoolean(value: unknown, fallback = false) {
+  if (value === undefined || value === null) return fallback
+  if (typeof value === "boolean") return value
+
+  const text = String(value).trim().toLowerCase()
+
+  if (["true", "1", "yes", "on"].includes(text)) return true
+  if (["false", "0", "no", "off"].includes(text)) return false
+
+  return fallback
+}
+
+function toNullableDate(value: unknown) {
+  if (value === undefined || value === null || value === "") return null
+
+  const date = new Date(String(value))
+
+  if (Number.isNaN(date.getTime())) {
+    throw new Error("Μη έγκυρη ημερομηνία.")
+  }
+
+  return date
+}
+
+async function getTaskBase(taskId: string) {
+  return prisma.task.findUnique({
+    where: { id: taskId },
+    select: {
+      id: true,
+      organizationId: true,
+      propertyId: true,
+      bookingId: true,
+    },
+  })
+}
+
+async function getFullTask(taskId: string) {
+  return prisma.task.findUnique({
+    where: { id: taskId },
+    include: {
+      property: {
+        include: {
+          defaultPartner: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              specialty: true,
+            },
+          },
+        },
+      },
+
+      booking: {
+        select: {
+          id: true,
+          sourcePlatform: true,
+          externalBookingId: true,
+          guestName: true,
+          guestPhone: true,
+          guestEmail: true,
+          checkInDate: true,
+          checkOutDate: true,
+          checkInTime: true,
+          checkOutTime: true,
+          adults: true,
+          children: true,
+          infants: true,
+          status: true,
+          notes: true,
+        },
+      },
+
+      assignments: {
+        orderBy: {
+          assignedAt: "desc",
+        },
+        include: {
+          partner: {
+            select: {
+              id: true,
+              code: true,
+              name: true,
+              email: true,
+              phone: true,
+              specialty: true,
+              status: true,
+            },
+          },
+        },
+      },
+
+      checklistRun: {
+        include: {
+          template: {
+            include: {
+              items: {
+                orderBy: {
+                  sortOrder: "asc",
+                },
+              },
+            },
+          },
+          answers: {
+            orderBy: {
+              createdAt: "asc",
+            },
+            include: {
+              templateItem: true,
+            },
+          },
+        },
+      },
+
+      issues: {
+        orderBy: {
+          createdAt: "desc",
+        },
+      },
+
+      taskPhotos: {
+        orderBy: {
+          uploadedAt: "desc",
+        },
+      },
+
+      activityLogs: {
+        orderBy: {
+          createdAt: "desc",
+        },
+      },
+    },
+  })
 }
 
 export async function GET(_req: NextRequest, context: RouteContext) {
@@ -31,41 +171,26 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       return access.response
     }
 
-    const { auth } = access
+    const auth = access.auth
     const { taskId } = await context.params
 
-    const task = await prisma.task.findFirst({
-      where: buildTenantWhere(auth, { id: taskId }),
-      include: {
-        property: true,
-        assignments: {
-          include: {
-            partner: true,
-          },
-          orderBy: {
-            createdAt: "desc",
-          },
-        },
-        checklistRuns: {
-          include: {
-            answers: true,
-          },
-          orderBy: {
-            createdAt: "desc",
-          },
-        },
-        issues: {
-          orderBy: {
-            createdAt: "desc",
-          },
-        },
-        events: {
-          orderBy: {
-            createdAt: "desc",
-          },
-        },
-      },
-    })
+    const base = await getTaskBase(taskId)
+
+    if (!base) {
+      return NextResponse.json(
+        { error: "Η εργασία δεν βρέθηκε." },
+        { status: 404 }
+      )
+    }
+
+    if (!canAccessOrganization(auth, base.organizationId)) {
+      return NextResponse.json(
+        { error: "Δεν έχετε πρόσβαση σε αυτή την εργασία." },
+        { status: 403 }
+      )
+    }
+
+    const task = await getFullTask(taskId)
 
     if (!task) {
       return NextResponse.json(
@@ -76,7 +201,8 @@ export async function GET(_req: NextRequest, context: RouteContext) {
 
     return NextResponse.json(task)
   } catch (error) {
-    console.error("Task GET by id error:", error)
+    console.error("GET /api/tasks/[taskId] error:", error)
+
     return NextResponse.json(
       { error: "Αποτυχία φόρτωσης εργασίας." },
       { status: 500 }
@@ -92,70 +218,136 @@ export async function PUT(req: NextRequest, context: RouteContext) {
       return access.response
     }
 
-    const { auth } = access
+    const auth = access.auth
     const { taskId } = await context.params
     const body = await req.json()
 
-    const existingTask = await prisma.task.findUnique({
-      where: { id: taskId },
-      select: {
-        id: true,
-        organizationId: true,
-      },
-    })
+    const existing = await getTaskBase(taskId)
 
-    if (!existingTask) {
+    if (!existing) {
       return NextResponse.json(
         { error: "Η εργασία δεν βρέθηκε." },
         { status: 404 }
       )
     }
 
-    if (!canAccessOrganization(auth, existingTask.organizationId)) {
+    if (!canAccessOrganization(auth, existing.organizationId)) {
       return NextResponse.json(
         { error: "Δεν έχετε πρόσβαση σε αυτή την εργασία." },
         { status: 403 }
       )
     }
 
-    const title = toStringValue(body.title)
-    const description = toNullableString(body.description)
-    const type = toNullableString(body.type)
-    const status = toNullableString(body.status)
+    const title = toRequiredString(body.title, "title")
+    const taskType = toRequiredString(body.taskType, "taskType")
+    const scheduledDate = toNullableDate(body.scheduledDate)
 
-    if (!title) {
+    if (!scheduledDate) {
       return NextResponse.json(
-        { error: "Ο τίτλος εργασίας είναι υποχρεωτικός." },
+        { error: 'Το πεδίο "scheduledDate" είναι υποχρεωτικό.' },
         { status: 400 }
       )
     }
 
-    const updatedTask = await prisma.task.update({
-      where: { id: taskId },
-      data: {
-        title,
-        description,
-        type,
-        ...(status !== null ? { status } : {}),
+    const propertyId = toRequiredString(
+      body.propertyId ?? existing.propertyId,
+      "propertyId"
+    )
+
+    const bookingId = toNullableString(body.bookingId)
+    const description = toNullableString(body.description)
+    const source = toNullableString(body.source) ?? "manual"
+    const priority = toNullableString(body.priority) ?? "normal"
+    const status = toNullableString(body.status) ?? "pending"
+    const scheduledStartTime = toNullableString(body.scheduledStartTime)
+    const scheduledEndTime = toNullableString(body.scheduledEndTime)
+    const dueDate = toNullableDate(body.dueDate)
+    const completedAt = toNullableDate(body.completedAt)
+    const notes = toNullableString(body.notes)
+    const resultNotes = toNullableString(body.resultNotes)
+    const requiresPhotos = toBoolean(body.requiresPhotos, false)
+    const requiresChecklist = toBoolean(body.requiresChecklist, false)
+    const requiresApproval = toBoolean(body.requiresApproval, false)
+
+    const property = await prisma.property.findFirst({
+      where: {
+        id: propertyId,
+        organizationId: existing.organizationId,
       },
-      include: {
-        property: true,
-        assignments: {
-          include: {
-            partner: true,
-          },
-        },
-        checklistRuns: true,
+      select: {
+        id: true,
       },
     })
 
-    return NextResponse.json(updatedTask)
+    if (!property) {
+      return NextResponse.json(
+        { error: "Το ακίνητο δεν βρέθηκε ή δεν ανήκει στον οργανισμό." },
+        { status: 400 }
+      )
+    }
+
+    if (bookingId) {
+      const booking = await prisma.booking.findFirst({
+        where: {
+          id: bookingId,
+          organizationId: existing.organizationId,
+          propertyId,
+        },
+        select: {
+          id: true,
+        },
+      })
+
+      if (!booking) {
+        return NextResponse.json(
+          {
+            error:
+              "Η κράτηση δεν βρέθηκε ή δεν ανήκει στο συγκεκριμένο ακίνητο / οργανισμό.",
+          },
+          { status: 400 }
+        )
+      }
+    }
+
+    await prisma.task.update({
+      where: { id: taskId },
+      data: {
+        propertyId,
+        bookingId,
+        title,
+        description,
+        taskType,
+        source,
+        priority,
+        status,
+        scheduledDate,
+        scheduledStartTime,
+        scheduledEndTime,
+        dueDate,
+        completedAt,
+        requiresPhotos,
+        requiresChecklist,
+        requiresApproval,
+        notes,
+        resultNotes,
+      },
+    })
+
+    const task = await getFullTask(taskId)
+
+    return NextResponse.json({
+      success: true,
+      task,
+    })
   } catch (error) {
-    console.error("Task PUT error:", error)
-    return NextResponse.json(
-      { error: "Αποτυχία ενημέρωσης εργασίας." },
-      { status: 500 }
-    )
+    console.error("PUT /api/tasks/[taskId] error:", error)
+
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Αποτυχία ενημέρωσης εργασίας."
+
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }
 
@@ -167,61 +359,191 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       return access.response
     }
 
-    const { auth } = access
+    const auth = access.auth
     const { taskId } = await context.params
     const body = await req.json()
 
-    const existingTask = await prisma.task.findUnique({
-      where: { id: taskId },
-      select: {
-        id: true,
-        organizationId: true,
-      },
-    })
+    const existing = await getTaskBase(taskId)
 
-    if (!existingTask) {
+    if (!existing) {
       return NextResponse.json(
         { error: "Η εργασία δεν βρέθηκε." },
         { status: 404 }
       )
     }
 
-    if (!canAccessOrganization(auth, existingTask.organizationId)) {
+    if (!canAccessOrganization(auth, existing.organizationId)) {
       return NextResponse.json(
         { error: "Δεν έχετε πρόσβαση σε αυτή την εργασία." },
         { status: 403 }
       )
     }
 
-    const data: Record<string, unknown> = {}
+    const data: {
+      propertyId?: string
+      bookingId?: string | null
+      title?: string
+      description?: string | null
+      taskType?: string
+      source?: string
+      priority?: string
+      status?: string
+      scheduledDate?: Date
+      scheduledStartTime?: string | null
+      scheduledEndTime?: string | null
+      dueDate?: Date | null
+      completedAt?: Date | null
+      requiresPhotos?: boolean
+      requiresChecklist?: boolean
+      requiresApproval?: boolean
+      notes?: string | null
+      resultNotes?: string | null
+    } = {}
 
-    if (body.title !== undefined) data.title = toStringValue(body.title)
-    if (body.description !== undefined) {
+    if ("propertyId" in body) {
+      data.propertyId = toRequiredString(body.propertyId, "propertyId")
+    }
+
+    if ("bookingId" in body) {
+      data.bookingId = toNullableString(body.bookingId)
+    }
+
+    if ("title" in body) {
+      data.title = toRequiredString(body.title, "title")
+    }
+
+    if ("description" in body) {
       data.description = toNullableString(body.description)
     }
-    if (body.type !== undefined) data.type = toNullableString(body.type)
-    if (body.status !== undefined) data.status = toNullableString(body.status)
 
-    const updatedTask = await prisma.task.update({
+    if ("taskType" in body) {
+      data.taskType = toRequiredString(body.taskType, "taskType")
+    }
+
+    if ("source" in body) {
+      data.source = toRequiredString(body.source, "source")
+    }
+
+    if ("priority" in body) {
+      data.priority = toRequiredString(body.priority, "priority")
+    }
+
+    if ("status" in body) {
+      data.status = toRequiredString(body.status, "status")
+    }
+
+    if ("scheduledDate" in body) {
+      const scheduledDate = toNullableDate(body.scheduledDate)
+
+      if (!scheduledDate) {
+        return NextResponse.json(
+          { error: 'Το πεδίο "scheduledDate" δεν μπορεί να είναι κενό.' },
+          { status: 400 }
+        )
+      }
+
+      data.scheduledDate = scheduledDate
+    }
+
+    if ("scheduledStartTime" in body) {
+      data.scheduledStartTime = toNullableString(body.scheduledStartTime)
+    }
+
+    if ("scheduledEndTime" in body) {
+      data.scheduledEndTime = toNullableString(body.scheduledEndTime)
+    }
+
+    if ("dueDate" in body) {
+      data.dueDate = toNullableDate(body.dueDate)
+    }
+
+    if ("completedAt" in body) {
+      data.completedAt = toNullableDate(body.completedAt)
+    }
+
+    if ("requiresPhotos" in body) {
+      data.requiresPhotos = toBoolean(body.requiresPhotos, false)
+    }
+
+    if ("requiresChecklist" in body) {
+      data.requiresChecklist = toBoolean(body.requiresChecklist, false)
+    }
+
+    if ("requiresApproval" in body) {
+      data.requiresApproval = toBoolean(body.requiresApproval, false)
+    }
+
+    if ("notes" in body) {
+      data.notes = toNullableString(body.notes)
+    }
+
+    if ("resultNotes" in body) {
+      data.resultNotes = toNullableString(body.resultNotes)
+    }
+
+    const targetPropertyId = data.propertyId ?? existing.propertyId
+
+    if (data.propertyId) {
+      const property = await prisma.property.findFirst({
+        where: {
+          id: targetPropertyId,
+          organizationId: existing.organizationId,
+        },
+        select: {
+          id: true,
+        },
+      })
+
+      if (!property) {
+        return NextResponse.json(
+          { error: "Το ακίνητο δεν βρέθηκε ή δεν ανήκει στον οργανισμό." },
+          { status: 400 }
+        )
+      }
+    }
+
+    if ("bookingId" in body && data.bookingId) {
+      const booking = await prisma.booking.findFirst({
+        where: {
+          id: data.bookingId,
+          organizationId: existing.organizationId,
+          propertyId: targetPropertyId,
+        },
+        select: {
+          id: true,
+        },
+      })
+
+      if (!booking) {
+        return NextResponse.json(
+          {
+            error:
+              "Η κράτηση δεν βρέθηκε ή δεν ανήκει στο συγκεκριμένο ακίνητο / οργανισμό.",
+          },
+          { status: 400 }
+        )
+      }
+    }
+
+    await prisma.task.update({
       where: { id: taskId },
       data,
-      include: {
-        property: true,
-        assignments: {
-          include: {
-            partner: true,
-          },
-        },
-        checklistRuns: true,
-      },
     })
 
-    return NextResponse.json(updatedTask)
+    const task = await getFullTask(taskId)
+
+    return NextResponse.json({
+      success: true,
+      task,
+    })
   } catch (error) {
-    console.error("Task PATCH error:", error)
-    return NextResponse.json(
-      { error: "Αποτυχία μερικής ενημέρωσης εργασίας." },
-      { status: 500 }
-    )
+    console.error("PATCH /api/tasks/[taskId] error:", error)
+
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Αποτυχία μερικής ενημέρωσης εργασίας."
+
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }

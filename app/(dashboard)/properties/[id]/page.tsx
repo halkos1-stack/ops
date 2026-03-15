@@ -1,13 +1,9 @@
 "use client"
 
 import Link from "next/link"
-import { use, useEffect, useMemo, useState } from "react"
-
-type PageProps = {
-  params: Promise<{
-    id: string
-  }>
-}
+import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useParams } from "next/navigation"
+import { useAppLanguage } from "@/components/i18n/LanguageProvider"
 
 type PropertyDetail = {
   id: string
@@ -170,6 +166,20 @@ type PropertyDetail = {
       requiresPhoto?: boolean
       opensIssueOnFail?: boolean
       optionsText?: string | null
+      issueTypeOnFail?: string | null
+      issueSeverityOnFail?: string | null
+      failureValuesText?: string | null
+      linkedSupplyItemId?: string | null
+      supplyUpdateMode?: string | null
+      supplyQuantity?: number | null
+      supplyItem?: {
+        id: string
+        code: string
+        name: string
+        category: string
+        unit: string
+        minimumStock?: number | null
+      } | null
     }>
   }>
 
@@ -179,6 +189,7 @@ type PropertyDetail = {
     targetStock?: number | null
     reorderThreshold?: number | null
     notes?: string | null
+    updatedAt?: string | null
     supplyItem?: {
       id: string
       code: string
@@ -220,33 +231,63 @@ type PropertyDetail = {
     actorType?: string | null
     actorName?: string | null
     createdAt: string
+    metadata?: Record<string, unknown> | null
   }>
 }
+
+type PropertyTask = NonNullable<PropertyDetail["tasks"]>[number]
+type TaskChecklistRun = NonNullable<PropertyTask["checklistRun"]>
+type TaskChecklistAnswer = NonNullable<TaskChecklistRun["answers"]>[number]
+
+type ModalKey =
+  | null
+  | "property"
+  | "partner"
+  | "template"
+  | "bookings"
+  | "issues"
+  | "supplies"
+  | "photos"
+  | "events"
+
+type MetricKey =
+  | "bookings"
+  | "pendingTasks"
+  | "completedTasks"
+  | "openIssues"
+  | "criticalIssues"
+  | "activeTemplates"
+  | "lowStock"
+
+type TaskFilterKey = "all" | "pending" | "completed" | "critical"
 
 function safeArray<T>(value: T[] | undefined | null): T[] {
   return Array.isArray(value) ? value : []
 }
 
-function formatDate(value?: string | null) {
-  if (!value) return "—"
-
+function normalizeDate(value?: string | null) {
+  if (!value) return null
   const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return "—"
+  if (Number.isNaN(date.getTime())) return null
+  return date
+}
 
-  return new Intl.DateTimeFormat("el-GR", {
+function formatDate(value: string | null | undefined, locale: string) {
+  const date = normalizeDate(value)
+  if (!date) return "—"
+
+  return new Intl.DateTimeFormat(locale, {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
   }).format(date)
 }
 
-function formatDateTime(value?: string | null) {
-  if (!value) return "—"
+function formatDateTime(value: string | null | undefined, locale: string) {
+  const date = normalizeDate(value)
+  if (!date) return "—"
 
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return "—"
-
-  return new Intl.DateTimeFormat("el-GR", {
+  return new Intl.DateTimeFormat(locale, {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
@@ -255,8 +296,320 @@ function formatDateTime(value?: string | null) {
   }).format(date)
 }
 
-function propertyStatusLabel(status?: string | null) {
-  switch ((status || "").toLowerCase()) {
+function getTexts(language: "el" | "en") {
+  if (language === "en") {
+    return {
+      locale: "en-GB",
+      back: "Properties",
+      manageChecklists: "Manage checklists",
+      propertyTasks: "Property tasks",
+      suppliesCenter: "Supplies center",
+      propertyDetailsButton: "Property details",
+      readiness: "Readiness",
+      unknown: "Unknown",
+      noData: "No data available.",
+      notReady: "Not ready",
+      actionNeeded: "Needs action",
+      ready: "Ready",
+      noPending: "There are no open pending items right now.",
+      createdFromChecklist: "Created from checklist",
+      overviewTitle: "Operational summary",
+      overviewSubtitle: "Choose the action you want to inspect.",
+      tasksSectionTopTitle: "Work queue",
+      tasksSectionTopSubtitle:
+        "The highest-priority tasks are shown first so you can move faster.",
+      loading: "Loading property...",
+      loadError: "Property loading error",
+      noPropertyData: "No property data found.",
+      open: "Open",
+      close: "Close",
+      noItems: "No items available.",
+      noNotes: "There are no notes.",
+      noDefaultPartner: "No default partner assigned.",
+      noPrimaryTemplate: "No primary checklist template assigned.",
+      openTaskHistory: "Open full task center",
+      viewTask: "View task",
+      viewBooking: "View booking",
+      viewIssue: "View issue",
+      viewPartner: "View partner",
+      viewTemplate: "View template",
+      openFile: "Open file",
+      details: "Details",
+      summary: "Summary",
+      seeDetails: "See details",
+      descriptionChooseAction: "Choose the action you want to inspect.",
+      dynamicInfoNote: "All sections below are dynamic and update from live data.",
+      modalClose: "Close",
+
+      cardDescriptions: {
+        bookings: "View current and recent bookings for this property.",
+        pendingTasks: "See tasks that still need action.",
+        completedTasks: "Review recently completed work.",
+        openIssues: "Inspect issues and repairs still open.",
+        criticalIssues: "Focus on the highest-severity issues.",
+        activeTemplates: "See which checklist templates are active.",
+        lowStock: "See supplies that are not yet at full level.",
+      },
+
+      sectionDescriptions: {
+        property: "Basic property profile and operational details.",
+        partner: "The default partner assigned to this property.",
+        template: "The main checklist template currently used.",
+        bookings: "Recent bookings linked to this property.",
+        issues: "Issues, damages and repair items.",
+        supplies: "Active supplies and their latest level.",
+        photos: "Photo documentation uploaded for tasks.",
+        events: "Timeline of events and activity history.",
+      },
+
+      metrics: {
+        bookings: "Bookings",
+        pendingTasks: "Pending tasks",
+        completedTasks: "Completed tasks",
+        openIssues: "Open issues",
+        criticalIssues: "Critical issues",
+        activeTemplates: "Active templates",
+        lowStock: "Not full supplies",
+      },
+
+      sections: {
+        property: "Property details",
+        partner: "Default partner",
+        template: "Primary checklist template",
+        bookings: "Bookings",
+        issues: "Issues / Repairs",
+        supplies: "Supplies",
+        photos: "Photo documentation",
+        events: "Events & activity",
+      },
+
+      taskFilters: {
+        all: "All tasks",
+        pending: "Pending",
+        completed: "Completed",
+        critical: "Urgent first",
+      },
+
+      labels: {
+        code: "Code",
+        type: "Type",
+        status: "Status",
+        bedrooms: "Bedrooms",
+        bathrooms: "Bathrooms",
+        maxGuests: "Max guests",
+        createdAt: "Created",
+        updatedAt: "Updated",
+        address: "Address",
+        cityRegionPostal: "City / Region / Postal code",
+        notes: "Notes",
+        name: "Name",
+        email: "Email",
+        phone: "Phone",
+        specialty: "Specialty",
+        source: "Source",
+        guest: "Guest",
+        checkIn: "Check-in",
+        checkOut: "Check-out",
+        priority: "Priority",
+        assignment: "Assignment",
+        checklist: "Checklist",
+        completion: "Completion",
+        requirements: "Requirements",
+        result: "Result",
+        current: "Current",
+        target: "Target",
+        threshold: "Threshold",
+        supplyStatus: "Supply level",
+        category: "Category",
+        issueType: "Issue type",
+        severity: "Severity",
+        lastUpdate: "Last update",
+        scheduledDate: "Scheduled",
+        itemCount: "Items",
+        templateType: "Template type",
+      },
+
+      inline: {
+        primaryChecklist: "Primary checklist",
+        noSpecialRequirements: "No special requirements",
+        noActivityLogs: "No activity history.",
+        checklistIssues: "Checklist issues",
+        missing: "Missing",
+        medium: "Medium",
+        full: "Full",
+        openNeeds: "Open needs",
+        translatedDynamicDataHint:
+          "Dynamic item names are shown as stored in the system.",
+      },
+    }
+  }
+
+  return {
+    locale: "el-GR",
+    back: "Ακίνητα",
+    manageChecklists: "Διαχείριση checklists",
+    propertyTasks: "Εργασίες ακινήτου",
+    suppliesCenter: "Κέντρο αναλωσίμων",
+    propertyDetailsButton: "Στοιχεία ακινήτου",
+    readiness: "Ετοιμότητα",
+    unknown: "Άγνωστη",
+    noData: "Δεν υπάρχουν διαθέσιμα δεδομένα.",
+    notReady: "Μη έτοιμο",
+    actionNeeded: "Θέλει ενέργειες",
+    ready: "Έτοιμο",
+    noPending: "Δεν υπάρχουν ανοιχτές εκκρεμότητες αυτή τη στιγμή.",
+    createdFromChecklist: "Από checklist",
+    overviewTitle: "Συνοπτική επιχειρησιακή εικόνα",
+    overviewSubtitle: "Δες την ενέργεια που επιλέγεις.",
+    tasksSectionTopTitle: "Ουρά εργασιών",
+    tasksSectionTopSubtitle:
+      "Εμφανίζονται πρώτα οι σημαντικότερες εργασίες για πιο γρήγορο έλεγχο.",
+    loading: "Φόρτωση ακινήτου...",
+    loadError: "Σφάλμα φόρτωσης ακινήτου",
+    noPropertyData: "Δεν βρέθηκαν δεδομένα ακινήτου.",
+    open: "Άνοιγμα",
+    close: "Κλείσιμο",
+    noItems: "Δεν υπάρχουν διαθέσιμα στοιχεία.",
+    noNotes: "Δεν υπάρχουν σημειώσεις.",
+    noDefaultPartner: "Δεν έχει οριστεί προεπιλεγμένος συνεργάτης.",
+    noPrimaryTemplate: "Δεν έχει οριστεί κύριο πρότυπο checklist.",
+    openTaskHistory: "Άνοιγμα πλήρους κέντρου εργασιών",
+    viewTask: "Προβολή εργασίας",
+    viewBooking: "Προβολή κράτησης",
+    viewIssue: "Προβολή θέματος",
+    viewPartner: "Προβολή συνεργάτη",
+    viewTemplate: "Προβολή προτύπου",
+    openFile: "Άνοιγμα αρχείου",
+    details: "Λεπτομέρειες",
+    summary: "Σύνοψη",
+    seeDetails: "Δες λεπτομέρειες",
+    descriptionChooseAction: "Δες την ενέργεια που επιλέγεις.",
+    dynamicInfoNote:
+      "Όλες οι ενότητες παρακάτω είναι δυναμικές και ενημερώνονται από τα ζωντανά δεδομένα.",
+    modalClose: "Κλείσιμο",
+
+    cardDescriptions: {
+      bookings: "Δες τις τρέχουσες και πρόσφατες κρατήσεις του ακινήτου.",
+      pendingTasks: "Δες ποιες εργασίες θέλουν ακόμη ενέργεια.",
+      completedTasks: "Δες τι ολοκληρώθηκε πρόσφατα.",
+      openIssues: "Δες ανοιχτά θέματα, ζημιές και βλάβες.",
+      criticalIssues: "Εστίασε πρώτα στα πιο σοβαρά θέματα.",
+      activeTemplates: "Δες ποια πρότυπα checklist είναι ενεργά.",
+      lowStock: "Δες αναλώσιμα που δεν είναι ακόμη σε πλήρη κατάσταση.",
+    },
+
+    sectionDescriptions: {
+      property: "Βασικό προφίλ ακινήτου και λειτουργικά στοιχεία.",
+      partner: "Ο προεπιλεγμένος συνεργάτης του ακινήτου.",
+      template: "Το κύριο πρότυπο checklist που χρησιμοποιείται τώρα.",
+      bookings: "Οι πιο πρόσφατες κρατήσεις του ακινήτου.",
+      issues: "Θέματα, ζημιές και βλάβες που έχουν καταγραφεί.",
+      supplies: "Τα ενεργά αναλώσιμα και η τελευταία τους κατάσταση.",
+      photos: "Η φωτογραφική τεκμηρίωση που έχει ανέβει από εργασίες.",
+      events: "Χρονολογική εικόνα συμβάντων και ιστορικού ενεργειών.",
+    },
+
+    metrics: {
+      bookings: "Κρατήσεις",
+      pendingTasks: "Εκκρεμείς εργασίες",
+      completedTasks: "Ολοκληρωμένες εργασίες",
+      openIssues: "Ανοιχτά θέματα",
+      criticalIssues: "Κρίσιμα θέματα",
+      activeTemplates: "Ενεργά checklist",
+      lowStock: "Μη πλήρη αναλώσιμα",
+    },
+
+    sections: {
+      property: "Στοιχεία ακινήτου",
+      partner: "Προεπιλεγμένος συνεργάτης",
+      template: "Κύριο πρότυπο checklist",
+      bookings: "Κρατήσεις",
+      issues: "Θέματα / Βλάβες",
+      supplies: "Αναλώσιμα",
+      photos: "Φωτογραφική τεκμηρίωση",
+      events: "Συμβάντα & ιστορικό",
+    },
+
+    taskFilters: {
+      all: "Όλες οι εργασίες",
+      pending: "Εκκρεμείς",
+      completed: "Ολοκληρωμένες",
+      critical: "Επείγουσες πρώτα",
+    },
+
+    labels: {
+      code: "Κωδικός",
+      type: "Τύπος",
+      status: "Κατάσταση",
+      bedrooms: "Υπνοδωμάτια",
+      bathrooms: "Μπάνια",
+      maxGuests: "Μέγιστοι επισκέπτες",
+      createdAt: "Δημιουργία",
+      updatedAt: "Τελευταία ενημέρωση",
+      address: "Διεύθυνση",
+      cityRegionPostal: "Πόλη / Περιοχή / ΤΚ",
+      notes: "Σημειώσεις",
+      name: "Όνομα",
+      email: "Email",
+      phone: "Τηλέφωνο",
+      specialty: "Ειδικότητα",
+      source: "Πηγή",
+      guest: "Επισκέπτης",
+      checkIn: "Check-in",
+      checkOut: "Check-out",
+      priority: "Προτεραιότητα",
+      assignment: "Ανάθεση",
+      checklist: "Checklist",
+      completion: "Ολοκλήρωση",
+      requirements: "Απαιτήσεις",
+      result: "Αποτέλεσμα",
+      current: "Τρέχον",
+      target: "Στόχος",
+      threshold: "Όριο",
+      supplyStatus: "Κατάσταση αναλωσίμου",
+      category: "Κατηγορία",
+      issueType: "Τύπος θέματος",
+      severity: "Σοβαρότητα",
+      lastUpdate: "Τελευταία ενημέρωση",
+      scheduledDate: "Προγραμματισμός",
+      itemCount: "Στοιχεία",
+      templateType: "Τύπος προτύπου",
+    },
+
+    inline: {
+      primaryChecklist: "Κύριο checklist",
+      noSpecialRequirements: "Καμία ειδική απαίτηση",
+      noActivityLogs: "Δεν υπάρχει ιστορικό ενεργειών.",
+      checklistIssues: "Θέματα checklist",
+      missing: "Έλλειψη",
+      medium: "Μέτρια",
+      full: "Πλήρης",
+      openNeeds: "Ανοιχτές ανάγκες",
+      translatedDynamicDataHint:
+        "Τα δυναμικά ονόματα στοιχείων εμφανίζονται όπως είναι αποθηκευμένα στο σύστημα.",
+    },
+  }
+}
+
+function propertyStatusLabel(language: "el" | "en", status?: string | null) {
+  const value = (status || "").toLowerCase()
+
+  if (language === "en") {
+    switch (value) {
+      case "active":
+        return "Active"
+      case "inactive":
+        return "Inactive"
+      case "maintenance":
+        return "Maintenance"
+      case "archived":
+        return "Archived"
+      default:
+        return status || "—"
+    }
+  }
+
+  switch (value) {
     case "active":
       return "Ενεργό"
     case "inactive":
@@ -270,8 +623,25 @@ function propertyStatusLabel(status?: string | null) {
   }
 }
 
-function bookingStatusLabel(status?: string | null) {
-  switch ((status || "").toLowerCase()) {
+function bookingStatusLabel(language: "el" | "en", status?: string | null) {
+  const value = (status || "").toLowerCase()
+
+  if (language === "en") {
+    switch (value) {
+      case "confirmed":
+        return "Confirmed"
+      case "pending":
+        return "Pending"
+      case "cancelled":
+        return "Cancelled"
+      case "completed":
+        return "Completed"
+      default:
+        return status || "—"
+    }
+  }
+
+  switch (value) {
     case "confirmed":
       return "Επιβεβαιωμένη"
     case "pending":
@@ -285,8 +655,29 @@ function bookingStatusLabel(status?: string | null) {
   }
 }
 
-function taskStatusLabel(status?: string | null) {
-  switch ((status || "").toLowerCase()) {
+function taskStatusLabel(language: "el" | "en", status?: string | null) {
+  const value = (status || "").toLowerCase()
+
+  if (language === "en") {
+    switch (value) {
+      case "pending":
+        return "Pending"
+      case "assigned":
+        return "Assigned"
+      case "accepted":
+        return "Accepted"
+      case "in_progress":
+        return "In progress"
+      case "completed":
+        return "Completed"
+      case "cancelled":
+        return "Cancelled"
+      default:
+        return status || "—"
+    }
+  }
+
+  switch (value) {
     case "pending":
       return "Εκκρεμεί"
     case "assigned":
@@ -304,8 +695,25 @@ function taskStatusLabel(status?: string | null) {
   }
 }
 
-function issueStatusLabel(status?: string | null) {
-  switch ((status || "").toLowerCase()) {
+function issueStatusLabel(language: "el" | "en", status?: string | null) {
+  const value = (status || "").toLowerCase()
+
+  if (language === "en") {
+    switch (value) {
+      case "open":
+        return "Open"
+      case "in_progress":
+        return "In progress"
+      case "resolved":
+        return "Resolved"
+      case "closed":
+        return "Closed"
+      default:
+        return status || "—"
+    }
+  }
+
+  switch (value) {
     case "open":
       return "Ανοιχτό"
     case "in_progress":
@@ -319,8 +727,25 @@ function issueStatusLabel(status?: string | null) {
   }
 }
 
-function severityLabel(severity?: string | null) {
-  switch ((severity || "").toLowerCase()) {
+function severityLabel(language: "el" | "en", severity?: string | null) {
+  const value = (severity || "").toLowerCase()
+
+  if (language === "en") {
+    switch (value) {
+      case "low":
+        return "Low"
+      case "medium":
+        return "Medium"
+      case "high":
+        return "High"
+      case "critical":
+        return "Critical"
+      default:
+        return severity || "—"
+    }
+  }
+
+  switch (value) {
     case "low":
       return "Χαμηλή"
     case "medium":
@@ -334,12 +759,96 @@ function severityLabel(severity?: string | null) {
   }
 }
 
-function typeLabel(value?: string | null) {
+function issueTypeLabel(language: "el" | "en", value?: string | null) {
+  const normalized = String(value || "").toLowerCase()
+
+  if (language === "en") {
+    switch (normalized) {
+      case "damage":
+        return "Damage"
+      case "repair":
+        return "Repair"
+      case "supplies":
+        return "Supplies"
+      case "inspection":
+        return "Inspection"
+      case "cleaning":
+        return "Cleaning"
+      case "general":
+        return "General"
+      default:
+        return value || "—"
+    }
+  }
+
+  switch (normalized) {
+    case "damage":
+      return "Ζημιά"
+    case "repair":
+      return "Βλάβη"
+    case "supplies":
+      return "Αναλώσιμα"
+    case "inspection":
+      return "Επιθεώρηση"
+    case "cleaning":
+      return "Καθαριότητα"
+    case "general":
+      return "Γενικό"
+    default:
+      return value || "—"
+  }
+}
+
+function typeLabel(language: "el" | "en", value?: string | null) {
   if (!value) return "—"
 
-  return value
-    .replaceAll("_", " ")
-    .replace(/\b\w/g, (char) => char.toUpperCase())
+  const normalized = value.toLowerCase()
+
+  if (language === "en") {
+    switch (normalized) {
+      case "apartment":
+      case "διαμέρισμα":
+        return "Apartment"
+      case "villa":
+      case "βίλα":
+        return "Villa"
+      case "house":
+      case "μονοκατοικία":
+        return "House"
+      case "studio":
+      case "στούντιο":
+        return "Studio"
+      case "maisonette":
+      case "μεζονέτα":
+        return "Maisonette"
+      case "loft":
+        return "Loft"
+      default:
+        return value
+    }
+  }
+
+  switch (normalized) {
+    case "apartment":
+    case "διαμέρισμα":
+      return "Διαμέρισμα"
+    case "villa":
+    case "βίλα":
+      return "Βίλα"
+    case "house":
+    case "μονοκατοικία":
+      return "Μονοκατοικία"
+    case "studio":
+    case "στούντιο":
+      return "Στούντιο"
+    case "maisonette":
+    case "μεζονέτα":
+      return "Μεζονέτα"
+    case "loft":
+      return "Loft"
+    default:
+      return value
+    }
 }
 
 function badgeClasses(status?: string | null) {
@@ -354,11 +863,13 @@ function badgeClasses(status?: string | null) {
     case "accepted":
     case "in_progress":
     case "maintenance":
+    case "medium":
       return "bg-amber-50 text-amber-700 ring-1 ring-amber-200"
     case "inactive":
     case "cancelled":
     case "archived":
     case "closed":
+    case "low":
       return "bg-slate-100 text-slate-700 ring-1 ring-slate-200"
     case "open":
     case "critical":
@@ -369,94 +880,321 @@ function badgeClasses(status?: string | null) {
   }
 }
 
-function assignmentStatusLabel(status?: string | null) {
-  switch ((status || "").toLowerCase()) {
-    case "assigned":
-      return "Ανατέθηκε"
-    case "accepted":
-      return "Αποδέχθηκε"
-    case "rejected":
-      return "Απέρριψε"
-    case "started":
-      return "Ξεκίνησε"
-    case "completed":
-      return "Ολοκλήρωσε"
+function priorityBadgeClasses(priority?: string | null) {
+  switch ((priority || "").toLowerCase()) {
+    case "critical":
+    case "urgent":
+      return "bg-red-50 text-red-700 ring-1 ring-red-200"
+    case "high":
+      return "bg-amber-50 text-amber-700 ring-1 ring-amber-200"
+    case "normal":
+    case "medium":
+      return "bg-sky-50 text-sky-700 ring-1 ring-sky-200"
+    case "low":
+      return "bg-slate-100 text-slate-700 ring-1 ring-slate-200"
     default:
-      return status || "—"
+      return "bg-slate-100 text-slate-700 ring-1 ring-slate-200"
   }
 }
 
-function checklistStatusLabel(status?: string | null) {
-  switch ((status || "").toLowerCase()) {
-    case "pending":
-      return "Εκκρεμεί"
-    case "in_progress":
-      return "Σε εξέλιξη"
-    case "completed":
-      return "Ολοκληρώθηκε"
-    default:
-      return status || "—"
+function getSupplyStateThree(
+  current: number,
+  target?: number | null,
+  threshold?: number | null
+): "missing" | "medium" | "full" {
+  if (current <= 0) return "missing"
+
+  const safeTarget =
+    typeof target === "number" && Number.isFinite(target) ? target : null
+  const safeThreshold =
+    typeof threshold === "number" && Number.isFinite(threshold) ? threshold : null
+
+  if (safeTarget !== null && safeTarget > 0 && current >= safeTarget) {
+    return "full"
   }
+
+  if (safeThreshold !== null && current <= safeThreshold) {
+    return "medium"
+  }
+
+  if (safeTarget !== null && safeTarget > 0 && current < safeTarget) {
+    return "medium"
+  }
+
+  return "full"
 }
 
-function getReadinessState(property: PropertyDetail | null) {
+function supplyStateLabel(
+  language: "el" | "en",
+  state: "missing" | "medium" | "full",
+  texts: ReturnType<typeof getTexts>
+) {
+  if (state === "missing") return texts.inline.missing
+  if (state === "medium") return texts.inline.medium
+  return texts.inline.full
+}
+
+function supplyStateBadgeClass(state: "missing" | "medium" | "full") {
+  if (state === "missing") {
+    return "bg-red-50 text-red-700 ring-1 ring-red-200"
+  }
+
+  if (state === "medium") {
+    return "bg-amber-50 text-amber-700 ring-1 ring-amber-200"
+  }
+
+  return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
+}
+
+function getReadinessState(
+  property: PropertyDetail | null,
+  language: "el" | "en",
+  texts: ReturnType<typeof getTexts>
+) {
   if (!property) {
     return {
-      label: "Άγνωστη",
+      label: texts.unknown,
       tone: "bg-slate-100 text-slate-700 ring-1 ring-slate-200",
-      details: "Δεν υπάρχουν διαθέσιμα δεδομένα.",
+      details: texts.noData,
     }
   }
 
-  const openIssues = safeArray(property.issues).filter(
-    (issue) => issue.status === "open"
+  const issues = safeArray(property.issues)
+  const openIssues = issues.filter((issue) =>
+    ["open", "in_progress"].includes((issue.status || "").toLowerCase())
   )
   const criticalIssues = openIssues.filter((issue) =>
     ["high", "critical"].includes((issue.severity || "").toLowerCase())
   )
 
   const openTasks = safeArray(property.tasks).filter((task) =>
-    ["pending", "assigned", "accepted", "in_progress"].includes(task.status)
+    ["pending", "assigned", "accepted", "in_progress"].includes(
+      (task.status || "").toLowerCase()
+    )
   )
 
   const hasPrimaryChecklist = safeArray(property.checklistTemplates).some(
     (template) => template.isPrimary && template.isActive
   )
 
+  const notFullSupplies = safeArray(property.propertySupplies).filter((supply) => {
+    const current = Number(supply.currentStock || 0)
+    const target = supply.targetStock ?? null
+    const threshold = supply.reorderThreshold ?? supply.supplyItem?.minimumStock ?? null
+    return getSupplyStateThree(current, target, threshold) !== "full"
+  })
+
   if (criticalIssues.length > 0) {
     return {
-      label: "Μη έτοιμο",
+      label: texts.notReady,
       tone: "bg-red-50 text-red-700 ring-1 ring-red-200",
-      details: `Υπάρχουν ${criticalIssues.length} κρίσιμα ανοιχτά θέματα.`,
+      details:
+        language === "en"
+          ? `There are ${criticalIssues.length} critical open issues.`
+          : `Υπάρχουν ${criticalIssues.length} κρίσιμα ανοιχτά θέματα.`,
     }
   }
 
-  if (openIssues.length > 0 || openTasks.length > 0 || !hasPrimaryChecklist) {
+  if (
+    openIssues.length > 0 ||
+    openTasks.length > 0 ||
+    !hasPrimaryChecklist ||
+    notFullSupplies.length > 0
+  ) {
     return {
-      label: "Θέλει ενέργειες",
+      label: texts.actionNeeded,
       tone: "bg-amber-50 text-amber-700 ring-1 ring-amber-200",
-      details: `Ανοιχτές εργασίες: ${openTasks.length} · Ανοιχτά θέματα: ${openIssues.length} · Κύρια checklist: ${
-        hasPrimaryChecklist ? "Ναι" : "Όχι"
-      }`,
+      details:
+        language === "en"
+          ? `Open tasks: ${openTasks.length} · Open issues: ${openIssues.length} · Supplies not full: ${notFullSupplies.length} · Primary checklist: ${
+              hasPrimaryChecklist ? "Yes" : "No"
+            }`
+          : `Ανοιχτές εργασίες: ${openTasks.length} · Ανοιχτά θέματα: ${openIssues.length} · Αναλώσιμα μη πλήρη: ${notFullSupplies.length} · Κύρια checklist: ${
+              hasPrimaryChecklist ? "Ναι" : "Όχι"
+            }`,
     }
   }
 
   return {
-    label: "Έτοιμο",
+    label: texts.ready,
     tone: "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200",
-    details: "Δεν υπάρχουν ανοιχτές εκκρεμότητες αυτή τη στιγμή.",
+    details: texts.noPending,
   }
 }
 
-export default function PropertyDetailPage({ params }: PageProps) {
-  const { id } = use(params)
+function Modal({
+  open,
+  title,
+  description,
+  onClose,
+  children,
+  closeLabel,
+}: {
+  open: boolean
+  title: string
+  description?: string
+  onClose: () => void
+  children: ReactNode
+  closeLabel: string
+}) {
+  if (!open) return null
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/50 p-0 sm:items-center sm:p-4">
+      <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:rounded-3xl">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-4 py-4 sm:px-6">
+          <div className="min-w-0">
+            <h2 className="text-lg font-semibold text-slate-900 sm:text-xl">
+              {title}
+            </h2>
+            {description ? (
+              <p className="mt-1 text-sm text-slate-500">{description}</p>
+            ) : null}
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex shrink-0 items-center rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            {closeLabel}
+          </button>
+        </div>
+
+        <div className="overflow-y-auto px-4 py-4 sm:px-6 sm:py-6">{children}</div>
+      </div>
+    </div>
+  )
+}
+
+function MetricCard({
+  label,
+  description,
+  value,
+  active,
+  onClick,
+  tone = "slate",
+}: {
+  label: string
+  description: string
+  value: number
+  active: boolean
+  onClick: () => void
+  tone?: "slate" | "amber" | "emerald" | "red" | "orange"
+}) {
+  const tones = {
+    slate: active
+      ? "border-slate-900 bg-slate-50"
+      : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50",
+    amber: active
+      ? "border-amber-300 bg-amber-50"
+      : "border-slate-200 bg-white hover:border-amber-300 hover:bg-amber-50",
+    emerald: active
+      ? "border-emerald-300 bg-emerald-50"
+      : "border-slate-200 bg-white hover:border-emerald-300 hover:bg-emerald-50",
+    red: active
+      ? "border-red-300 bg-red-50"
+      : "border-slate-200 bg-white hover:border-red-300 hover:bg-red-50",
+    orange: active
+      ? "border-orange-300 bg-orange-50"
+      : "border-slate-200 bg-white hover:border-orange-300 hover:bg-orange-50",
+  }
+
+  const valueTones = {
+    slate: "text-slate-900",
+    amber: "text-amber-700",
+    emerald: "text-emerald-700",
+    red: "text-red-700",
+    orange: "text-orange-700",
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-2xl border p-4 text-left shadow-sm transition sm:p-5 ${tones[tone]}`}
+    >
+      <div className="text-sm font-semibold text-slate-900">{label}</div>
+      <div className="mt-1 text-xs leading-5 text-slate-500">{description}</div>
+      <div className={`mt-4 text-3xl font-bold ${valueTones[tone]}`}>{value}</div>
+    </button>
+  )
+}
+
+function SummaryCard({
+  title,
+  description,
+  onOpen,
+  actionLabel,
+  count,
+}: {
+  title: string
+  description: string
+  onOpen: () => void
+  actionLabel: string
+  count?: number
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <h3 className="text-base font-semibold text-slate-900">{title}</h3>
+            {typeof count === "number" ? (
+              <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700 ring-1 ring-slate-200">
+                {count}
+              </span>
+            ) : null}
+          </div>
+          <p className="mt-1 text-sm leading-6 text-slate-500">{description}</p>
+        </div>
+
+        <button
+          type="button"
+          onClick={onOpen}
+          className="inline-flex shrink-0 items-center rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+        >
+          {actionLabel}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function MiniInfo({
+  label,
+  value,
+}: {
+  label: string
+  value: string
+}) {
+  return (
+    <div className="rounded-xl bg-slate-50 p-3">
+      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+        {label}
+      </div>
+      <div className="mt-1 text-sm text-slate-900">{value}</div>
+    </div>
+  )
+}
+
+export default function PropertyDetailPage() {
+  const params = useParams()
+  const id = Array.isArray(params?.id) ? params.id[0] : params?.id
+  const { language } = useAppLanguage()
+  const texts = getTexts(language)
 
   const [property, setProperty] = useState<PropertyDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [activeMetric, setActiveMetric] = useState<MetricKey | null>("pendingTasks")
+  const [taskFilter, setTaskFilter] = useState<TaskFilterKey>("pending")
+  const [activeModal, setActiveModal] = useState<ModalKey>(null)
 
   useEffect(() => {
     async function loadProperty() {
+      if (!id) return
+
       setLoading(true)
       setError(null)
 
@@ -477,7 +1215,7 @@ export default function PropertyDetailPage({ params }: PageProps) {
           throw new Error("Μη έγκυρη απόκριση από το API ακινήτου.")
         }
 
-        setProperty(normalized)
+        setProperty(normalized as PropertyDetail)
       } catch (err) {
         console.error("Load property detail error:", err)
         setError(
@@ -485,6 +1223,7 @@ export default function PropertyDetailPage({ params }: PageProps) {
             ? err.message
             : "Αποτυχία φόρτωσης σελίδας ακινήτου."
         )
+        setProperty(null)
       } finally {
         setLoading(false)
       }
@@ -493,41 +1232,44 @@ export default function PropertyDetailPage({ params }: PageProps) {
     loadProperty()
   }, [id])
 
-  const metrics = useMemo(() => {
-    const bookings = safeArray(property?.bookings)
-    const tasks = safeArray(property?.tasks)
-    const issues = safeArray(property?.issues)
-    const templates = safeArray(property?.checklistTemplates)
-    const supplies = safeArray(property?.propertySupplies)
+  const bookings = safeArray(property?.bookings)
+  const tasks = safeArray(property?.tasks)
+  const issues = safeArray(property?.issues)
+  const templates = safeArray(property?.checklistTemplates)
+  const supplies = safeArray(property?.propertySupplies)
+  const taskPhotos = safeArray(property?.taskPhotos)
+  const events = safeArray(property?.events)
+  const activityLogs = safeArray(property?.activityLogs)
 
+  const metrics = useMemo(() => {
     const pendingTasks = tasks.filter((task) =>
-      ["pending", "assigned", "accepted", "in_progress"].includes(task.status)
+      ["pending", "assigned", "accepted", "in_progress"].includes(
+        (task.status || "").toLowerCase()
+      )
     ).length
 
     const completedTasks = tasks.filter(
-      (task) => task.status === "completed"
+      (task) => (task.status || "").toLowerCase() === "completed"
     ).length
 
-    const openIssues = issues.filter((issue) => issue.status === "open").length
+    const openIssues = issues.filter((issue) =>
+      ["open", "in_progress"].includes((issue.status || "").toLowerCase())
+    ).length
 
     const criticalIssues = issues.filter((issue) =>
       ["high", "critical"].includes((issue.severity || "").toLowerCase())
     ).length
 
-    const activeTemplates = templates.filter(
-      (template) => template.isActive
-    ).length
+    const activeTemplates = templates.filter((template) => template.isActive).length
 
     const primaryTemplate =
       templates.find((template) => template.isPrimary) || null
 
-    const lowStockCount = supplies.filter((supply) => {
+    const notFullSuppliesCount = supplies.filter((supply) => {
       const current = Number(supply.currentStock || 0)
-      const threshold =
-        supply.reorderThreshold ?? supply.supplyItem?.minimumStock ?? null
-
-      if (threshold === null || threshold === undefined) return false
-      return current <= Number(threshold)
+      const target = supply.targetStock ?? null
+      const threshold = supply.reorderThreshold ?? supply.supplyItem?.minimumStock ?? null
+      return getSupplyStateThree(current, target, threshold) !== "full"
     }).length
 
     return {
@@ -538,16 +1280,141 @@ export default function PropertyDetailPage({ params }: PageProps) {
       criticalIssues,
       activeTemplates,
       primaryTemplate,
-      lowStockCount,
+      notFullSuppliesCount,
     }
-  }, [property])
+  }, [bookings, tasks, issues, templates, supplies])
 
-  const readiness = useMemo(() => getReadinessState(property), [property])
+  const readiness = useMemo(
+    () => getReadinessState(property, language, texts),
+    [property, language, texts]
+  )
+
+  const checklistGeneratedIssues = useMemo(() => {
+    return issues.filter((issue) => {
+      const title = String(issue.title || "").toLowerCase()
+      return (
+        title.startsWith("ζημιά:") ||
+        title.startsWith("βλάβη:") ||
+        title.startsWith("αναλώσιμα:") ||
+        title.startsWith("damage:") ||
+        title.startsWith("repair:") ||
+        title.startsWith("supplies:")
+      )
+    })
+  }, [issues])
+
+  const topTasks = useMemo(() => {
+    const rows = [...tasks]
+
+    const scoreTask = (task: PropertyTask) => {
+      const status = String(task.status || "").toLowerCase()
+      const priority = String(task.priority || "").toLowerCase()
+      const checklistIssues = safeArray(task.checklistRun?.answers).filter(
+        (answer: TaskChecklistAnswer) => Boolean(answer.issueCreated)
+      ).length
+
+      let score = 0
+
+      if (status === "in_progress") score += 100
+      if (status === "accepted") score += 90
+      if (status === "assigned") score += 80
+      if (status === "pending") score += 70
+      if (status === "completed") score += 10
+
+      if (priority === "critical" || priority === "urgent") score += 50
+      if (priority === "high") score += 30
+      if (priority === "medium" || priority === "normal") score += 10
+
+      score += checklistIssues * 20
+
+      return score
+    }
+
+    let filtered = rows
+
+    if (taskFilter === "pending") {
+      filtered = rows.filter((task) =>
+        ["pending", "assigned", "accepted", "in_progress"].includes(
+          String(task.status || "").toLowerCase()
+        )
+      )
+    }
+
+    if (taskFilter === "completed") {
+      filtered = rows.filter(
+        (task) => String(task.status || "").toLowerCase() === "completed"
+      )
+    }
+
+    if (taskFilter === "critical") {
+      filtered = rows.filter((task) => {
+        const priority = String(task.priority || "").toLowerCase()
+        const checklistIssues = safeArray(task.checklistRun?.answers).filter(
+          (answer: TaskChecklistAnswer) => Boolean(answer.issueCreated)
+        ).length
+
+        return (
+          ["critical", "urgent", "high"].includes(priority) ||
+          checklistIssues > 0 ||
+          ["in_progress", "accepted"].includes(String(task.status || "").toLowerCase())
+        )
+      })
+    }
+
+    return filtered.sort((a, b) => scoreTask(b) - scoreTask(a)).slice(0, 6)
+  }, [tasks, taskFilter])
+
+  const supplyRows = useMemo(() => {
+    return supplies.map((supply) => {
+      const current = Number(supply.currentStock || 0)
+      const target = supply.targetStock ?? null
+      const threshold = supply.reorderThreshold ?? supply.supplyItem?.minimumStock ?? null
+      const state = getSupplyStateThree(current, target, threshold)
+
+      return {
+        ...supply,
+        derivedState: state,
+      }
+    })
+  }, [supplies])
+
+  const visibleIssues = useMemo(() => {
+    if (activeMetric === "criticalIssues") {
+      return issues.filter((issue) =>
+        ["high", "critical"].includes((issue.severity || "").toLowerCase())
+      )
+    }
+
+    if (activeMetric === "openIssues") {
+      return issues.filter((issue) =>
+        ["open", "in_progress"].includes((issue.status || "").toLowerCase())
+      )
+    }
+
+    return issues
+  }, [issues, activeMetric])
+
+  const visibleSupplies = useMemo(() => {
+    if (activeMetric === "lowStock") {
+      return supplyRows.filter((supply) => supply.derivedState !== "full")
+    }
+
+    return supplyRows
+  }, [supplyRows, activeMetric])
+
+  function openMetric(metric: MetricKey) {
+    setActiveMetric(metric)
+
+    if (metric === "bookings") setActiveModal("bookings")
+    if (metric === "openIssues" || metric === "criticalIssues") setActiveModal("issues")
+    if (metric === "activeTemplates") setActiveModal("template")
+    if (metric === "lowStock") setActiveModal("supplies")
+  }
 
   if (loading) {
     return (
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="text-sm text-slate-500">Φόρτωση ακινήτου...</div>
+        <div className="text-sm text-slate-500">{texts.loading}</div>
       </div>
     )
   }
@@ -555,602 +1422,739 @@ export default function PropertyDetailPage({ params }: PageProps) {
   if (error || !property) {
     return (
       <div className="rounded-2xl border border-red-200 bg-white p-6 shadow-sm">
-        <h1 className="text-lg font-semibold text-slate-900">
-          Σφάλμα φόρτωσης ακινήτου
-        </h1>
+        <h1 className="text-lg font-semibold text-slate-900">{texts.loadError}</h1>
         <p className="mt-2 text-sm text-red-600">
-          {error || "Δεν βρέθηκαν δεδομένα ακινήτου."}
+          {error || texts.noPropertyData}
         </p>
         <div className="mt-4">
           <Link
             href="/properties"
             className="inline-flex rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
           >
-            Επιστροφή στα ακίνητα
+            {texts.back}
           </Link>
         </div>
       </div>
     )
   }
 
-  const bookings = safeArray(property.bookings)
-  const tasks = safeArray(property.tasks)
-  const issues = safeArray(property.issues)
-  const templates = safeArray(property.checklistTemplates)
-  const supplies = safeArray(property.propertySupplies)
-  const taskPhotos = safeArray(property.taskPhotos)
-  const events = safeArray(property.events)
-  const activityLogs = safeArray(property.activityLogs)
-
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Link
-              href="/properties"
-              className="text-sm font-medium text-slate-500 hover:text-slate-900"
-            >
-              Ακίνητα
-            </Link>
-            <span className="text-slate-300">/</span>
-            <span className="text-sm text-slate-600">{property.code}</span>
+    <>
+      <div className="space-y-6">
+        <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+          <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <Link
+                  href="/properties"
+                  className="font-medium text-slate-500 hover:text-slate-900"
+                >
+                  {texts.back}
+                </Link>
+                <span className="text-slate-300">/</span>
+                <span className="text-slate-600">{property.code}</span>
+              </div>
+
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
+                  {property.name}
+                </h1>
+
+                <span
+                  className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${badgeClasses(
+                    property.status
+                  )}`}
+                >
+                  {propertyStatusLabel(language, property.status)}
+                </span>
+
+                <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200">
+                  {typeLabel(language, property.type)}
+                </span>
+
+                <span
+                  className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${readiness.tone}`}
+                >
+                  {texts.readiness}: {readiness.label}
+                </span>
+              </div>
+
+              <p className="mt-3 text-sm leading-6 text-slate-600">
+                {property.address}, {property.city}, {property.region}, {property.postalCode},{" "}
+                {property.country}
+              </p>
+
+              <p className="mt-2 text-sm leading-6 text-slate-500">
+                {readiness.details}
+              </p>
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveModal("property")}
+                  className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  {texts.propertyDetailsButton}
+                </button>
+
+                <Link
+                  href={`/property-checklists/${property.id}`}
+                  className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  {texts.manageChecklists}
+                </Link>
+
+                <Link
+                  href={`/properties/${property.id}/supplies`}
+                  className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  {texts.suppliesCenter}
+                </Link>
+
+                <Link
+                  href={`/properties/${property.id}/tasks`}
+                  className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
+                >
+                  {texts.propertyTasks}
+                </Link>
+              </div>
+            </div>
           </div>
+        </section>
 
-          <div className="mt-2 flex flex-wrap items-center gap-3">
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900">
-              {property.name}
-            </h1>
-
-            <span
-              className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${badgeClasses(
-                property.status
-              )}`}
-            >
-              {propertyStatusLabel(property.status)}
-            </span>
-
-            <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200">
-              {typeLabel(property.type)}
-            </span>
-
-            <span
-              className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${readiness.tone}`}
-            >
-              Readiness: {readiness.label}
-            </span>
-          </div>
-
-          <p className="mt-2 text-sm text-slate-600">
-            {property.address}, {property.city}, {property.region},{" "}
-            {property.postalCode}, {property.country}
-          </p>
-
-          <p className="mt-2 text-sm text-slate-500">{readiness.details}</p>
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          <Link
-            href={`/property-checklists/${property.id}`}
-            className="inline-flex items-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-          >
-            Διαχείριση checklists
-          </Link>
-
-          <Link
-            href="/tasks"
-            className="inline-flex items-center rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
-          >
-            Εργασίες
-          </Link>
-        </div>
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-7">
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="text-sm text-slate-500">Κρατήσεις</div>
-          <div className="mt-2 text-3xl font-bold text-slate-900">
-            {metrics.bookings}
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="text-sm text-slate-500">Εκκρεμείς εργασίες</div>
-          <div className="mt-2 text-3xl font-bold text-amber-700">
-            {metrics.pendingTasks}
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="text-sm text-slate-500">Ολοκληρωμένες εργασίες</div>
-          <div className="mt-2 text-3xl font-bold text-emerald-700">
-            {metrics.completedTasks}
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="text-sm text-slate-500">Ανοιχτά θέματα</div>
-          <div className="mt-2 text-3xl font-bold text-red-700">
-            {metrics.openIssues}
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="text-sm text-slate-500">Κρίσιμα θέματα</div>
-          <div className="mt-2 text-3xl font-bold text-red-700">
-            {metrics.criticalIssues}
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="text-sm text-slate-500">Ενεργά checklist</div>
-          <div className="mt-2 text-3xl font-bold text-slate-900">
-            {metrics.activeTemplates}
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="text-sm text-slate-500">Χαμηλό απόθεμα</div>
-          <div className="mt-2 text-3xl font-bold text-orange-700">
-            {metrics.lowStockCount}
-          </div>
-        </div>
-      </div>
-
-      <div className="grid gap-6 xl:grid-cols-3">
-        <div className="xl:col-span-2 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-semibold text-slate-900">
-            Στοιχεία ακινήτου
-          </h2>
-
-          <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Κωδικός
-              </div>
-              <div className="mt-1 text-sm text-slate-900">{property.code}</div>
+              <h2 className="text-lg font-semibold text-slate-900">
+                {texts.overviewTitle}
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                {texts.overviewSubtitle}
+              </p>
+              <p className="mt-1 text-xs text-slate-400">
+                {texts.dynamicInfoNote}
+              </p>
             </div>
 
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Όνομα
-              </div>
-              <div className="mt-1 text-sm text-slate-900">{property.name}</div>
-            </div>
-
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Τύπος
-              </div>
-              <div className="mt-1 text-sm text-slate-900">
-                {typeLabel(property.type)}
-              </div>
-            </div>
-
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Κατάσταση
-              </div>
-              <div className="mt-1 text-sm text-slate-900">
-                {propertyStatusLabel(property.status)}
-              </div>
-            </div>
-
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Υπνοδωμάτια
-              </div>
-              <div className="mt-1 text-sm text-slate-900">
-                {property.bedrooms}
-              </div>
-            </div>
-
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Μπάνια
-              </div>
-              <div className="mt-1 text-sm text-slate-900">
-                {property.bathrooms}
-              </div>
-            </div>
-
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Μέγιστοι επισκέπτες
-              </div>
-              <div className="mt-1 text-sm text-slate-900">
-                {property.maxGuests}
-              </div>
-            </div>
-
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Δημιουργία
-              </div>
-              <div className="mt-1 text-sm text-slate-900">
-                {formatDateTime(property.createdAt)}
-              </div>
-            </div>
-
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Τελευταία ενημέρωση
-              </div>
-              <div className="mt-1 text-sm text-slate-900">
-                {formatDateTime(property.updatedAt)}
-              </div>
+            <div className="text-sm text-slate-500">
+              {texts.descriptionChooseAction}
             </div>
           </div>
 
-          <div className="mt-6 grid gap-4 md:grid-cols-2">
+          <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
+            <MetricCard
+              label={texts.metrics.bookings}
+              description={texts.cardDescriptions.bookings}
+              value={metrics.bookings}
+              active={activeMetric === "bookings"}
+              onClick={() => openMetric("bookings")}
+              tone="slate"
+            />
+
+            <MetricCard
+              label={texts.metrics.pendingTasks}
+              description={texts.cardDescriptions.pendingTasks}
+              value={metrics.pendingTasks}
+              active={activeMetric === "pendingTasks"}
+              onClick={() => setActiveMetric("pendingTasks")}
+              tone="amber"
+            />
+
+            <MetricCard
+              label={texts.metrics.completedTasks}
+              description={texts.cardDescriptions.completedTasks}
+              value={metrics.completedTasks}
+              active={activeMetric === "completedTasks"}
+              onClick={() => setActiveMetric("completedTasks")}
+              tone="emerald"
+            />
+
+            <MetricCard
+              label={texts.metrics.openIssues}
+              description={texts.cardDescriptions.openIssues}
+              value={metrics.openIssues}
+              active={activeMetric === "openIssues"}
+              onClick={() => openMetric("openIssues")}
+              tone="red"
+            />
+
+            <MetricCard
+              label={texts.metrics.criticalIssues}
+              description={texts.cardDescriptions.criticalIssues}
+              value={metrics.criticalIssues}
+              active={activeMetric === "criticalIssues"}
+              onClick={() => openMetric("criticalIssues")}
+              tone="red"
+            />
+
+            <MetricCard
+              label={texts.metrics.activeTemplates}
+              description={texts.cardDescriptions.activeTemplates}
+              value={metrics.activeTemplates}
+              active={activeMetric === "activeTemplates"}
+              onClick={() => openMetric("activeTemplates")}
+              tone="slate"
+            />
+
+            <MetricCard
+              label={texts.metrics.lowStock}
+              description={texts.cardDescriptions.lowStock}
+              value={metrics.notFullSuppliesCount}
+              active={activeMetric === "lowStock"}
+              onClick={() => openMetric("lowStock")}
+              tone="orange"
+            />
+          </div>
+        </section>
+
+        <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Διεύθυνση
-              </div>
-              <div className="mt-1 text-sm text-slate-900">{property.address}</div>
+              <h2 className="text-xl font-semibold text-slate-900">
+                {texts.tasksSectionTopTitle}
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                {texts.tasksSectionTopSubtitle}
+              </p>
             </div>
 
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Πόλη / Περιοχή / ΤΚ
-              </div>
-              <div className="mt-1 text-sm text-slate-900">
-                {property.city} / {property.region} / {property.postalCode}
-              </div>
+            <div className="flex flex-wrap gap-2">
+              {(
+                [
+                  { key: "pending", label: texts.taskFilters.pending },
+                  { key: "critical", label: texts.taskFilters.critical },
+                  { key: "completed", label: texts.taskFilters.completed },
+                  { key: "all", label: texts.taskFilters.all },
+                ] as Array<{ key: TaskFilterKey; label: string }>
+              ).map((filter) => (
+                <button
+                  key={filter.key}
+                  type="button"
+                  onClick={() => setTaskFilter(filter.key)}
+                  className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
+                    taskFilter === filter.key
+                      ? "bg-slate-900 text-white"
+                      : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                  }`}
+                >
+                  {filter.label}
+                </button>
+              ))}
             </div>
           </div>
 
-          <div className="mt-6">
-            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Σημειώσεις ακινήτου
-            </div>
-            <div className="mt-1 rounded-xl bg-slate-50 p-4 text-sm text-slate-700">
-              {property.notes?.trim() ? property.notes : "Δεν υπάρχουν σημειώσεις."}
-            </div>
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-semibold text-slate-900">
-            Προεπιλεγμένος συνεργάτης
-          </h2>
-
-          {property.defaultPartner ? (
-            <div className="mt-5 space-y-3">
-              <div>
-                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Όνομα
-                </div>
-                <div className="mt-1 text-sm font-medium text-slate-900">
-                  {property.defaultPartner.name}
-                </div>
-              </div>
-
-              <div>
-                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Κωδικός
-                </div>
-                <div className="mt-1 text-sm text-slate-900">
-                  {property.defaultPartner.code}
-                </div>
-              </div>
-
-              <div>
-                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Email
-                </div>
-                <div className="mt-1 text-sm text-slate-900">
-                  {property.defaultPartner.email}
-                </div>
-              </div>
-
-              <div>
-                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Τηλέφωνο
-                </div>
-                <div className="mt-1 text-sm text-slate-900">
-                  {property.defaultPartner.phone || "—"}
-                </div>
-              </div>
-
-              <div>
-                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Ειδικότητα
-                </div>
-                <div className="mt-1 text-sm text-slate-900">
-                  {property.defaultPartner.specialty}
-                </div>
-              </div>
-
-              <div>
-                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Κατάσταση
-                </div>
-                <div className="mt-1 text-sm text-slate-900">
-                  {property.defaultPartner.status}
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="mt-5 rounded-xl bg-slate-50 p-4 text-sm text-slate-500">
-              Δεν έχει οριστεί προεπιλεγμένος συνεργάτης.
-            </div>
-          )}
-
-          <div className="mt-6 border-t border-slate-200 pt-6">
-            <h3 className="text-sm font-semibold text-slate-900">
-              Κύριο πρότυπο checklist
-            </h3>
-
-            {metrics.primaryTemplate ? (
-              <div className="mt-3 rounded-xl bg-slate-50 p-4">
-                <div className="font-medium text-slate-900">
-                  {metrics.primaryTemplate.title}
-                </div>
-                <div className="mt-1 text-sm text-slate-600">
-                  Τύπος: {metrics.primaryTemplate.templateType}
-                </div>
+          <div className="mt-5">
+            {topTasks.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-6 text-sm text-slate-500">
+                {texts.noItems}
               </div>
             ) : (
-              <div className="mt-3 rounded-xl bg-slate-50 p-4 text-sm text-slate-500">
-                Δεν έχει οριστεί κύριο πρότυπο checklist.
+              <div className="grid gap-4 xl:grid-cols-2">
+                {topTasks.map((task) => {
+                  const latestAssignment = safeArray(task.assignments)[0] || null
+                  const checklistIssuesCount = safeArray(task.checklistRun?.answers).filter(
+                    (answer: TaskChecklistAnswer) => Boolean(answer.issueCreated)
+                  ).length
+
+                  return (
+                    <div
+                      key={task.id}
+                      className="rounded-2xl border border-slate-200 p-4"
+                    >
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <div className="font-semibold text-slate-900">
+                              {task.title}
+                            </div>
+
+                            <span
+                              className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${badgeClasses(
+                                task.status
+                              )}`}
+                            >
+                              {taskStatusLabel(language, task.status)}
+                            </span>
+
+                            <span
+                              className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${priorityBadgeClasses(
+                                task.priority
+                              )}`}
+                            >
+                              {task.priority || "—"}
+                            </span>
+
+                            <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200">
+                              {task.taskType}
+                            </span>
+                          </div>
+
+                          {task.description ? (
+                            <div className="mt-2 text-sm text-slate-700">
+                              {task.description}
+                            </div>
+                          ) : null}
+                        </div>
+
+                        <Link
+                          href={`/tasks/${task.id}`}
+                          className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                        >
+                          {texts.viewTask}
+                        </Link>
+                      </div>
+
+                      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                        <MiniInfo
+                          label={texts.labels.scheduledDate}
+                          value={formatDate(task.scheduledDate, texts.locale)}
+                        />
+                        <MiniInfo
+                          label={texts.labels.assignment}
+                          value={latestAssignment?.partner?.name || "—"}
+                        />
+                        <MiniInfo
+                          label={texts.labels.checklist}
+                          value={task.checklistRun?.template?.title || "—"}
+                        />
+                        <MiniInfo
+                          label={texts.inline.checklistIssues}
+                          value={String(checklistIssuesCount)}
+                        />
+                      </div>
+
+                      <div className="mt-3 rounded-xl bg-slate-50 p-3 text-sm text-slate-700">
+                        {task.requiresChecklist ? "Checklist " : ""}
+                        {task.requiresPhotos ? "Photos " : ""}
+                        {task.requiresApproval ? "Approval " : ""}
+                        {!task.requiresChecklist &&
+                        !task.requiresPhotos &&
+                        !task.requiresApproval
+                          ? texts.inline.noSpecialRequirements
+                          : ""}
+                      </div>
+
+                      {task.resultNotes ? (
+                        <div className="mt-3 text-sm text-slate-600">
+                          {texts.labels.result}: {task.resultNotes}
+                        </div>
+                      ) : null}
+                    </div>
+                  )
+                })}
               </div>
             )}
           </div>
+
+          <div className="mt-5">
+            <Link
+              href={`/properties/${property.id}/tasks`}
+              className="inline-flex items-center rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
+            >
+              {texts.openTaskHistory}
+            </Link>
+          </div>
+        </section>
+
+        <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
+          <SummaryCard
+            title={texts.sections.property}
+            description={texts.sectionDescriptions.property}
+            onOpen={() => setActiveModal("property")}
+            actionLabel={texts.seeDetails}
+          />
+
+          <SummaryCard
+            title={texts.sections.partner}
+            description={texts.sectionDescriptions.partner}
+            onOpen={() => setActiveModal("partner")}
+            actionLabel={texts.seeDetails}
+          />
+
+          <SummaryCard
+            title={texts.sections.template}
+            description={texts.sectionDescriptions.template}
+            onOpen={() => setActiveModal("template")}
+            actionLabel={texts.seeDetails}
+            count={metrics.primaryTemplate ? 1 : 0}
+          />
+
+          <SummaryCard
+            title={texts.sections.bookings}
+            description={texts.sectionDescriptions.bookings}
+            onOpen={() => setActiveModal("bookings")}
+            actionLabel={texts.seeDetails}
+            count={bookings.length}
+          />
+
+          <SummaryCard
+            title={texts.sections.issues}
+            description={texts.sectionDescriptions.issues}
+            onOpen={() => setActiveModal("issues")}
+            actionLabel={texts.seeDetails}
+            count={issues.length}
+          />
+
+          <SummaryCard
+            title={texts.sections.supplies}
+            description={texts.sectionDescriptions.supplies}
+            onOpen={() => setActiveModal("supplies")}
+            actionLabel={texts.seeDetails}
+            count={supplies.length}
+          />
+
+          <SummaryCard
+            title={texts.sections.photos}
+            description={texts.sectionDescriptions.photos}
+            onOpen={() => setActiveModal("photos")}
+            actionLabel={texts.seeDetails}
+            count={taskPhotos.length}
+          />
+
+          <SummaryCard
+            title={texts.sections.events}
+            description={texts.sectionDescriptions.events}
+            onOpen={() => setActiveModal("events")}
+            actionLabel={texts.seeDetails}
+            count={events.length + activityLogs.length}
+          />
         </div>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-2">
-        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-          <div className="border-b border-slate-200 px-5 py-4">
-            <h2 className="text-lg font-semibold text-slate-900">Κρατήσεις</h2>
+      <Modal
+        open={activeModal === "property"}
+        title={texts.sections.property}
+        description={texts.sectionDescriptions.property}
+        onClose={() => setActiveModal(null)}
+        closeLabel={texts.modalClose}
+      >
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <MiniInfo label={texts.labels.code} value={property.code} />
+          <MiniInfo label={texts.labels.type} value={typeLabel(language, property.type)} />
+          <MiniInfo
+            label={texts.labels.status}
+            value={propertyStatusLabel(language, property.status)}
+          />
+          <MiniInfo label={texts.labels.bedrooms} value={String(property.bedrooms)} />
+          <MiniInfo label={texts.labels.bathrooms} value={String(property.bathrooms)} />
+          <MiniInfo label={texts.labels.maxGuests} value={String(property.maxGuests)} />
+          <MiniInfo
+            label={texts.labels.createdAt}
+            value={formatDateTime(property.createdAt, texts.locale)}
+          />
+          <MiniInfo
+            label={texts.labels.updatedAt}
+            value={formatDateTime(property.updatedAt, texts.locale)}
+          />
+        </div>
+
+        <div className="mt-6 grid gap-4 md:grid-cols-2">
+          <MiniInfo label={texts.labels.address} value={property.address} />
+          <MiniInfo
+            label={texts.labels.cityRegionPostal}
+            value={`${property.city} / ${property.region} / ${property.postalCode}`}
+          />
+        </div>
+
+        <div className="mt-6">
+          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            {texts.labels.notes}
           </div>
-
-          {bookings.length === 0 ? (
-            <div className="p-5 text-sm text-slate-500">
-              Δεν υπάρχουν κρατήσεις για αυτό το ακίνητο.
-            </div>
-          ) : (
-            <div className="divide-y divide-slate-100">
-              {bookings.map((booking) => (
-                <div key={booking.id} className="p-5">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <div className="font-medium text-slate-900">
-                        {booking.guestName || "Χωρίς όνομα επισκέπτη"}
-                      </div>
-                      <div className="mt-1 text-sm text-slate-500">
-                        {booking.sourcePlatform}
-                      </div>
-                    </div>
-
-                    <span
-                      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${badgeClasses(
-                        booking.status
-                      )}`}
-                    >
-                      {bookingStatusLabel(booking.status)}
-                    </span>
-                  </div>
-
-                  <div className="mt-3 grid gap-3 md:grid-cols-2">
-                    <div className="text-sm text-slate-700">
-                      Check-in: {formatDate(booking.checkInDate)}{" "}
-                      {booking.checkInTime ? `· ${booking.checkInTime}` : ""}
-                    </div>
-                    <div className="text-sm text-slate-700">
-                      Check-out: {formatDate(booking.checkOutDate)}{" "}
-                      {booking.checkOutTime ? `· ${booking.checkOutTime}` : ""}
-                    </div>
-                  </div>
-
-                  <div className="mt-2 text-sm text-slate-500">
-                    Επισκέπτες: {booking.adults ?? 0} ενήλικες,{" "}
-                    {booking.children ?? 0} παιδιά, {booking.infants ?? 0} βρέφη
-                  </div>
-
-                  {booking.notes ? (
-                    <div className="mt-2 text-sm text-slate-600">
-                      Σημειώσεις: {booking.notes}
-                    </div>
-                  ) : null}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-          <div className="border-b border-slate-200 px-5 py-4">
-            <h2 className="text-lg font-semibold text-slate-900">
-              Θέματα / Βλάβες
-            </h2>
+          <div className="mt-1 rounded-xl bg-slate-50 p-4 text-sm text-slate-700">
+            {property.notes?.trim() ? property.notes : texts.noNotes}
           </div>
-
-          {issues.length === 0 ? (
-            <div className="p-5 text-sm text-slate-500">
-              Δεν υπάρχουν θέματα για αυτό το ακίνητο.
-            </div>
-          ) : (
-            <div className="divide-y divide-slate-100">
-              {issues.map((issue) => (
-                <div key={issue.id} className="p-5">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <div className="font-medium text-slate-900">
-                        {issue.title}
-                      </div>
-                      <div className="mt-1 text-sm text-slate-500">
-                        {issue.issueType}
-                      </div>
-                    </div>
-
-                    <div className="flex gap-2">
-                      <span
-                        className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${badgeClasses(
-                          issue.severity
-                        )}`}
-                      >
-                        {severityLabel(issue.severity)}
-                      </span>
-
-                      <span
-                        className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${badgeClasses(
-                          issue.status
-                        )}`}
-                      >
-                        {issueStatusLabel(issue.status)}
-                      </span>
-                    </div>
-                  </div>
-
-                  {issue.description ? (
-                    <div className="mt-3 text-sm text-slate-700">
-                      {issue.description}
-                    </div>
-                  ) : null}
-
-                  <div className="mt-3 text-xs text-slate-500">
-                    Δημιουργία: {formatDateTime(issue.createdAt)}
-                  </div>
-
-                  {issue.task ? (
-                    <div className="mt-2 text-xs text-slate-500">
-                      Συνδεδεμένη εργασία: {issue.task.title}
-                    </div>
-                  ) : null}
-
-                  {issue.resolutionNotes ? (
-                    <div className="mt-2 text-sm text-slate-600">
-                      Επίλυση: {issue.resolutionNotes}
-                    </div>
-                  ) : null}
-                </div>
-              ))}
-            </div>
-          )}
         </div>
-      </div>
+      </Modal>
 
-      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-        <div className="border-b border-slate-200 px-5 py-4">
-          <h2 className="text-lg font-semibold text-slate-900">Εργασίες</h2>
-        </div>
-
-        {tasks.length === 0 ? (
-          <div className="p-5 text-sm text-slate-500">
-            Δεν υπάρχουν εργασίες για αυτό το ακίνητο.
+      <Modal
+        open={activeModal === "partner"}
+        title={texts.sections.partner}
+        description={texts.sectionDescriptions.partner}
+        onClose={() => setActiveModal(null)}
+        closeLabel={texts.modalClose}
+      >
+        {property.defaultPartner ? (
+          <div className="grid gap-4 md:grid-cols-2">
+            <MiniInfo label={texts.labels.name} value={property.defaultPartner.name} />
+            <MiniInfo label={texts.labels.code} value={property.defaultPartner.code} />
+            <MiniInfo label={texts.labels.email} value={property.defaultPartner.email} />
+            <MiniInfo
+              label={texts.labels.phone}
+              value={property.defaultPartner.phone || "—"}
+            />
+            <MiniInfo
+              label={texts.labels.specialty}
+              value={property.defaultPartner.specialty}
+            />
+            <MiniInfo
+              label={texts.labels.status}
+              value={propertyStatusLabel(language, property.defaultPartner.status)}
+            />
           </div>
         ) : (
-          <div className="divide-y divide-slate-100">
-            {tasks.map((task) => {
-              const assignments = safeArray(task.assignments)
-              const latestAssignment = assignments[0] || null
+          <div className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">
+            {texts.noDefaultPartner}
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={activeModal === "template"}
+        title={texts.sections.template}
+        description={texts.sectionDescriptions.template}
+        onClose={() => setActiveModal(null)}
+        closeLabel={texts.modalClose}
+      >
+        {metrics.primaryTemplate ? (
+          <div className="space-y-4">
+            <div className="grid gap-4 md:grid-cols-3">
+              <MiniInfo
+                label={texts.labels.name}
+                value={metrics.primaryTemplate.title}
+              />
+              <MiniInfo
+                label={texts.labels.templateType}
+                value={metrics.primaryTemplate.templateType}
+              />
+              <MiniInfo
+                label={texts.labels.itemCount}
+                value={String(safeArray(metrics.primaryTemplate.items).length)}
+              />
+            </div>
+
+            {metrics.primaryTemplate.description ? (
+              <div className="rounded-xl bg-slate-50 p-4 text-sm text-slate-700">
+                {metrics.primaryTemplate.description}
+              </div>
+            ) : null}
+
+            <div className="space-y-3">
+              {safeArray(metrics.primaryTemplate.items).map((item) => (
+                <div key={item.id} className="rounded-xl border border-slate-200 p-4">
+                  <div className="font-medium text-slate-900">{item.label}</div>
+                  <div className="mt-1 text-sm text-slate-500">
+                    {(item.category || "inspection") + " · " + item.itemType}
+                  </div>
+                  {item.description ? (
+                    <div className="mt-2 text-sm text-slate-700">{item.description}</div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">
+            {texts.noPrimaryTemplate}
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={activeModal === "bookings"}
+        title={texts.sections.bookings}
+        description={texts.sectionDescriptions.bookings}
+        onClose={() => setActiveModal(null)}
+        closeLabel={texts.modalClose}
+      >
+        {bookings.length === 0 ? (
+          <div className="text-sm text-slate-500">{texts.noItems}</div>
+        ) : (
+          <div className="space-y-4">
+            {bookings.map((booking) => (
+              <div
+                key={booking.id}
+                className="rounded-2xl border border-slate-200 p-4"
+              >
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="font-medium text-slate-900">
+                        {booking.guestName || "—"}
+                      </div>
+                      <span
+                        className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${badgeClasses(
+                          booking.status
+                        )}`}
+                      >
+                        {bookingStatusLabel(language, booking.status)}
+                      </span>
+                    </div>
+
+                    <div className="mt-1 text-sm text-slate-500">
+                      {texts.labels.source}: {booking.sourcePlatform}
+                    </div>
+
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                      <MiniInfo
+                        label={texts.labels.checkIn}
+                        value={formatDate(booking.checkInDate, texts.locale)}
+                      />
+                      <MiniInfo
+                        label={texts.labels.checkOut}
+                        value={formatDate(booking.checkOutDate, texts.locale)}
+                      />
+                      <MiniInfo
+                        label={texts.labels.guest}
+                        value={booking.guestName || "—"}
+                      />
+                      <MiniInfo
+                        label={texts.labels.status}
+                        value={bookingStatusLabel(language, booking.status)}
+                      />
+                    </div>
+                  </div>
+
+                  <Link
+                    href={`/bookings/${booking.id}`}
+                    className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    {texts.viewBooking}
+                  </Link>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={activeModal === "issues"}
+        title={texts.sections.issues}
+        description={texts.sectionDescriptions.issues}
+        onClose={() => setActiveModal(null)}
+        closeLabel={texts.modalClose}
+      >
+        {visibleIssues.length === 0 ? (
+          <div className="text-sm text-slate-500">{texts.noItems}</div>
+        ) : (
+          <div className="space-y-4">
+            {visibleIssues.map((issue) => {
+              const looksChecklistGenerated = checklistGeneratedIssues.some(
+                (row) => row.id === issue.id
+              )
 
               return (
-                <div key={task.id} className="p-5">
-                  <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-                    <div>
+                <div
+                  key={issue.id}
+                  className="rounded-2xl border border-slate-200 p-4"
+                >
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <div className="font-semibold text-slate-900">
-                          {task.title}
-                        </div>
+                        <div className="font-medium text-slate-900">{issue.title}</div>
 
                         <span
                           className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${badgeClasses(
-                            task.status
+                            issue.status
                           )}`}
                         >
-                          {taskStatusLabel(task.status)}
+                          {issueStatusLabel(language, issue.status)}
+                        </span>
+
+                        <span
+                          className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${badgeClasses(
+                            issue.severity
+                          )}`}
+                        >
+                          {severityLabel(language, issue.severity)}
                         </span>
 
                         <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200">
-                          {task.taskType}
+                          {issueTypeLabel(language, issue.issueType)}
                         </span>
 
-                        <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200">
-                          Προτεραιότητα: {task.priority}
-                        </span>
+                        {looksChecklistGenerated ? (
+                          <span className="inline-flex rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700 ring-1 ring-blue-200">
+                            {texts.createdFromChecklist}
+                          </span>
+                        ) : null}
                       </div>
 
-                      {task.description ? (
-                        <div className="mt-2 text-sm text-slate-700">
-                          {task.description}
+                      {issue.description ? (
+                        <div className="mt-2 whitespace-pre-line text-sm text-slate-700">
+                          {issue.description}
                         </div>
                       ) : null}
                     </div>
 
-                    <div className="text-sm text-slate-500">
-                      Προγραμματισμός: {formatDate(task.scheduledDate)}
-                      {task.scheduledStartTime ? ` · ${task.scheduledStartTime}` : ""}
-                      {task.scheduledEndTime ? ` - ${task.scheduledEndTime}` : ""}
+                    <Link
+                      href={`/issues/${issue.id}`}
+                      className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      {texts.viewIssue}
+                    </Link>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={activeModal === "supplies"}
+        title={texts.sections.supplies}
+        description={texts.sectionDescriptions.supplies}
+        onClose={() => setActiveModal(null)}
+        closeLabel={texts.modalClose}
+      >
+        <div className="mb-4 rounded-xl bg-slate-50 p-4 text-xs text-slate-500">
+          {texts.inline.translatedDynamicDataHint}
+        </div>
+
+        {visibleSupplies.length === 0 ? (
+          <div className="text-sm text-slate-500">{texts.noItems}</div>
+        ) : (
+          <div className="space-y-4">
+            {visibleSupplies.map((supply) => {
+              const current = Number(supply.currentStock || 0)
+              const target = supply.targetStock ?? null
+              const threshold =
+                supply.reorderThreshold ?? supply.supplyItem?.minimumStock ?? null
+              const state = supply.derivedState
+
+              return (
+                <div
+                  key={supply.id}
+                  className="rounded-2xl border border-slate-200 p-4"
+                >
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="min-w-0">
+                      <div className="font-medium text-slate-900">
+                        {supply.supplyItem?.name || "—"}
+                      </div>
+                      <div className="mt-1 text-sm text-slate-500">
+                        {(supply.supplyItem?.category || "—") +
+                          " · " +
+                          (supply.supplyItem?.unit || "—")}
+                      </div>
                     </div>
+
+                    <span
+                      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${supplyStateBadgeClass(
+                        state
+                      )}`}
+                    >
+                      {supplyStateLabel(language, state, texts)}
+                    </span>
                   </div>
 
-                  <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                    <div className="rounded-xl bg-slate-50 p-3">
-                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        Ανάθεση
-                      </div>
-                      <div className="mt-1 text-sm text-slate-900">
-                        {latestAssignment?.partner?.name || "Δεν έχει ανατεθεί"}
-                      </div>
-                      <div className="mt-1 text-xs text-slate-500">
-                        {latestAssignment
-                          ? assignmentStatusLabel(latestAssignment.status)
-                          : "—"}
-                      </div>
-                    </div>
-
-                    <div className="rounded-xl bg-slate-50 p-3">
-                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        Checklist
-                      </div>
-                      <div className="mt-1 text-sm text-slate-900">
-                        {task.checklistRun?.template?.title || "Δεν υπάρχει"}
-                      </div>
-                      <div className="mt-1 text-xs text-slate-500">
-                        {task.checklistRun
-                          ? checklistStatusLabel(task.checklistRun.status)
-                          : "—"}
-                      </div>
-                    </div>
-
-                    <div className="rounded-xl bg-slate-50 p-3">
-                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        Απαιτήσεις
-                      </div>
-                      <div className="mt-1 text-sm text-slate-900">
-                        {task.requiresChecklist ? "Checklist " : ""}
-                        {task.requiresPhotos ? "Φωτογραφίες " : ""}
-                        {task.requiresApproval ? "Έγκριση " : ""}
-                        {!task.requiresChecklist &&
-                        !task.requiresPhotos &&
-                        !task.requiresApproval
-                          ? "Καμία ειδική απαίτηση"
-                          : ""}
-                      </div>
-                    </div>
-
-                    <div className="rounded-xl bg-slate-50 p-3">
-                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        Ολοκλήρωση
-                      </div>
-                      <div className="mt-1 text-sm text-slate-900">
-                        {formatDateTime(task.completedAt)}
-                      </div>
-                    </div>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <MiniInfo label={texts.labels.current} value={String(current)} />
+                    <MiniInfo label={texts.labels.target} value={String(target ?? "—")} />
+                    <MiniInfo
+                      label={texts.labels.threshold}
+                      value={String(threshold ?? "—")}
+                    />
+                    <MiniInfo
+                      label={texts.labels.lastUpdate}
+                      value={formatDateTime(supply.updatedAt, texts.locale)}
+                    />
                   </div>
 
-                  {task.notes ? (
-                    <div className="mt-3 text-sm text-slate-600">
-                      Σημειώσεις: {task.notes}
-                    </div>
-                  ) : null}
-
-                  {task.resultNotes ? (
-                    <div className="mt-2 text-sm text-slate-600">
-                      Αποτέλεσμα: {task.resultNotes}
+                  {supply.notes ? (
+                    <div className="mt-3 rounded-xl bg-slate-50 p-3 text-sm text-slate-700">
+                      {supply.notes}
                     </div>
                   ) : null}
                 </div>
@@ -1158,231 +2162,102 @@ export default function PropertyDetailPage({ params }: PageProps) {
             })}
           </div>
         )}
-      </div>
+      </Modal>
 
-      <div className="grid gap-6 xl:grid-cols-2">
-        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-          <div className="border-b border-slate-200 px-5 py-4">
-            <h2 className="text-lg font-semibold text-slate-900">
-              Πρότυπα checklist
-            </h2>
-          </div>
-
-          {templates.length === 0 ? (
-            <div className="p-5 text-sm text-slate-500">
-              Δεν υπάρχουν πρότυπα checklist για αυτό το ακίνητο.
-            </div>
-          ) : (
-            <div className="divide-y divide-slate-100">
-              {templates.map((template) => (
-                <div key={template.id} className="p-5">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <div className="font-medium text-slate-900">
-                        {template.title}
-                      </div>
-                      <div className="mt-1 text-sm text-slate-500">
-                        Τύπος: {template.templateType}
-                      </div>
-                    </div>
-
-                    <div className="flex gap-2">
-                      {template.isPrimary ? (
-                        <span className="inline-flex rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200">
-                          Κύριο
-                        </span>
-                      ) : null}
-
-                      <span
-                        className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${badgeClasses(
-                          template.isActive ? "active" : "inactive"
-                        )}`}
-                      >
-                        {template.isActive ? "Ενεργό" : "Ανενεργό"}
-                      </span>
-                    </div>
-                  </div>
-
-                  {template.description ? (
-                    <div className="mt-3 text-sm text-slate-700">
-                      {template.description}
-                    </div>
-                  ) : null}
-
-                  <div className="mt-3 text-sm text-slate-600">
-                    Στοιχεία checklist: {safeArray(template.items).length}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-          <div className="border-b border-slate-200 px-5 py-4">
-            <h2 className="text-lg font-semibold text-slate-900">Αναλώσιμα</h2>
-          </div>
-
-          {supplies.length === 0 ? (
-            <div className="p-5 text-sm text-slate-500">
-              Δεν υπάρχουν αναλώσιμα για αυτό το ακίνητο.
-            </div>
-          ) : (
-            <div className="divide-y divide-slate-100">
-              {supplies.map((supply) => {
-                const threshold =
-                  supply.reorderThreshold ??
-                  supply.supplyItem?.minimumStock ??
-                  null
-
-                const lowStock =
-                  threshold !== null &&
-                  threshold !== undefined &&
-                  Number(supply.currentStock || 0) <= Number(threshold)
-
-                return (
-                  <div key={supply.id} className="p-5">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <div className="font-medium text-slate-900">
-                          {supply.supplyItem?.name || "Άγνωστο είδος"}
-                        </div>
-                        <div className="mt-1 text-sm text-slate-500">
-                          {supply.supplyItem?.category || "—"} ·{" "}
-                          {supply.supplyItem?.unit || "—"}
-                        </div>
-                      </div>
-
-                      <span
-                        className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
-                          lowStock
-                            ? "bg-red-50 text-red-700 ring-1 ring-red-200"
-                            : "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
-                        }`}
-                      >
-                        {lowStock ? "Χαμηλό απόθεμα" : "Επαρκές"}
-                      </span>
-                    </div>
-
-                    <div className="mt-3 grid gap-3 md:grid-cols-3">
-                      <div className="text-sm text-slate-700">
-                        Τρέχον: {supply.currentStock}
-                      </div>
-                      <div className="text-sm text-slate-700">
-                        Στόχος: {supply.targetStock ?? "—"}
-                      </div>
-                      <div className="text-sm text-slate-700">
-                        Όριο παραγγελίας: {threshold ?? "—"}
-                      </div>
-                    </div>
-
-                    {supply.notes ? (
-                      <div className="mt-2 text-sm text-slate-600">
-                        {supply.notes}
-                      </div>
-                    ) : null}
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="grid gap-6 xl:grid-cols-2">
-        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-          <div className="border-b border-slate-200 px-5 py-4">
-            <h2 className="text-lg font-semibold text-slate-900">
-              Φωτογραφική τεκμηρίωση
-            </h2>
-          </div>
-
-          {taskPhotos.length === 0 ? (
-            <div className="p-5 text-sm text-slate-500">
-              Δεν υπάρχουν φωτογραφίες για αυτό το ακίνητο.
-            </div>
-          ) : (
-            <div className="divide-y divide-slate-100">
-              {taskPhotos.slice(0, 12).map((photo) => (
-                <div key={photo.id} className="p-5">
-                  <div className="font-medium text-slate-900">
-                    {photo.fileName || "Αρχείο φωτογραφίας"}
-                  </div>
-                  <div className="mt-1 text-sm text-slate-500">
-                    Κατηγορία: {photo.category}
-                  </div>
-                  <div className="mt-1 text-sm text-slate-500 break-all">
-                    {photo.fileUrl}
-                  </div>
-                  <div className="mt-1 text-sm text-slate-500">
-                    Ανέβηκε: {formatDateTime(photo.uploadedAt)}
-                  </div>
-                  {photo.caption ? (
-                    <div className="mt-2 text-sm text-slate-700">
-                      {photo.caption}
-                    </div>
-                  ) : null}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-          <div className="border-b border-slate-200 px-5 py-4">
-            <h2 className="text-lg font-semibold text-slate-900">
-              Συμβάντα & ιστορικό
-            </h2>
-          </div>
-
-          <div className="max-h-[520px] overflow-auto">
-            {events.length === 0 && activityLogs.length === 0 ? (
-              <div className="p-5 text-sm text-slate-500">
-                Δεν υπάρχει ιστορικό για αυτό το ακίνητο.
-              </div>
-            ) : (
-              <div className="divide-y divide-slate-100">
-                {events.map((event) => (
-                  <div key={`event-${event.id}`} className="p-5">
-                    <div className="font-medium text-slate-900">{event.title}</div>
-                    <div className="mt-1 text-sm text-slate-500">
-                      {event.eventType} · {event.status}
-                    </div>
-                    <div className="mt-1 text-xs text-slate-500">
-                      {formatDateTime(event.startAt)}{" "}
-                      {event.endAt ? `— ${formatDateTime(event.endAt)}` : ""}
-                    </div>
-                    {event.description ? (
-                      <div className="mt-2 text-sm text-slate-700">
-                        {event.description}
-                      </div>
-                    ) : null}
-                  </div>
-                ))}
-
-                {activityLogs.map((log) => (
-                  <div key={`log-${log.id}`} className="p-5">
+      <Modal
+        open={activeModal === "photos"}
+        title={texts.sections.photos}
+        description={texts.sectionDescriptions.photos}
+        onClose={() => setActiveModal(null)}
+        closeLabel={texts.modalClose}
+      >
+        {taskPhotos.length === 0 ? (
+          <div className="text-sm text-slate-500">{texts.noItems}</div>
+        ) : (
+          <div className="space-y-4">
+            {taskPhotos.map((photo) => (
+              <div
+                key={photo.id}
+                className="rounded-2xl border border-slate-200 p-4"
+              >
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="min-w-0">
                     <div className="font-medium text-slate-900">
-                      {log.action}
+                      {photo.fileName || "Photo file"}
                     </div>
                     <div className="mt-1 text-sm text-slate-500">
-                      {log.entityType} · {log.actorName || log.actorType || "Σύστημα"}
+                      {texts.labels.category}: {photo.category}
                     </div>
-                    <div className="mt-1 text-xs text-slate-500">
-                      {formatDateTime(log.createdAt)}
-                    </div>
-                    {log.message ? (
-                      <div className="mt-2 text-sm text-slate-700">
-                        {log.message}
-                      </div>
+                    {photo.caption ? (
+                      <div className="mt-2 text-sm text-slate-700">{photo.caption}</div>
                     ) : null}
                   </div>
-                ))}
+
+                  <a
+                    href={photo.fileUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    {texts.openFile}
+                  </a>
+                </div>
               </div>
-            )}
+            ))}
           </div>
-        </div>
-      </div>
-    </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={activeModal === "events"}
+        title={texts.sections.events}
+        description={texts.sectionDescriptions.events}
+        onClose={() => setActiveModal(null)}
+        closeLabel={texts.modalClose}
+      >
+        {events.length === 0 && activityLogs.length === 0 ? (
+          <div className="text-sm text-slate-500">{texts.inline.noActivityLogs}</div>
+        ) : (
+          <div className="space-y-4">
+            {events.map((event) => (
+              <div
+                key={`event-${event.id}`}
+                className="rounded-2xl border border-slate-200 p-4"
+              >
+                <div className="font-medium text-slate-900">{event.title}</div>
+                <div className="mt-1 text-sm text-slate-500">
+                  {event.eventType} · {event.status}
+                </div>
+                <div className="mt-1 text-xs text-slate-500">
+                  {formatDateTime(event.startAt, texts.locale)}
+                  {event.endAt ? ` — ${formatDateTime(event.endAt, texts.locale)}` : ""}
+                </div>
+                {event.description ? (
+                  <div className="mt-2 text-sm text-slate-700">{event.description}</div>
+                ) : null}
+              </div>
+            ))}
+
+            {activityLogs.map((log) => (
+              <div
+                key={`log-${log.id}`}
+                className="rounded-2xl border border-slate-200 p-4"
+              >
+                <div className="font-medium text-slate-900">{log.action}</div>
+                <div className="mt-1 text-sm text-slate-500">
+                  {log.entityType} · {log.actorName || log.actorType || "Σύστημα"}
+                </div>
+                <div className="mt-1 text-xs text-slate-500">
+                  {formatDateTime(log.createdAt, texts.locale)}
+                </div>
+                {log.message ? (
+                  <div className="mt-2 text-sm text-slate-700">{log.message}</div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        )}
+      </Modal>
+    </>
   )
 }

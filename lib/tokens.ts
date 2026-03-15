@@ -1,11 +1,12 @@
 import crypto from "crypto"
 
 export function createSecureToken(length = 32) {
-  return crypto.randomBytes(length).toString("hex")
+  const bytes = Math.max(16, Math.ceil(length))
+  return crypto.randomBytes(bytes).toString("hex")
 }
 
-export function createExpiryDate(hours = 48) {
-  const date = new Date()
-  date.setHours(date.getHours() + hours)
-  return date
+export function createExpiryDate(hours = 72) {
+  const expiresAt = new Date()
+  expiresAt.setHours(expiresAt.getHours() + hours)
+  return expiresAt
 }

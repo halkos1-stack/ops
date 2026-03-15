@@ -33,9 +33,36 @@ export async function GET() {
         createdAt: "desc",
       },
       include: {
-        property: true,
-        task: true,
-        event: true,
+        property: {
+          select: {
+            id: true,
+            code: true,
+            name: true,
+            address: true,
+            city: true,
+            region: true,
+            status: true,
+          },
+        },
+        task: {
+          select: {
+            id: true,
+            title: true,
+            status: true,
+            taskType: true,
+            scheduledDate: true,
+          },
+        },
+        booking: {
+          select: {
+            id: true,
+            guestName: true,
+            sourcePlatform: true,
+            checkInDate: true,
+            checkOutDate: true,
+            status: true,
+          },
+        },
       },
     })
 
@@ -60,13 +87,17 @@ export async function POST(req: NextRequest) {
     const { auth } = access
     const body = await req.json()
 
+    const issueType = toStringValue(body.issueType, "general")
     const title = toStringValue(body.title)
     const description = toNullableString(body.description)
-    const status = toNullableString(body.status) ?? "OPEN"
-    const severity = toNullableString(body.severity)
+    const status = toNullableString(body.status) ?? "open"
+    const severity = toNullableString(body.severity) ?? "medium"
+    const reportedBy = toNullableString(body.reportedBy)
+    const resolutionNotes = toNullableString(body.resolutionNotes)
+
     const propertyId = toNullableString(body.propertyId)
     const taskId = toNullableString(body.taskId)
-    const eventId = toNullableString(body.eventId)
+    const bookingId = toNullableString(body.bookingId)
     const requestedOrganizationId = toNullableString(body.organizationId)
 
     let organizationId: string | null = null
@@ -91,12 +122,18 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    if (!propertyId && !taskId && !eventId) {
+    if (!propertyId && !taskId && !bookingId) {
       return NextResponse.json(
-        { error: "Το ζήτημα πρέπει να συνδέεται με ακίνητο, εργασία ή συμβάν." },
+        {
+          error:
+            "Το ζήτημα πρέπει να συνδέεται με ακίνητο, εργασία ή κράτηση.",
+        },
         { status: 400 }
       )
     }
+
+    let resolvedPropertyId: string | null = propertyId
+    let resolvedBookingId: string | null = bookingId
 
     if (propertyId) {
       const property = await prisma.property.findUnique({
@@ -135,6 +172,8 @@ export async function POST(req: NextRequest) {
         select: {
           id: true,
           organizationId: true,
+          propertyId: true,
+          bookingId: true,
         },
       })
 
@@ -158,54 +197,104 @@ export async function POST(req: NextRequest) {
           { status: 400 }
         )
       }
+
+      if (!resolvedPropertyId) {
+        resolvedPropertyId = task.propertyId
+      }
+
+      if (!resolvedBookingId && task.bookingId) {
+        resolvedBookingId = task.bookingId
+      }
     }
 
-    if (eventId) {
-      const event = await prisma.event.findUnique({
-        where: { id: eventId },
+    if (bookingId) {
+      const booking = await prisma.booking.findUnique({
+        where: { id: bookingId },
         select: {
           id: true,
           organizationId: true,
+          propertyId: true,
         },
       })
 
-      if (!event) {
+      if (!booking) {
         return NextResponse.json(
-          { error: "Το συμβάν δεν βρέθηκε." },
+          { error: "Η κράτηση δεν βρέθηκε." },
           { status: 404 }
         )
       }
 
-      if (!canAccessOrganization(auth, event.organizationId)) {
+      if (!canAccessOrganization(auth, booking.organizationId)) {
         return NextResponse.json(
-          { error: "Δεν έχετε πρόσβαση στο συγκεκριμένο συμβάν." },
+          { error: "Δεν έχετε πρόσβαση στη συγκεκριμένη κράτηση." },
           { status: 403 }
         )
       }
 
-      if (event.organizationId !== organizationId) {
+      if (booking.organizationId !== organizationId) {
         return NextResponse.json(
-          { error: "Το συμβάν ανήκει σε διαφορετικό οργανισμό." },
+          { error: "Η κράτηση ανήκει σε διαφορετικό οργανισμό." },
           { status: 400 }
         )
       }
+
+      if (!resolvedPropertyId) {
+        resolvedPropertyId = booking.propertyId
+      }
+    }
+
+    if (!resolvedPropertyId) {
+      return NextResponse.json(
+        { error: "Δεν μπόρεσε να προσδιοριστεί το ακίνητο του ζητήματος." },
+        { status: 400 }
+      )
     }
 
     const issue = await prisma.issue.create({
       data: {
         organizationId,
+        propertyId: resolvedPropertyId,
+        taskId,
+        bookingId: resolvedBookingId,
+        issueType,
         title,
         description,
-        status,
         severity,
-        propertyId,
-        taskId,
-        eventId,
+        status,
+        reportedBy,
+        resolutionNotes,
       },
       include: {
-        property: true,
-        task: true,
-        event: true,
+        property: {
+          select: {
+            id: true,
+            code: true,
+            name: true,
+            address: true,
+            city: true,
+            region: true,
+            status: true,
+          },
+        },
+        task: {
+          select: {
+            id: true,
+            title: true,
+            status: true,
+            taskType: true,
+            scheduledDate: true,
+          },
+        },
+        booking: {
+          select: {
+            id: true,
+            guestName: true,
+            sourcePlatform: true,
+            checkInDate: true,
+            checkOutDate: true,
+            status: true,
+          },
+        },
       },
     })
 

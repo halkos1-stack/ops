@@ -12,15 +12,15 @@ export default async function HomePage() {
     redirect("/super-admin/organizations")
   }
 
-  if (auth.organizationRole === "PARTNER") {
-    redirect("/partner/tasks")
-  }
-
   if (
     auth.organizationRole === "MANAGER" ||
     auth.organizationRole === "ORG_ADMIN"
   ) {
     redirect("/properties")
+  }
+
+  if (auth.organizationRole === "PARTNER") {
+    redirect("/login")
   }
 
   redirect("/login")

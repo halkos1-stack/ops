@@ -36,6 +36,166 @@ function buildTenantWhere(auth: AuthContext) {
   }
 }
 
+async function findPrimaryChecklistTemplate(
+  organizationId: string,
+  propertyId: string
+) {
+  return prisma.propertyChecklistTemplate.findFirst({
+    where: {
+      organizationId,
+      propertyId,
+      isPrimary: true,
+      isActive: true,
+    },
+    select: {
+      id: true,
+      title: true,
+      templateType: true,
+      isPrimary: true,
+      isActive: true,
+    },
+    orderBy: {
+      updatedAt: "desc",
+    },
+  })
+}
+
+async function syncTaskChecklistRun(params: {
+  taskId: string
+  organizationId: string
+  propertyId: string
+  requiresChecklist: boolean
+}) {
+  const { taskId, organizationId, propertyId, requiresChecklist } = params
+
+  const existingRun = await prisma.taskChecklistRun.findUnique({
+    where: {
+      taskId,
+    },
+    select: {
+      id: true,
+      templateId: true,
+      status: true,
+    },
+  })
+
+  if (!requiresChecklist) {
+    if (existingRun) {
+      await prisma.taskChecklistRun.delete({
+        where: {
+          taskId,
+        },
+      })
+    }
+
+    return null
+  }
+
+  const primaryTemplate = await findPrimaryChecklistTemplate(
+    organizationId,
+    propertyId
+  )
+
+  if (!primaryTemplate) {
+    if (existingRun) {
+      await prisma.taskChecklistRun.delete({
+        where: {
+          taskId,
+        },
+      })
+    }
+
+    return null
+  }
+
+  if (!existingRun) {
+    return prisma.taskChecklistRun.create({
+      data: {
+        taskId,
+        templateId: primaryTemplate.id,
+        status: "pending",
+      },
+      include: {
+        template: {
+          select: {
+            id: true,
+            title: true,
+            templateType: true,
+            isPrimary: true,
+          },
+        },
+        answers: {
+          select: {
+            id: true,
+            issueCreated: true,
+            createdAt: true,
+          },
+        },
+      },
+    })
+  }
+
+  if (existingRun.templateId !== primaryTemplate.id) {
+    await prisma.taskChecklistAnswer.deleteMany({
+      where: {
+        checklistRunId: existingRun.id,
+      },
+    })
+
+    return prisma.taskChecklistRun.update({
+      where: {
+        taskId,
+      },
+      data: {
+        templateId: primaryTemplate.id,
+        status: "pending",
+        startedAt: null,
+        completedAt: null,
+      },
+      include: {
+        template: {
+          select: {
+            id: true,
+            title: true,
+            templateType: true,
+            isPrimary: true,
+          },
+        },
+        answers: {
+          select: {
+            id: true,
+            issueCreated: true,
+            createdAt: true,
+          },
+        },
+      },
+    })
+  }
+
+  return prisma.taskChecklistRun.findUnique({
+    where: {
+      taskId,
+    },
+    include: {
+      template: {
+        select: {
+          id: true,
+          title: true,
+          templateType: true,
+          isPrimary: true,
+        },
+      },
+      answers: {
+        select: {
+          id: true,
+          issueCreated: true,
+          createdAt: true,
+        },
+      },
+    },
+  })
+}
+
 export async function GET(req: NextRequest) {
   try {
     const auth = getMockAuthFromRequest(req)
@@ -159,8 +319,7 @@ export async function POST(req: NextRequest) {
     const auth = getMockAuthFromRequest(req)
     const body = await req.json()
 
-    const organizationId =
-      body.organizationId || auth.organizationId || null
+    const organizationId = body.organizationId || auth.organizationId || null
 
     if (!organizationId) {
       return NextResponse.json(
@@ -211,6 +370,10 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    const requiresPhotos = Boolean(body.requiresPhotos)
+    const requiresChecklist = Boolean(body.requiresChecklist)
+    const requiresApproval = Boolean(body.requiresApproval)
+
     const property = await prisma.property.findFirst({
       where: {
         id: propertyId,
@@ -248,10 +411,23 @@ export async function POST(req: NextRequest) {
           ? String(body.scheduledEndTime)
           : null,
         dueDate: body.dueDate ? new Date(body.dueDate) : null,
-        requiresPhotos: Boolean(body.requiresPhotos),
-        requiresChecklist: Boolean(body.requiresChecklist),
-        requiresApproval: Boolean(body.requiresApproval),
+        requiresPhotos,
+        requiresChecklist,
+        requiresApproval,
         notes: body.notes ? String(body.notes) : null,
+      },
+    })
+
+    await syncTaskChecklistRun({
+      taskId: task.id,
+      organizationId,
+      propertyId,
+      requiresChecklist,
+    })
+
+    const fullTask = await prisma.task.findUnique({
+      where: {
+        id: task.id,
       },
       include: {
         property: true,
@@ -260,14 +436,32 @@ export async function POST(req: NextRequest) {
             partner: true,
           },
         },
-        checklistRun: true,
+        checklistRun: {
+          include: {
+            template: {
+              select: {
+                id: true,
+                title: true,
+                templateType: true,
+                isPrimary: true,
+              },
+            },
+            answers: {
+              select: {
+                id: true,
+                issueCreated: true,
+                createdAt: true,
+              },
+            },
+          },
+        },
       },
     })
 
     return NextResponse.json(
       {
         success: true,
-        task,
+        task: fullTask,
       },
       { status: 201 }
     )

@@ -1,6 +1,23 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 
+function toNullableString(value: unknown) {
+  if (value === undefined || value === null) return null
+  const text = String(value).trim()
+  return text === "" ? null : text
+}
+
+function toStringValue(value: unknown, fallback = "") {
+  if (value === undefined || value === null) return fallback
+  return String(value).trim()
+}
+
+function toNumberValue(value: unknown, fallback = 0) {
+  if (value === undefined || value === null || value === "") return fallback
+  const num = Number(value)
+  return Number.isFinite(num) ? num : fallback
+}
+
 export async function GET() {
   try {
     const bookings = await prisma.booking.findMany({
@@ -27,28 +44,21 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
 
-    const propertyId = body.propertyId
-    const sourcePlatform = body.sourcePlatform?.trim()
-    const externalBookingId = body.externalBookingId?.trim() || null
-    const guestName = body.guestName?.trim() || null
-    const guestPhone = body.guestPhone?.trim() || null
-    const guestEmail = body.guestEmail?.trim() || null
-    const checkInDate = body.checkInDate
-    const checkOutDate = body.checkOutDate
-    const checkInTime = body.checkInTime?.trim() || null
-    const checkOutTime = body.checkOutTime?.trim() || null
-    const adults =
-      body.adults !== "" && body.adults !== undefined ? Number(body.adults) : 1
-    const children =
-      body.children !== "" && body.children !== undefined
-        ? Number(body.children)
-        : 0
-    const infants =
-      body.infants !== "" && body.infants !== undefined
-        ? Number(body.infants)
-        : 0
-    const status = body.status?.trim() || "confirmed"
-    const notes = body.notes?.trim() || null
+    const propertyId = toStringValue(body.propertyId)
+    const sourcePlatform = toStringValue(body.sourcePlatform)
+    const externalBookingId = toNullableString(body.externalBookingId)
+    const guestName = toNullableString(body.guestName)
+    const guestPhone = toNullableString(body.guestPhone)
+    const guestEmail = toNullableString(body.guestEmail)
+    const checkInDate = toStringValue(body.checkInDate)
+    const checkOutDate = toStringValue(body.checkOutDate)
+    const checkInTime = toNullableString(body.checkInTime)
+    const checkOutTime = toNullableString(body.checkOutTime)
+    const adults = toNumberValue(body.adults, 1)
+    const children = toNumberValue(body.children, 0)
+    const infants = toNumberValue(body.infants, 0)
+    const status = toStringValue(body.status, "confirmed")
+    const notes = toNullableString(body.notes)
 
     if (!propertyId || !sourcePlatform || !checkInDate || !checkOutDate) {
       return NextResponse.json(
@@ -64,6 +74,9 @@ export async function POST(req: NextRequest) {
       where: {
         id: propertyId,
       },
+      select: {
+        id: true,
+      },
     })
 
     if (!property) {
@@ -75,7 +88,11 @@ export async function POST(req: NextRequest) {
 
     const booking = await prisma.booking.create({
       data: {
-        propertyId,
+        property: {
+          connect: {
+            id: propertyId,
+          },
+        },
         sourcePlatform,
         externalBookingId,
         guestName,

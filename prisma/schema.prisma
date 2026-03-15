@@ -30,9 +30,9 @@ model User {
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
 
-  accounts    Account[]
-  sessions    Session[]
-  memberships Membership[]
+  accounts         Account[]
+  sessions         Session[]
+  memberships      Membership[]
   activationTokens UserActivationToken[]
 }
 
@@ -164,11 +164,12 @@ model Partner {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  organization      Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  defaultProperties Property[]       @relation("PropertyDefaultPartner")
-  taskAssignments   TaskAssignment[]
-  activityLogs      ActivityLog[]
-  events            Event[]
+  organization       Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  defaultProperties  Property[]                 @relation("PropertyDefaultPartner")
+  taskAssignments    TaskAssignment[]
+  activityLogs       ActivityLog[]
+  events             Event[]
+  portalAccessTokens PartnerPortalAccessToken[]
 
   @@unique([organizationId, code])
   @@unique([organizationId, email])
@@ -176,6 +177,24 @@ model Partner {
   @@index([status])
   @@index([specialty])
   @@index([name])
+}
+
+model PartnerPortalAccessToken {
+  id         String    @id @default(cuid())
+  partnerId  String
+  token      String    @unique
+  isActive   Boolean   @default(true)
+  expiresAt  DateTime?
+  lastUsedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  partner Partner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  @@index([partnerId])
+  @@index([token])
+  @@index([isActive])
+  @@index([expiresAt])
 }
 
 model Task {
@@ -287,19 +306,20 @@ model Issue {
 }
 
 model SupplyItem {
-  id           String   @id @default(cuid())
-  code         String   @unique
-  name         String
-  category     String
-  unit         String
-  minimumStock Float?   @default(0)
-  isActive     Boolean  @default(true)
-  notes        String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                     String   @id @default(cuid())
+  code                   String   @unique
+  name                   String
+  category               String
+  unit                   String
+  minimumStock           Float?   @default(0)
+  isActive               Boolean  @default(true)
+  notes                  String?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
 
-  propertySupplies PropertySupply[]
-  consumptions     SupplyConsumption[]
+  propertySupplies       PropertySupply[]
+  consumptions           SupplyConsumption[]
+  checklistTemplateItems PropertyChecklistTemplateItem[]
 
   @@index([category])
   @@index([isActive])
@@ -388,25 +408,37 @@ model PropertyChecklistTemplate {
 }
 
 model PropertyChecklistTemplateItem {
-  id               String   @id @default(cuid())
-  templateId       String
-  label            String
-  description      String?
-  itemType         String
-  isRequired       Boolean  @default(true)
-  sortOrder        Int
-  category         String?  @default("inspection")
-  requiresPhoto    Boolean  @default(false)
-  opensIssueOnFail Boolean  @default(false)
-  optionsText      String?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id                  String   @id @default(cuid())
+  templateId          String
+  label               String
+  description         String?
+  itemType            String
+  isRequired          Boolean  @default(true)
+  sortOrder           Int
+  category            String?  @default("inspection")
+  requiresPhoto       Boolean  @default(false)
+  opensIssueOnFail    Boolean  @default(false)
+  optionsText         String?
 
-  template PropertyChecklistTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
-  answers  TaskChecklistAnswer[]
+  issueTypeOnFail     String?  @default("repair")
+  issueSeverityOnFail String?  @default("medium")
+  failureValuesText   String?
+
+  linkedSupplyItemId  String?
+  supplyUpdateMode    String   @default("none")
+  supplyQuantity      Float?
+
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  template   PropertyChecklistTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  answers    TaskChecklistAnswer[]
+  supplyItem SupplyItem?               @relation(fields: [linkedSupplyItemId], references: [id], onDelete: SetNull)
 
   @@index([templateId])
   @@index([templateId, sortOrder])
+  @@index([linkedSupplyItemId])
+  @@index([supplyUpdateMode])
 }
 
 model TaskChecklistRun {
@@ -579,13 +611,14 @@ model VerificationToken {
 
   @@id([identifier, token])
 }
+
 model UserActivationToken {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   userId    String
-  token     String   @unique
+  token     String    @unique
   expiresAt DateTime
   usedAt    DateTime?
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 

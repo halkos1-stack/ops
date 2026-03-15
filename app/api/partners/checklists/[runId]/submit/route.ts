@@ -13,9 +13,12 @@ type RouteContext = {
 
 type AnswerInput = {
   templateItemId?: unknown
-  value?: unknown
+  valueBoolean?: unknown
+  valueText?: unknown
+  valueNumber?: unknown
+  valueSelect?: unknown
   notes?: unknown
-  status?: unknown
+  photoUrls?: unknown
 }
 
 function toNullableString(value: unknown) {
@@ -24,14 +27,15 @@ function toNullableString(value: unknown) {
   return text === "" ? null : text
 }
 
-function normalizeStatus(value: unknown) {
-  const text = String(value ?? "").trim().toUpperCase()
+function toNullableNumber(value: unknown) {
+  if (value === undefined || value === null || value === "") return null
+  const num = Number(value)
+  return Number.isFinite(num) ? num : null
+}
 
-  if (text === "OK") return "OK"
-  if (text === "WARNING") return "WARNING"
-  if (text === "FAIL") return "FAIL"
-
-  return "OK"
+function normalizePhotoUrls(value: unknown) {
+  if (!Array.isArray(value)) return []
+  return value.map((item) => String(item || "").trim()).filter(Boolean)
 }
 
 function normalizeAnswers(input: unknown) {
@@ -40,24 +44,57 @@ function normalizeAnswers(input: unknown) {
   return input
     .map((item) => {
       const row = (item ?? {}) as AnswerInput
-
       const templateItemId = toNullableString(row.templateItemId)
-      const value = toNullableString(row.value)
-      const notes = toNullableString(row.notes)
-      const status = normalizeStatus(row.status)
 
-      if (!templateItemId) {
-        return null
-      }
+      if (!templateItemId) return null
 
       return {
         templateItemId,
-        value,
-        notes,
-        status,
+        valueBoolean:
+          typeof row.valueBoolean === "boolean" ? row.valueBoolean : null,
+        valueText: toNullableString(row.valueText),
+        valueNumber: toNullableNumber(row.valueNumber),
+        valueSelect: toNullableString(row.valueSelect),
+        notes: toNullableString(row.notes),
+        photoUrls: normalizePhotoUrls(row.photoUrls),
       }
     })
     .filter((item): item is NonNullable<typeof item> => item !== null)
+}
+
+function hasRequiredValue(itemType: string, answer?: ReturnType<typeof normalizeAnswers>[number]) {
+  if (!answer) return false
+
+  const normalized = String(itemType || "").trim().toLowerCase()
+
+  if (
+    normalized === "boolean" ||
+    normalized === "yes_no" ||
+    normalized === "pass_fail" ||
+    normalized === "checkbox"
+  ) {
+    return typeof answer.valueBoolean === "boolean"
+  }
+
+  if (normalized === "number" || normalized === "numeric") {
+    return typeof answer.valueNumber === "number" && Number.isFinite(answer.valueNumber)
+  }
+
+  if (
+    normalized === "select" ||
+    normalized === "dropdown" ||
+    normalized === "choice" ||
+    normalized === "option" ||
+    normalized === "options"
+  ) {
+    return Boolean(answer.valueSelect)
+  }
+
+  if (normalized === "photo") {
+    return answer.photoUrls.length > 0
+  }
+
+  return Boolean(answer.valueText)
 }
 
 export async function POST(req: NextRequest, context: RouteContext) {
@@ -90,13 +127,12 @@ export async function POST(req: NextRequest, context: RouteContext) {
       )
     }
 
-    const startedAt = body.startedAt ? new Date(body.startedAt) : undefined
-    const completedAt = body.completedAt ? new Date(body.completedAt) : new Date()
-
     const existingRun = await prisma.taskChecklistRun.findFirst({
       where: {
         id: runId,
-        organizationId: auth.organizationId,
+        task: {
+          organizationId: auth.organizationId,
+        },
       },
       include: {
         template: {
@@ -108,10 +144,11 @@ export async function POST(req: NextRequest, context: RouteContext) {
             },
           },
         },
+        answers: true,
         task: {
           select: {
             id: true,
-            organizationId: true,
+            status: true,
           },
         },
       },
@@ -121,13 +158,6 @@ export async function POST(req: NextRequest, context: RouteContext) {
       return NextResponse.json(
         { error: "Το checklist run δεν βρέθηκε." },
         { status: 404 }
-      )
-    }
-
-    if (!existingRun.template) {
-      return NextResponse.json(
-        { error: "Το checklist run δεν συνδέεται με πρότυπο checklist." },
-        { status: 400 }
       )
     }
 
@@ -150,13 +180,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
         (submitted) => submitted.templateItemId === item.id
       )
 
-      if (!answer) return true
-
-      const hasValue =
-        (answer.value !== null && answer.value !== "") ||
-        (answer.notes !== null && answer.notes !== "")
-
-      return !hasValue
+      return !hasRequiredValue(item.itemType, answer)
     })
 
     if (missingRequiredItems.length > 0) {
@@ -172,50 +196,72 @@ export async function POST(req: NextRequest, context: RouteContext) {
       )
     }
 
-    const answersByTemplateItemId = new Map(
+    const submittedMap = new Map(
       submittedAnswers.map((answer) => [answer.templateItemId, answer])
     )
 
     const result = await prisma.$transaction(async (tx) => {
-      await tx.taskChecklistAnswer.deleteMany({
-        where: {
-          runId,
-        },
-      })
+      for (const item of templateItems) {
+        const submitted = submittedMap.get(item.id)
+        const existing = existingRun.answers.find((row) => row.templateItemId === item.id)
 
-      const createdAnswers = templateItems
-        .map((item) => {
-          const submitted = answersByTemplateItemId.get(item.id)
-
-          if (!submitted) return null
-
-          return {
-            organizationId: auth.organizationId,
-            runId,
-            templateItemId: item.id,
-            itemLabel: item.label,
-            value: submitted.value,
-            notes: submitted.notes,
-            status: submitted.status,
+        if (!submitted) {
+          if (existing) {
+            await tx.taskChecklistAnswer.delete({
+              where: { id: existing.id },
+            })
           }
-        })
-        .filter((row): row is NonNullable<typeof row> => row !== null)
+          continue
+        }
 
-      if (createdAnswers.length > 0) {
-        await tx.taskChecklistAnswer.createMany({
-          data: createdAnswers,
-        })
+        const data = {
+          valueBoolean: submitted.valueBoolean,
+          valueText: submitted.valueText,
+          valueNumber: submitted.valueNumber,
+          valueSelect: submitted.valueSelect,
+          notes: submitted.notes,
+          photoUrls: submitted.photoUrls,
+        }
+
+        if (existing) {
+          await tx.taskChecklistAnswer.update({
+            where: { id: existing.id },
+            data,
+          })
+        } else {
+          await tx.taskChecklistAnswer.create({
+            data: {
+              checklistRunId: runId,
+              templateItemId: item.id,
+              ...data,
+            },
+          })
+        }
       }
 
-      const updatedRun = await tx.taskChecklistRun.update({
+      await tx.taskChecklistRun.update({
         where: {
           id: runId,
         },
         data: {
-          status: "COMPLETED",
-          startedAt,
-          completedAt,
+          status: "completed",
+          startedAt: body.startedAt ? new Date(body.startedAt) : new Date(),
+          completedAt: body.completedAt ? new Date(body.completedAt) : new Date(),
         },
+      })
+
+      await tx.task.update({
+        where: {
+          id: existingRun.task.id,
+        },
+        data: {
+          status: "completed",
+          completedAt: new Date(),
+        },
+      })
+
+      return tx.taskChecklistRun.findUnique({
+        where: { id: runId },
         include: {
           template: {
             include: {
@@ -230,17 +276,6 @@ export async function POST(req: NextRequest, context: RouteContext) {
           task: true,
         },
       })
-
-      await tx.task.update({
-        where: {
-          id: existingRun.task.id,
-        },
-        data: {
-          status: "COMPLETED",
-        },
-      })
-
-      return updatedRun
     })
 
     return NextResponse.json(result)

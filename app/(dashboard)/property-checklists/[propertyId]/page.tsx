@@ -1,304 +1,626 @@
 "use client"
 
 import Link from "next/link"
-import { useEffect, useMemo, useState } from "react"
-import { useParams } from "next/navigation"
+import { use, useEffect, useMemo, useState } from "react"
 
-type Property = {
-  id: string
-  code: string
-  name: string
-  address: string
-  city: string
-  region: string
-  postalCode: string
-  country: string
-  type: string
-  status: string
-}
+type Language = "el" | "en"
+type TemplateFilter = "all" | "primary" | "active" | "inactive"
 
-type ChecklistItem = {
+type PageParams = Promise<{
+  propertyId: string
+}>
+
+type TemplateItem = {
   id: string
   label: string
-  description?: string | null
+  description: string | null
   itemType: string
   isRequired: boolean
   sortOrder: number
-  category?: string | null
-  requiresPhoto?: boolean
-  opensIssueOnFail?: boolean
-  optionsText?: string | null
+  category: string | null
+  requiresPhoto: boolean
+  opensIssueOnFail: boolean
+  optionsText: string | null
 }
 
 type ChecklistTemplate = {
   id: string
-  propertyId: string
   title: string
-  description?: string | null
+  description: string | null
   templateType: string
   isPrimary: boolean
   isActive: boolean
   createdAt?: string
   updatedAt?: string
-  items?: ChecklistItem[]
+  items: TemplateItem[]
 }
 
-type ChecklistApiResponse = {
-  templates: ChecklistTemplate[]
-  primaryTemplate: ChecklistTemplate | null
+type PropertyInfo = {
+  id: string
+  code: string
+  name: string
+  address: string
 }
 
-type NewItem = {
-  localId: string
+type PropertyChecklistResponse = {
+  property?: Partial<PropertyInfo> | null
+  templates?: unknown
+  primaryTemplate?: unknown
+}
+
+type NewItemDraft = {
   label: string
   description: string
   itemType: string
-  isRequired: boolean
-  sortOrder: number
   category: string
+  isRequired: boolean
   requiresPhoto: boolean
   opensIssueOnFail: boolean
-  optionsText: string
+  options: string[]
 }
 
-function cls(...classes: Array<string | false | null | undefined>) {
+const texts = {
+  el: {
+    pageEyebrow: "Πρότυπα checklist ακινήτου",
+    pageTitleFallback: "Checklist ακινήτου",
+    pageSubtitle:
+      "Ανά ακίνητο επιτρέπονται πολλά πρότυπα checklist, αλλά μόνο ένα είναι το κύριο πρότυπο της βασικής ροής.",
+    backToChecklists: "Επιστροφή στα checklists",
+    backToProperty: "Επιστροφή στο ακίνητο",
+
+    totalTemplates: "Σύνολο προτύπων",
+    primaryTemplates: "Κύρια πρότυπα",
+    activeTemplates: "Ενεργά πρότυπα",
+    inactiveTemplates: "Ανενεργά πρότυπα",
+
+    filterAllSubtitle: "Όλα τα πρότυπα του ακινήτου",
+    filterPrimarySubtitle: "Μόνο τα κύρια πρότυπα",
+    filterActiveSubtitle: "Μόνο τα ενεργά πρότυπα",
+    filterInactiveSubtitle: "Μόνο τα ανενεργά πρότυπα",
+
+    showNewTemplate: "Νέο πρότυπο checklist",
+    hideNewTemplate: "Απόκρυψη φόρμας νέου προτύπου",
+
+    newTemplateTitle: "Νέο πρότυπο checklist",
+    newTemplateSubtitle:
+      "Δημιούργησε νέο πρότυπο για την κύρια ροή ή για ειδικές χρήσεις όπως ζημιές, βλάβες, αναλώσιμα, επιθεώρηση και φωτογραφική τεκμηρίωση.",
+
+    templateTitle: "Τίτλος προτύπου",
+    templateTitlePlaceholder: "π.χ. Βασική checklist ετοιμότητας ακινήτου",
+
+    templateDescription: "Περιγραφή",
+    templateDescriptionPlaceholder:
+      "Σύντομη περιγραφή της χρήσης του προτύπου.",
+
+    templateType: "Τύπος προτύπου",
+    activeStatus: "Κατάσταση",
+    setAsPrimary: "Ορισμός ως κύριο πρότυπο του ακινήτου",
+
+    checklistItems: "Στοιχεία checklist",
+    checklistItemsSubtitle:
+      "Όρισε τα βήματα που θα εκτελούνται σε κάθε run της λίστας.",
+
+    itemLabel: "Τίτλος στοιχείου",
+    itemLabelPlaceholder: "π.χ. Έλεγχος κουζίνας",
+
+    itemDescription: "Περιγραφή",
+    itemDescriptionPlaceholder: "Προαιρετική επεξήγηση του βήματος.",
+
+    itemFieldType: "Τύπος πεδίου",
+    itemCategory: "Κατηγορία",
+    itemCategoryPlaceholder: "π.χ. inspection",
+
+    itemChoices: "Επιλογές",
+    itemChoicesSubtitle:
+      "Πρόσθεσε όσες επιλογές θέλεις. Ο συνεργάτης θα μπορεί να επιλέγει μία από αυτές.",
+    choicePlaceholder: "π.χ. Καλή",
+    addChoice: "Προσθήκη επιλογής",
+    removeChoice: "Αφαίρεση επιλογής",
+
+    required: "Υποχρεωτικό",
+    requiresPhoto: "Απαιτεί φωτογραφία",
+    opensIssueOnFail: "Δημιουργεί συμβάν σε αποτυχία",
+
+    addItem: "Προσθήκη στοιχείου",
+    removeItem: "Αφαίρεση",
+    createTemplate: "Δημιουργία προτύπου",
+    creating: "Δημιουργία...",
+
+    existingTemplates: "Υπάρχοντα πρότυπα",
+    existingTemplatesSubtitle:
+      "Λίστα των προτύπων checklist του ακινήτου. Κάθε πρότυπο ανοίγει ξεχωριστά από το κουμπί προβολής.",
+    noTemplates: "Δεν υπάρχουν πρότυπα για αυτό το ακίνητο.",
+    noTemplatesForFilter: "Δεν υπάρχουν πρότυπα για το συγκεκριμένο φίλτρο.",
+
+    viewTemplate: "Προβολή",
+
+    primaryBadge: "Κύριο πρότυπο",
+    helperBadge: "Βοηθητικό πρότυπο",
+    activeBadge: "Ενεργό",
+    inactiveBadge: "Ανενεργό",
+
+    itemsCount: "Στοιχεία",
+
+    loading: "Φόρτωση...",
+    loadError: "Αποτυχία φόρτωσης προτύπων checklist.",
+    saveError: "Αποτυχία δημιουργίας προτύπου checklist.",
+    createdSuccess: "Το πρότυπο δημιουργήθηκε επιτυχώς.",
+
+    yesNo: "Ναι / Όχι",
+    text: "Κείμενο",
+    number: "Αριθμός",
+    choice: "Επιλογή",
+    photo: "Φωτογραφία",
+
+    mainType: "Κύριο πρότυπο",
+    supportType: "Βοηθητικό πρότυπο",
+
+    activeLabel: "Ενεργό",
+    inactiveLabel: "Ανενεργό",
+
+    languageGreek: "Ελληνικά",
+    languageEnglish: "English",
+  },
+  en: {
+    pageEyebrow: "Property checklist templates",
+    pageTitleFallback: "Property checklist",
+    pageSubtitle:
+      "Each property can have multiple checklist templates, but only one can be the primary template for the core workflow.",
+    backToChecklists: "Back to checklists",
+    backToProperty: "Back to property",
+
+    totalTemplates: "Total templates",
+    primaryTemplates: "Primary templates",
+    activeTemplates: "Active templates",
+    inactiveTemplates: "Inactive templates",
+
+    filterAllSubtitle: "All templates for this property",
+    filterPrimarySubtitle: "Only primary templates",
+    filterActiveSubtitle: "Only active templates",
+    filterInactiveSubtitle: "Only inactive templates",
+
+    showNewTemplate: "New checklist template",
+    hideNewTemplate: "Hide new template form",
+
+    newTemplateTitle: "New checklist template",
+    newTemplateSubtitle:
+      "Create a new template for the core workflow or for special uses like damage, issues, supplies, inspection and photo documentation.",
+
+    templateTitle: "Template title",
+    templateTitlePlaceholder: "e.g. Main property readiness checklist",
+
+    templateDescription: "Description",
+    templateDescriptionPlaceholder: "Short description of this template.",
+
+    templateType: "Template type",
+    activeStatus: "Status",
+    setAsPrimary: "Set as primary template for this property",
+
+    checklistItems: "Checklist items",
+    checklistItemsSubtitle:
+      "Define the steps that will run each time this checklist is executed.",
+
+    itemLabel: "Item title",
+    itemLabelPlaceholder: "e.g. Kitchen inspection",
+
+    itemDescription: "Description",
+    itemDescriptionPlaceholder: "Optional explanation for this step.",
+
+    itemFieldType: "Field type",
+    itemCategory: "Category",
+    itemCategoryPlaceholder: "e.g. inspection",
+
+    itemChoices: "Choices",
+    itemChoicesSubtitle:
+      "Add as many options as you want. The partner will be able to select one of them.",
+    choicePlaceholder: "e.g. Good",
+    addChoice: "Add choice",
+    removeChoice: "Remove choice",
+
+    required: "Required",
+    requiresPhoto: "Requires photo",
+    opensIssueOnFail: "Creates issue on failure",
+
+    addItem: "Add item",
+    removeItem: "Remove",
+    createTemplate: "Create template",
+    creating: "Creating...",
+
+    existingTemplates: "Existing templates",
+    existingTemplatesSubtitle:
+      "List of property checklist templates. Each template opens separately with its view button.",
+    noTemplates: "There are no templates for this property.",
+    noTemplatesForFilter: "There are no templates for this filter.",
+
+    viewTemplate: "View",
+
+    primaryBadge: "Primary template",
+    helperBadge: "Support template",
+    activeBadge: "Active",
+    inactiveBadge: "Inactive",
+
+    itemsCount: "Items",
+
+    loading: "Loading...",
+    loadError: "Failed to load checklist templates.",
+    saveError: "Failed to create checklist template.",
+    createdSuccess: "Template created successfully.",
+
+    yesNo: "Yes / No",
+    text: "Text",
+    number: "Number",
+    choice: "Choice",
+    photo: "Photo",
+
+    mainType: "Main template",
+    supportType: "Support template",
+
+    activeLabel: "Active",
+    inactiveLabel: "Inactive",
+
+    languageGreek: "Ελληνικά",
+    languageEnglish: "English",
+  },
+} satisfies Record<Language, Record<string, string>>
+
+function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ")
 }
 
-function mapTypeToUi(type: string | null | undefined) {
-  switch (type) {
-    case "apartment":
-      return "Διαμέρισμα"
-    case "villa":
-      return "Βίλα"
-    case "house":
-      return "Κατοικία"
-    case "studio":
-      return "Στούντιο"
-    case "maisonette":
-      return "Μεζονέτα"
-    default:
-      return type || "-"
-  }
+function getInitialLanguage(): Language {
+  if (typeof window === "undefined") return "el"
+
+  const url = new URL(window.location.href)
+  const lang = url.searchParams.get("lang")
+  if (lang === "el" || lang === "en") return lang
+
+  const saved = window.localStorage.getItem("ops-language")
+  if (saved === "el" || saved === "en") return saved
+
+  return "el"
 }
 
-function mapTemplateTypeToUi(templateType: string | null | undefined) {
-  switch ((templateType || "").toLowerCase()) {
-    case "main":
-      return "Κύριο πρότυπο"
-    case "damage":
-      return "Ζημιές"
-    case "repair":
-      return "Βλάβες"
-    case "supplies":
-      return "Αναλώσιμα"
-    case "inspection":
-      return "Επιθεώρηση"
-    case "photos":
-      return "Φωτογραφική τεκμηρίωση"
-    default:
-      return templateType || "-"
-  }
-}
+function normalizeTemplateItem(
+  item: unknown,
+  index: number,
+  parentId: string
+): TemplateItem {
+  const raw = (item ?? {}) as Record<string, unknown>
 
-function createEmptyItem(index: number): NewItem {
   return {
-    localId: `item-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 8)}`,
-    label: "",
-    description: "",
-    itemType: "boolean",
-    isRequired: true,
-    sortOrder: index,
-    category: "inspection",
-    requiresPhoto: false,
-    opensIssueOnFail: false,
-    optionsText: "",
+    id: String(raw.id ?? `${parentId}-${index}`),
+    label: String(raw.label ?? ""),
+    description:
+      raw.description === null || raw.description === undefined
+        ? null
+        : String(raw.description),
+    itemType: String(raw.itemType ?? "boolean"),
+    isRequired: Boolean(raw.isRequired ?? false),
+    sortOrder: Number(raw.sortOrder ?? index + 1),
+    category:
+      raw.category === null || raw.category === undefined
+        ? null
+        : String(raw.category),
+    requiresPhoto: Boolean(raw.requiresPhoto ?? false),
+    opensIssueOnFail: Boolean(raw.opensIssueOnFail ?? false),
+    optionsText:
+      raw.optionsText === null || raw.optionsText === undefined
+        ? null
+        : String(raw.optionsText),
   }
 }
 
-export default function PropertyChecklistsPage() {
-  const params = useParams()
-  const propertyId = Array.isArray(params?.propertyId)
-    ? params.propertyId[0]
-    : params?.propertyId
+function normalizeTemplate(rawValue: unknown): ChecklistTemplate {
+  const raw = (rawValue ?? {}) as Record<string, unknown>
+  const itemsRaw = Array.isArray(raw.items) ? raw.items : []
+  const templateId = String(raw.id ?? "")
 
+  return {
+    id: templateId,
+    title: String(raw.title ?? ""),
+    description:
+      raw.description === null || raw.description === undefined
+        ? null
+        : String(raw.description),
+    templateType: String(raw.templateType ?? "main"),
+    isPrimary: Boolean(raw.isPrimary ?? false),
+    isActive: Boolean(raw.isActive ?? false),
+    createdAt: raw.createdAt ? String(raw.createdAt) : undefined,
+    updatedAt: raw.updatedAt ? String(raw.updatedAt) : undefined,
+    items: itemsRaw.map((item: unknown, index: number) =>
+      normalizeTemplateItem(item, index, templateId || "template")
+    ),
+  }
+}
+
+function getTemplateTypeLabel(templateType: string, language: Language) {
+  const t = texts[language]
+  const normalized = String(templateType).toLowerCase()
+
+  if (normalized === "main" || normalized === "core") {
+    return t.mainType
+  }
+
+  return t.supportType
+}
+
+function joinOptions(options: string[]) {
+  return options
+    .map((option) => option.trim())
+    .filter(Boolean)
+    .join(", ")
+}
+
+export default function PropertyChecklistsPage({
+  params,
+}: {
+  params: PageParams
+}) {
+  const { propertyId } = use(params)
+
+  const [language, setLanguage] = useState<Language>("el")
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
   const [successMessage, setSuccessMessage] = useState("")
-
-  const [property, setProperty] = useState<Property | null>(null)
+  const [property, setProperty] = useState<PropertyInfo | null>(null)
   const [templates, setTemplates] = useState<ChecklistTemplate[]>([])
-  const [primaryTemplate, setPrimaryTemplate] = useState<ChecklistTemplate | null>(null)
+  const [activeFilter, setActiveFilter] = useState<TemplateFilter>("all")
+  const [showCreateForm, setShowCreateForm] = useState(false)
 
-  const [title, setTitle] = useState("")
-  const [description, setDescription] = useState("")
+  const [templateTitle, setTemplateTitle] = useState("")
+  const [templateDescription, setTemplateDescription] = useState("")
   const [templateType, setTemplateType] = useState("main")
   const [isPrimary, setIsPrimary] = useState(true)
   const [isActive, setIsActive] = useState(true)
-  const [items, setItems] = useState<NewItem[]>([
-    createEmptyItem(1),
-    createEmptyItem(2),
+
+  const [items, setItems] = useState<NewItemDraft[]>([
+    {
+      label: "",
+      description: "",
+      itemType: "boolean",
+      category: "inspection",
+      isRequired: true,
+      requiresPhoto: false,
+      opensIssueOnFail: false,
+      options: [""],
+    },
   ])
 
-  async function loadPageData() {
-    if (!propertyId) return
+  const t = texts[language]
 
-    setLoading(true)
-    setError("")
-    setSuccessMessage("")
+  useEffect(() => {
+    setLanguage(getInitialLanguage())
+  }, [])
 
+  useEffect(() => {
+    if (typeof window === "undefined") return
+
+    const url = new URL(window.location.href)
+    url.searchParams.set("lang", language)
+    window.history.replaceState({}, "", url.toString())
+    window.localStorage.setItem("ops-language", language)
+  }, [language])
+
+  async function loadData() {
     try {
-      const [propertyRes, checklistRes] = await Promise.all([
-        fetch(`/api/properties/${propertyId}`, {
-          cache: "no-store",
-        }),
-        fetch(`/api/property-checklists/${propertyId}`, {
-          cache: "no-store",
-        }),
-      ])
+      setLoading(true)
+      setError("")
 
-      const propertyData = await propertyRes.json().catch(() => null)
-      const checklistData = await checklistRes.json().catch(() => null)
+      const response = await fetch(`/api/property-checklists/${propertyId}`, {
+        method: "GET",
+        cache: "no-store",
+      })
 
-      if (!propertyRes.ok) {
-        throw new Error(propertyData?.error || "Αποτυχία φόρτωσης ακινήτου.")
-      }
+      const data: PropertyChecklistResponse = await response.json()
 
-      if (!checklistRes.ok) {
+      if (!response.ok) {
         throw new Error(
-          checklistData?.error || "Αποτυχία φόρτωσης προτύπων checklist."
+          typeof (data as { error?: unknown })?.error === "string"
+            ? (data as { error?: string }).error
+            : t.loadError
         )
       }
 
-      const checklistPayload = (checklistData || {}) as ChecklistApiResponse
+      const rawTemplates = Array.isArray(data?.templates) ? data.templates : []
 
-      setProperty(propertyData)
-      setTemplates(Array.isArray(checklistPayload.templates) ? checklistPayload.templates : [])
-      setPrimaryTemplate(checklistPayload.primaryTemplate || null)
+      const normalizedTemplates = rawTemplates
+        .map((template: unknown) => normalizeTemplate(template))
+        .sort((a: ChecklistTemplate, b: ChecklistTemplate) => {
+          if (a.isPrimary && !b.isPrimary) return -1
+          if (!a.isPrimary && b.isPrimary) return 1
+          if (a.isActive && !b.isActive) return -1
+          if (!a.isActive && b.isActive) return 1
+          return a.title.localeCompare(b.title, "el")
+        })
+
+      const rawProperty = data?.property ?? null
+
+      setProperty({
+        id: String(rawProperty?.id ?? propertyId),
+        code: String(rawProperty?.code ?? ""),
+        name: String(rawProperty?.name ?? ""),
+        address: String(rawProperty?.address ?? ""),
+      })
+      setTemplates(normalizedTemplates)
     } catch (err) {
-      console.error("Σφάλμα φόρτωσης checklist ακινήτου:", err)
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Παρουσιάστηκε σφάλμα κατά τη φόρτωση της σελίδας."
-      )
-      setProperty(null)
-      setTemplates([])
-      setPrimaryTemplate(null)
+      setError(err instanceof Error ? err.message : t.loadError)
     } finally {
       setLoading(false)
     }
   }
 
   useEffect(() => {
-    loadPageData()
-  }, [propertyId])
+    void loadData()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [propertyId, language])
 
-  useEffect(() => {
-    if (templateType !== "main" && isPrimary) {
-      setIsPrimary(false)
+  const totalCount = templates.length
+  const primaryCount = templates.filter((template) => template.isPrimary).length
+  const activeCount = templates.filter((template) => template.isActive).length
+  const inactiveCount = templates.filter((template) => !template.isActive).length
+
+  const filteredTemplates = useMemo(() => {
+    if (activeFilter === "primary") {
+      return templates.filter((template) => template.isPrimary)
     }
-  }, [templateType, isPrimary])
 
-  const totalItems = useMemo(() => {
-    return templates.reduce((sum, template) => sum + (template.items?.length || 0), 0)
-  }, [templates])
+    if (activeFilter === "active") {
+      return templates.filter((template) => template.isActive)
+    }
 
-  const activeTemplates = useMemo(() => {
-    return templates.filter((template) => template.isActive)
-  }, [templates])
+    if (activeFilter === "inactive") {
+      return templates.filter((template) => !template.isActive)
+    }
+
+    return templates
+  }, [templates, activeFilter])
 
   function addItem() {
-    setItems((prev) => [...prev, createEmptyItem(prev.length + 1)])
+    setItems((prev) => [
+      ...prev,
+      {
+        label: "",
+        description: "",
+        itemType: "boolean",
+        category: "inspection",
+        isRequired: true,
+        requiresPhoto: false,
+        opensIssueOnFail: false,
+        options: [""],
+      },
+    ])
   }
 
-  function removeItem(localId: string) {
+  function removeItem(index: number) {
+    setItems((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  function updateItem<K extends keyof NewItemDraft>(
+    index: number,
+    field: K,
+    value: NewItemDraft[K]
+  ) {
     setItems((prev) =>
-      prev
-        .filter((item) => item.localId !== localId)
-        .map((item, index) => ({
+      prev.map((item, i) => {
+        if (i !== index) return item
+        return {
           ...item,
-          sortOrder: index + 1,
-        }))
+          [field]: value,
+        }
+      })
     )
   }
 
-  function updateItem(localId: string, patch: Partial<NewItem>) {
+  function addChoice(itemIndex: number) {
     setItems((prev) =>
-      prev.map((item, index) =>
-        item.localId === localId
-          ? {
-              ...item,
-              ...patch,
-              sortOrder: patch.sortOrder ?? index + 1,
-            }
-          : item
-      )
+      prev.map((item, index) => {
+        if (index !== itemIndex) return item
+        return {
+          ...item,
+          options: [...item.options, ""],
+        }
+      })
+    )
+  }
+
+  function removeChoice(itemIndex: number, choiceIndex: number) {
+    setItems((prev) =>
+      prev.map((item, index) => {
+        if (index !== itemIndex) return item
+
+        const nextOptions = item.options.filter((_, i) => i !== choiceIndex)
+
+        return {
+          ...item,
+          options: nextOptions.length > 0 ? nextOptions : [""],
+        }
+      })
+    )
+  }
+
+  function updateChoice(itemIndex: number, choiceIndex: number, value: string) {
+    setItems((prev) =>
+      prev.map((item, index) => {
+        if (index !== itemIndex) return item
+
+        return {
+          ...item,
+          options: item.options.map((choice, i) =>
+            i === choiceIndex ? value : choice
+          ),
+        }
+      })
     )
   }
 
   async function handleCreateTemplate(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
 
-    if (!propertyId) return
-
     try {
       setSaving(true)
       setError("")
       setSuccessMessage("")
 
-      const cleanedItems = items
-        .map((item, index) => ({
-          label: item.label.trim(),
-          description: item.description.trim() || null,
+      const payload = {
+        title: templateTitle,
+        description: templateDescription,
+        templateType,
+        isPrimary,
+        isActive,
+        items: items.map((item, index) => ({
+          label: item.label,
+          description: item.description,
           itemType: item.itemType,
           isRequired: item.isRequired,
           sortOrder: index + 1,
-          category: item.category.trim() || "inspection",
+          category: item.category,
           requiresPhoto: item.requiresPhoto,
           opensIssueOnFail: item.opensIssueOnFail,
-          optionsText: item.optionsText.trim() || null,
-        }))
-        .filter((item) => item.label)
+          optionsText:
+            item.itemType === "choice" ? joinOptions(item.options) : "",
+        })),
+      }
 
-      const res = await fetch(`/api/property-checklists/${propertyId}`, {
+      const response = await fetch(`/api/property-checklists/${propertyId}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          title: title.trim(),
-          description: description.trim() || null,
-          templateType,
-          isPrimary: templateType === "main" ? isPrimary : false,
-          isActive,
-          items: cleanedItems,
-        }),
+        body: JSON.stringify(payload),
       })
 
-      const data = await res.json().catch(() => null)
+      const data = await response.json()
 
-      if (!res.ok) {
-        throw new Error(data?.error || "Αποτυχία δημιουργίας προτύπου checklist.")
+      if (!response.ok) {
+        throw new Error(
+          typeof data?.error === "string" ? data.error : t.saveError
+        )
       }
 
-      setTitle("")
-      setDescription("")
+      setTemplateTitle("")
+      setTemplateDescription("")
       setTemplateType("main")
       setIsPrimary(true)
       setIsActive(true)
-      setItems([createEmptyItem(1), createEmptyItem(2)])
+      setItems([
+        {
+          label: "",
+          description: "",
+          itemType: "boolean",
+          category: "inspection",
+          isRequired: true,
+          requiresPhoto: false,
+          opensIssueOnFail: false,
+          options: [""],
+        },
+      ])
 
-      setSuccessMessage("Το πρότυπο checklist δημιουργήθηκε επιτυχώς.")
-      await loadPageData()
+      setSuccessMessage(t.createdSuccess)
+      setShowCreateForm(false)
+      await loadData()
     } catch (err) {
-      console.error("Σφάλμα δημιουργίας προτύπου checklist:", err)
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Παρουσιάστηκε σφάλμα κατά τη δημιουργία προτύπου checklist."
-      )
+      setError(err instanceof Error ? err.message : t.saveError)
     } finally {
       setSaving(false)
     }
@@ -306,492 +628,549 @@ export default function PropertyChecklistsPage() {
 
   if (loading) {
     return (
-      <div className="space-y-6">
-        <div className="rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
-          <p className="text-sm text-slate-500">Φόρτωση προτύπων checklist...</p>
-        </div>
-      </div>
-    )
-  }
-
-  if (!property) {
-    return (
-      <div className="space-y-6">
-        <div className="rounded-3xl border border-red-200 bg-red-50 p-8 shadow-sm">
-          <h1 className="text-xl font-bold text-red-700">
-            Δεν βρέθηκε το ακίνητο
-          </h1>
-          <p className="mt-2 text-sm text-red-600">
-            Το ακίνητο δεν φορτώθηκε ή δεν υπάρχει.
-          </p>
-
-          <div className="mt-6">
-            <Link
-              href="/properties"
-              className="inline-flex items-center rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
-            >
-              Επιστροφή στα ακίνητα
-            </Link>
-          </div>
-        </div>
+      <div className="rounded-3xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-500 shadow-sm">
+        {t.loading}
       </div>
     )
   }
 
   return (
     <div className="space-y-6">
-      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+        <div className="space-y-2">
+          <p className="text-sm font-medium text-slate-500">{t.pageEyebrow}</p>
           <div>
-            <p className="text-sm text-slate-500">Πρότυπα checklist ακινήτου</p>
-            <h1 className="mt-2 text-3xl font-bold text-slate-950">
-              {property.name}
+            <h1 className="text-4xl font-bold tracking-tight text-slate-900">
+              {property?.name || t.pageTitleFallback}
             </h1>
-            <p className="mt-2 text-sm text-slate-500">
-              Ανά ακίνητο επιτρέπονται πολλά πρότυπα checklist, αλλά μόνο ένα
-              είναι το κύριο πρότυπο της βασικής ροής.
+            <p className="mt-2 max-w-3xl text-sm text-slate-600">
+              {t.pageSubtitle}
             </p>
-            <p className="mt-2 text-sm text-slate-400">
-              {property.code} • {mapTypeToUi(property.type)} • {property.city}
+            <p className="mt-3 text-sm text-slate-500">
+              {[property?.code, property?.address].filter(Boolean).join(" • ")}
             </p>
-          </div>
-
-          <div className="flex flex-wrap gap-3">
-            <Link
-              href="/checklists"
-              className="inline-flex items-center rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-            >
-              Επιστροφή στα checklists
-            </Link>
-
-            <Link
-              href={`/properties/${property.id}`}
-              className="inline-flex items-center rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-            >
-              Επιστροφή στο ακίνητο
-            </Link>
           </div>
         </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1">
+            <button
+              type="button"
+              onClick={() => setLanguage("el")}
+              className={cn(
+                "rounded-lg px-3 py-2 text-sm font-medium transition",
+                language === "el"
+                  ? "bg-slate-900 text-white"
+                  : "text-slate-600 hover:bg-slate-50"
+              )}
+            >
+              {t.languageGreek}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setLanguage("en")}
+              className={cn(
+                "rounded-lg px-3 py-2 text-sm font-medium transition",
+                language === "en"
+                  ? "bg-slate-900 text-white"
+                  : "text-slate-600 hover:bg-slate-50"
+              )}
+            >
+              {t.languageEnglish}
+            </button>
+          </div>
+
+          <Link
+            href="/checklists"
+            className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            {t.backToChecklists}
+          </Link>
+
+          <Link
+            href={`/properties/${propertyId}`}
+            className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            {t.backToProperty}
+          </Link>
+        </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <FilterCard
+          title={t.totalTemplates}
+          value={totalCount}
+          subtitle={t.filterAllSubtitle}
+          active={activeFilter === "all"}
+          onClick={() => setActiveFilter("all")}
+        />
+        <FilterCard
+          title={t.primaryTemplates}
+          value={primaryCount}
+          subtitle={t.filterPrimarySubtitle}
+          active={activeFilter === "primary"}
+          onClick={() => setActiveFilter("primary")}
+        />
+        <FilterCard
+          title={t.activeTemplates}
+          value={activeCount}
+          subtitle={t.filterActiveSubtitle}
+          active={activeFilter === "active"}
+          onClick={() => setActiveFilter("active")}
+        />
+        <FilterCard
+          title={t.inactiveTemplates}
+          value={inactiveCount}
+          subtitle={t.filterInactiveSubtitle}
+          active={activeFilter === "inactive"}
+          onClick={() => setActiveFilter("inactive")}
+        />
+      </div>
+
+      <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="text-2xl font-bold text-slate-900">
+              {t.newTemplateTitle}
+            </h2>
+            <p className="mt-2 max-w-3xl text-sm text-slate-600">
+              {t.newTemplateSubtitle}
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setShowCreateForm((prev) => !prev)}
+            className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700"
+          >
+            {showCreateForm ? t.hideNewTemplate : t.showNewTemplate}
+          </button>
+        </div>
+
+        {showCreateForm ? (
+          <form onSubmit={handleCreateTemplate} className="mt-6 space-y-6">
+            <div className="grid gap-5">
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-700">
+                  {t.templateTitle}
+                </label>
+                <input
+                  value={templateTitle}
+                  onChange={(e) => setTemplateTitle(e.target.value)}
+                  placeholder={t.templateTitlePlaceholder}
+                  className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-700">
+                  {t.templateDescription}
+                </label>
+                <textarea
+                  value={templateDescription}
+                  onChange={(e) => setTemplateDescription(e.target.value)}
+                  placeholder={t.templateDescriptionPlaceholder}
+                  className="min-h-[120px] w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                />
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-slate-700">
+                    {t.templateType}
+                  </label>
+                  <select
+                    value={templateType}
+                    onChange={(e) => setTemplateType(e.target.value)}
+                    className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  >
+                    <option value="main">{t.mainType}</option>
+                    <option value="support">{t.supportType}</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-slate-700">
+                    {t.activeStatus}
+                  </label>
+                  <select
+                    value={isActive ? "active" : "inactive"}
+                    onChange={(e) => setIsActive(e.target.value === "active")}
+                    className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  >
+                    <option value="active">{t.activeLabel}</option>
+                    <option value="inactive">{t.inactiveLabel}</option>
+                  </select>
+                </div>
+              </div>
+
+              <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <input
+                  type="checkbox"
+                  checked={isPrimary}
+                  onChange={(e) => setIsPrimary(e.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300"
+                />
+                <span className="text-sm text-slate-700">{t.setAsPrimary}</span>
+              </label>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-xl font-bold text-slate-900">
+                  {t.checklistItems}
+                </h3>
+                <p className="mt-1 text-sm text-slate-600">
+                  {t.checklistItemsSubtitle}
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                {items.map((item, index) => (
+                  <div
+                    key={`new-item-${index}`}
+                    className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                  >
+                    <div className="mb-4 flex items-center justify-between gap-3">
+                      <p className="text-sm font-semibold text-slate-700">
+                        #{index + 1}
+                      </p>
+
+                      {items.length > 1 ? (
+                        <button
+                          type="button"
+                          onClick={() => removeItem(index)}
+                          className="rounded-xl border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50"
+                        >
+                          {t.removeItem}
+                        </button>
+                      ) : null}
+                    </div>
+
+                    <div className="grid gap-4">
+                      <div>
+                        <label className="mb-2 block text-sm font-medium text-slate-700">
+                          {t.itemLabel}
+                        </label>
+                        <input
+                          value={item.label}
+                          onChange={(e) =>
+                            updateItem(index, "label", e.target.value)
+                          }
+                          placeholder={t.itemLabelPlaceholder}
+                          className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                          required
+                        />
+                      </div>
+
+                      <div>
+                        <label className="mb-2 block text-sm font-medium text-slate-700">
+                          {t.itemDescription}
+                        </label>
+                        <textarea
+                          value={item.description}
+                          onChange={(e) =>
+                            updateItem(index, "description", e.target.value)
+                          }
+                          placeholder={t.itemDescriptionPlaceholder}
+                          className="min-h-[100px] w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                        />
+                      </div>
+
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-slate-700">
+                            {t.itemFieldType}
+                          </label>
+                          <select
+                            value={item.itemType}
+                            onChange={(e) =>
+                              updateItem(index, "itemType", e.target.value)
+                            }
+                            className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                          >
+                            <option value="boolean">{t.yesNo}</option>
+                            <option value="text">{t.text}</option>
+                            <option value="number">{t.number}</option>
+                            <option value="choice">{t.choice}</option>
+                            <option value="photo">{t.photo}</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-slate-700">
+                            {t.itemCategory}
+                          </label>
+                          <input
+                            value={item.category}
+                            onChange={(e) =>
+                              updateItem(index, "category", e.target.value)
+                            }
+                            placeholder={t.itemCategoryPlaceholder}
+                            className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                          />
+                        </div>
+                      </div>
+
+                      {item.itemType === "choice" ? (
+                        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                          <div className="mb-3">
+                            <h4 className="text-sm font-semibold text-slate-800">
+                              {t.itemChoices}
+                            </h4>
+                            <p className="mt-1 text-xs text-slate-500">
+                              {t.itemChoicesSubtitle}
+                            </p>
+                          </div>
+
+                          <div className="space-y-3">
+                            {item.options.map((choice, choiceIndex) => (
+                              <div
+                                key={`item-${index}-choice-${choiceIndex}`}
+                                className="flex items-center gap-3"
+                              >
+                                <input
+                                  value={choice}
+                                  onChange={(e) =>
+                                    updateChoice(index, choiceIndex, e.target.value)
+                                  }
+                                  placeholder={t.choicePlaceholder}
+                                  className="flex-1 rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                                />
+
+                                <button
+                                  type="button"
+                                  onClick={() => removeChoice(index, choiceIndex)}
+                                  className="rounded-xl border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50"
+                                >
+                                  {t.removeChoice}
+                                </button>
+                              </div>
+                            ))}
+
+                            <button
+                              type="button"
+                              onClick={() => addChoice(index)}
+                              className="rounded-xl border border-slate-300 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+                            >
+                              {t.addChoice}
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
+
+                      <div className="grid gap-3 md:grid-cols-3">
+                        <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                          <input
+                            type="checkbox"
+                            checked={item.isRequired}
+                            onChange={(e) =>
+                              updateItem(index, "isRequired", e.target.checked)
+                            }
+                            className="h-4 w-4 rounded border-slate-300"
+                          />
+                          <span className="text-sm text-slate-700">
+                            {t.required}
+                          </span>
+                        </label>
+
+                        <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                          <input
+                            type="checkbox"
+                            checked={item.requiresPhoto}
+                            onChange={(e) =>
+                              updateItem(index, "requiresPhoto", e.target.checked)
+                            }
+                            className="h-4 w-4 rounded border-slate-300"
+                          />
+                          <span className="text-sm text-slate-700">
+                            {t.requiresPhoto}
+                          </span>
+                        </label>
+
+                        <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                          <input
+                            type="checkbox"
+                            checked={item.opensIssueOnFail}
+                            onChange={(e) =>
+                              updateItem(index, "opensIssueOnFail", e.target.checked)
+                            }
+                            className="h-4 w-4 rounded border-slate-300"
+                          />
+                          <span className="text-sm text-slate-700">
+                            {t.opensIssueOnFail}
+                          </span>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <button
+                  type="button"
+                  onClick={addItem}
+                  className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                >
+                  {t.addItem}
+                </button>
+
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {saving ? t.creating : t.createTemplate}
+                </button>
+              </div>
+            </div>
+          </form>
+        ) : null}
       </section>
 
       {error ? (
-        <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
           {error}
         </div>
       ) : null}
 
       {successMessage ? (
-        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">
           {successMessage}
         </div>
       ) : null}
 
-      <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm font-medium text-slate-500">Σύνολο προτύπων</p>
-          <p className="mt-3 text-4xl font-bold text-slate-950">{templates.length}</p>
-        </div>
-
-        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm font-medium text-slate-500">Κύρια πρότυπα</p>
-          <p className="mt-3 text-4xl font-bold text-slate-950">
-            {templates.filter((t) => t.isPrimary).length}
-          </p>
-        </div>
-
-        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm font-medium text-slate-500">Ενεργά πρότυπα</p>
-          <p className="mt-3 text-4xl font-bold text-slate-950">
-            {activeTemplates.length}
-          </p>
-        </div>
-
-        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm font-medium text-slate-500">Σύνολο στοιχείων</p>
-          <p className="mt-3 text-4xl font-bold text-slate-950">{totalItems}</p>
-        </div>
-      </section>
-
-      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="mb-6">
-          <h2 className="text-2xl font-bold text-slate-950">Νέο πρότυπο checklist</h2>
-          <p className="mt-2 text-sm text-slate-500">
-            Δημιούργησε νέο πρότυπο για την κύρια ροή ή για ειδικές χρήσεις όπως
-            ζημιές, βλάβες, αναλώσιμα, επιθεώρηση και φωτογραφική τεκμηρίωση.
-          </p>
-        </div>
-
-        <form onSubmit={handleCreateTemplate} className="space-y-6">
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="md:col-span-2">
-              <label className="mb-2 block text-sm font-medium text-slate-700">
-                Τίτλος προτύπου
-              </label>
-              <input
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                className="w-full rounded-2xl border border-slate-300 px-4 py-3 outline-none transition focus:border-blue-500"
-                placeholder="π.χ. Βασική checklist ετοιμότητας ακινήτου"
-                required
-              />
-            </div>
-
-            <div className="md:col-span-2">
-              <label className="mb-2 block text-sm font-medium text-slate-700">
-                Περιγραφή
-              </label>
-              <textarea
-                rows={4}
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                className="w-full rounded-2xl border border-slate-300 px-4 py-3 outline-none transition focus:border-blue-500"
-                placeholder="Σύντομη περιγραφή της χρήσης του προτύπου."
-              />
-            </div>
-
-            <div>
-              <label className="mb-2 block text-sm font-medium text-slate-700">
-                Τύπος προτύπου
-              </label>
-              <select
-                value={templateType}
-                onChange={(e) => setTemplateType(e.target.value)}
-                className="w-full rounded-2xl border border-slate-300 px-4 py-3 outline-none transition focus:border-blue-500"
-              >
-                <option value="main">Κύριο πρότυπο</option>
-                <option value="damage">Ζημιές</option>
-                <option value="repair">Βλάβες</option>
-                <option value="supplies">Αναλώσιμα</option>
-                <option value="inspection">Επιθεώρηση</option>
-                <option value="photos">Φωτογραφική τεκμηρίωση</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="mb-2 block text-sm font-medium text-slate-700">
-                Κατάσταση
-              </label>
-              <select
-                value={isActive ? "active" : "inactive"}
-                onChange={(e) => setIsActive(e.target.value === "active")}
-                className="w-full rounded-2xl border border-slate-300 px-4 py-3 outline-none transition focus:border-blue-500"
-              >
-                <option value="active">Ενεργό</option>
-                <option value="inactive">Ανενεργό</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <label className="flex items-center gap-3 text-sm font-medium text-slate-700">
-              <input
-                type="checkbox"
-                checked={isPrimary}
-                onChange={(e) => setIsPrimary(e.target.checked)}
-                disabled={templateType !== "main"}
-              />
-              Ορισμός ως κύριο πρότυπο του ακινήτου
-            </label>
-
-            {templateType !== "main" ? (
-              <p className="mt-2 text-xs text-slate-500">
-                Μόνο τα πρότυπα τύπου «Κύριο πρότυπο» μπορούν να οριστούν ως κύρια.
-              </p>
-            ) : null}
-          </div>
-
-          <div className="space-y-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h3 className="text-xl font-bold text-slate-950">Στοιχεία checklist</h3>
-                <p className="mt-1 text-sm text-slate-500">
-                  Όρισε τα βήματα που θα εκτελούνται σε κάθε run της λίστας.
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={addItem}
-                className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-              >
-                Προσθήκη στοιχείου
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              {items.map((item, index) => (
-                <div
-                  key={item.localId}
-                  className="rounded-2xl border border-slate-200 p-4"
-                >
-                  <div className="mb-4 flex items-center justify-between gap-3">
-                    <h4 className="text-lg font-semibold text-slate-900">
-                      Στοιχείο {index + 1}
-                    </h4>
-
-                    <button
-                      type="button"
-                      onClick={() => removeItem(item.localId)}
-                      disabled={items.length === 1}
-                      className={cls(
-                        "rounded-xl px-3 py-2 text-sm font-semibold transition",
-                        items.length === 1
-                          ? "cursor-not-allowed bg-slate-100 text-slate-400"
-                          : "bg-red-50 text-red-700 hover:bg-red-100"
-                      )}
-                    >
-                      Διαγραφή
-                    </button>
-                  </div>
-
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="md:col-span-2">
-                      <label className="mb-2 block text-sm font-medium text-slate-700">
-                        Ετικέτα
-                      </label>
-                      <input
-                        value={item.label}
-                        onChange={(e) =>
-                          updateItem(item.localId, { label: e.target.value })
-                        }
-                        className="w-full rounded-2xl border border-slate-300 px-4 py-3 outline-none transition focus:border-blue-500"
-                        placeholder="π.χ. Έλεγχος καθαριότητας κουζίνας"
-                      />
-                    </div>
-
-                    <div className="md:col-span-2">
-                      <label className="mb-2 block text-sm font-medium text-slate-700">
-                        Περιγραφή
-                      </label>
-                      <textarea
-                        rows={3}
-                        value={item.description}
-                        onChange={(e) =>
-                          updateItem(item.localId, { description: e.target.value })
-                        }
-                        className="w-full rounded-2xl border border-slate-300 px-4 py-3 outline-none transition focus:border-blue-500"
-                        placeholder="Προαιρετική επεξήγηση του βήματος."
-                      />
-                    </div>
-
-                    <div>
-                      <label className="mb-2 block text-sm font-medium text-slate-700">
-                        Τύπος πεδίου
-                      </label>
-                      <select
-                        value={item.itemType}
-                        onChange={(e) =>
-                          updateItem(item.localId, { itemType: e.target.value })
-                        }
-                        className="w-full rounded-2xl border border-slate-300 px-4 py-3 outline-none transition focus:border-blue-500"
-                      >
-                        <option value="boolean">Ναι / Όχι</option>
-                        <option value="text">Κείμενο</option>
-                        <option value="number">Αριθμός</option>
-                        <option value="select">Επιλογή</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="mb-2 block text-sm font-medium text-slate-700">
-                        Κατηγορία
-                      </label>
-                      <input
-                        value={item.category}
-                        onChange={(e) =>
-                          updateItem(item.localId, { category: e.target.value })
-                        }
-                        className="w-full rounded-2xl border border-slate-300 px-4 py-3 outline-none transition focus:border-blue-500"
-                        placeholder="π.χ. inspection"
-                      />
-                    </div>
-
-                    {item.itemType === "select" ? (
-                      <div className="md:col-span-2">
-                        <label className="mb-2 block text-sm font-medium text-slate-700">
-                          Επιλογές
-                        </label>
-                        <input
-                          value={item.optionsText}
-                          onChange={(e) =>
-                            updateItem(item.localId, { optionsText: e.target.value })
-                          }
-                          className="w-full rounded-2xl border border-slate-300 px-4 py-3 outline-none transition focus:border-blue-500"
-                          placeholder="π.χ. Καλή,Μέτρια,Κακή"
-                        />
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <div className="mt-4 grid gap-3 md:grid-cols-3">
-                    <label className="flex items-center gap-3 text-sm font-medium text-slate-700">
-                      <input
-                        type="checkbox"
-                        checked={item.isRequired}
-                        onChange={(e) =>
-                          updateItem(item.localId, { isRequired: e.target.checked })
-                        }
-                      />
-                      Υποχρεωτικό
-                    </label>
-
-                    <label className="flex items-center gap-3 text-sm font-medium text-slate-700">
-                      <input
-                        type="checkbox"
-                        checked={item.requiresPhoto}
-                        onChange={(e) =>
-                          updateItem(item.localId, {
-                            requiresPhoto: e.target.checked,
-                          })
-                        }
-                      />
-                      Απαιτεί φωτογραφία
-                    </label>
-
-                    <label className="flex items-center gap-3 text-sm font-medium text-slate-700">
-                      <input
-                        type="checkbox"
-                        checked={item.opensIssueOnFail}
-                        onChange={(e) =>
-                          updateItem(item.localId, {
-                            opensIssueOnFail: e.target.checked,
-                          })
-                        }
-                      />
-                      Δημιουργεί συμβάν σε αποτυχία
-                    </label>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex justify-end">
-            <button
-              type="submit"
-              disabled={saving}
-              className="rounded-2xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {saving ? "Αποθήκευση..." : "Δημιουργία προτύπου"}
-            </button>
-          </div>
-        </form>
-      </section>
-
-      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="mb-6">
-          <h2 className="text-2xl font-bold text-slate-950">Υπάρχοντα πρότυπα</h2>
-          <p className="mt-2 text-sm text-slate-500">
-            Όλα τα πρότυπα checklist του ακινήτου με ένδειξη κύριου προτύπου και
-            τύπου χρήσης.
+      <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="mb-5">
+          <h2 className="text-2xl font-bold text-slate-900">
+            {t.existingTemplates}
+          </h2>
+          <p className="mt-2 text-sm text-slate-600">
+            {t.existingTemplatesSubtitle}
           </p>
         </div>
 
         {templates.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-slate-300 p-6 text-sm text-slate-500">
-            Δεν υπάρχουν ακόμη πρότυπα checklist για αυτό το ακίνητο.
+          <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-5 py-8 text-center text-sm text-slate-500">
+            {t.noTemplates}
+          </div>
+        ) : filteredTemplates.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-5 py-8 text-center text-sm text-slate-500">
+            {t.noTemplatesForFilter}
           </div>
         ) : (
           <div className="space-y-4">
-            {templates.map((template) => (
+            {filteredTemplates.map((template) => (
               <div
                 key={template.id}
-                className="rounded-2xl border border-slate-200 p-5"
+                className="rounded-2xl border border-slate-200 bg-white p-4"
               >
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="text-lg font-bold text-slate-950">
+                      <h3 className="text-xl font-bold text-slate-900">
                         {template.title}
                       </h3>
 
                       {template.isPrimary ? (
                         <span className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
-                          Κύριο πρότυπο
+                          {t.primaryBadge}
                         </span>
-                      ) : null}
+                      ) : (
+                        <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
+                          {t.helperBadge}
+                        </span>
+                      )}
 
                       <span
-                        className={cls(
+                        className={cn(
                           "rounded-full border px-3 py-1 text-xs font-semibold",
                           template.isActive
                             ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                            : "border-slate-200 bg-slate-100 text-slate-700"
+                            : "border-slate-200 bg-slate-50 text-slate-600"
                         )}
                       >
-                        {template.isActive ? "Ενεργό" : "Ανενεργό"}
+                        {template.isActive ? t.activeBadge : t.inactiveBadge}
                       </span>
 
-                      <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
-                        {mapTemplateTypeToUi(template.templateType)}
+                      <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
+                        {getTemplateTypeLabel(template.templateType, language)}
                       </span>
                     </div>
 
-                    <p className="mt-2 text-sm text-slate-500">
-                      {template.description || "Δεν υπάρχει περιγραφή προτύπου."}
-                    </p>
+                    {template.description ? (
+                      <p className="mt-3 text-sm text-slate-600">
+                        {template.description}
+                      </p>
+                    ) : null}
 
-                    <p className="mt-3 text-xs text-slate-400">
-                      Στοιχεία: {template.items?.length || 0}
+                    <p className="mt-3 text-sm text-slate-500">
+                      {t.itemsCount}: {template.items.length}
                     </p>
                   </div>
 
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex shrink-0 items-center gap-3">
                     <Link
-                      href={`/property-checklists/${property.id}/templates/${template.id}`}
-                      className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                      href={`/property-checklists/${propertyId}/templates/${template.id}?lang=${language}`}
+                      className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
                     >
-                      Επεξεργασία
+                      {t.viewTemplate}
                     </Link>
                   </div>
                 </div>
-
-                {(template.items || []).length > 0 ? (
-                  <div className="mt-4 max-h-64 space-y-2 overflow-auto rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                    {template.items
-                      ?.slice()
-                      .sort((a, b) => a.sortOrder - b.sortOrder)
-                      .map((item) => (
-                        <div
-                          key={item.id}
-                          className="rounded-xl border border-slate-200 bg-white px-3 py-3"
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <p className="text-sm font-semibold text-slate-900">
-                                {item.label}
-                              </p>
-                              <p className="mt-1 text-xs text-slate-500">
-                                {item.description || "Χωρίς περιγραφή"}
-                              </p>
-                            </div>
-
-                            <div className="flex flex-wrap gap-2">
-                              <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-semibold text-slate-700">
-                                {item.itemType}
-                              </span>
-
-                              <span
-                                className={cls(
-                                  "rounded-full border px-2 py-1 text-[11px] font-semibold",
-                                  item.isRequired
-                                    ? "border-amber-200 bg-amber-50 text-amber-700"
-                                    : "border-slate-200 bg-white text-slate-600"
-                                )}
-                              >
-                                {item.isRequired ? "Υποχρεωτικό" : "Προαιρετικό"}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                  </div>
-                ) : null}
               </div>
             ))}
           </div>
         )}
       </section>
     </div>
+  )
+}
+
+function FilterCard({
+  title,
+  value,
+  subtitle,
+  active,
+  onClick,
+}: {
+  title: string
+  value: number
+  subtitle: string
+  active: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "rounded-3xl border p-5 text-left shadow-sm transition",
+        active
+          ? "border-slate-900 bg-slate-900 text-white"
+          : "border-slate-200 bg-white hover:border-slate-300"
+      )}
+    >
+      <p
+        className={cn(
+          "text-sm font-medium",
+          active ? "text-white/80" : "text-slate-600"
+        )}
+      >
+        {title}
+      </p>
+      <p className="mt-3 text-4xl font-bold tracking-tight">{value}</p>
+      <p
+        className={cn(
+          "mt-2 text-sm",
+          active ? "text-white/80" : "text-slate-500"
+        )}
+      >
+        {subtitle}
+      </p>
+    </button>
   )
 }

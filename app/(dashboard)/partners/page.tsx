@@ -15,6 +15,23 @@ type Partner = {
   updatedAt: string
 }
 
+type PortalAccessResponse = {
+  partner: {
+    id: string
+    name: string
+    email: string
+  }
+  portalAccess: {
+    id: string
+    token: string
+    isActive: boolean
+    expiresAt?: string | null
+    createdAt: string
+    lastUsedAt?: string | null
+    portalUrl: string
+  } | null
+}
+
 function getStatusBadgeClasses(status: string) {
   switch (status.toLowerCase()) {
     case "active":
@@ -37,6 +54,21 @@ function getStatusLabel(status: string) {
   }
 }
 
+function formatDateTime(value?: string | null) {
+  if (!value) return "—"
+
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return "—"
+
+  return new Intl.DateTimeFormat("el-GR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date)
+}
+
 export default function PartnersPage() {
   const [partners, setPartners] = useState<Partner[]>([])
 
@@ -52,6 +84,15 @@ export default function PartnersPage() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
+
+  const [portalLoadingId, setPortalLoadingId] = useState<string | null>(null)
+  const [portalError, setPortalError] = useState("")
+  const [portalSuccess, setPortalSuccess] = useState("")
+  const [portalPartnerName, setPortalPartnerName] = useState("")
+  const [portalUrl, setPortalUrl] = useState("")
+  const [portalCreatedAt, setPortalCreatedAt] = useState<string | null>(null)
+  const [portalLastUsedAt, setPortalLastUsedAt] = useState<string | null>(null)
+  const [showPortalBox, setShowPortalBox] = useState(false)
 
   async function loadPartners() {
     try {
@@ -142,6 +183,91 @@ export default function PartnersPage() {
     }
   }
 
+  async function handleGeneratePortalLink(partnerId: string) {
+    try {
+      setPortalLoadingId(partnerId)
+      setPortalError("")
+      setPortalSuccess("")
+      setShowPortalBox(false)
+
+      const res = await fetch(`/api/partners/${partnerId}/portal-link`, {
+        method: "POST",
+      })
+
+      const data = (await res.json().catch(() => null)) as PortalAccessResponse | null
+
+      if (!res.ok) {
+        throw new Error(data && "error" in (data as any) ? (data as any).error : "Αποτυχία δημιουργίας portal link.")
+      }
+
+      setPortalPartnerName(data?.partner?.name || "")
+      setPortalUrl(data?.portalAccess?.portalUrl || "")
+      setPortalCreatedAt(data?.portalAccess?.createdAt || null)
+      setPortalLastUsedAt(data?.portalAccess?.lastUsedAt || null)
+      setPortalSuccess("Το portal link δημιουργήθηκε επιτυχώς.")
+      setShowPortalBox(true)
+    } catch (err) {
+      console.error("Generate portal link error:", err)
+      setPortalError(
+        err instanceof Error
+          ? err.message
+          : "Δεν ήταν δυνατή η δημιουργία του portal link."
+      )
+    } finally {
+      setPortalLoadingId(null)
+    }
+  }
+
+  async function handleLoadExistingPortalLink(partnerId: string) {
+    try {
+      setPortalLoadingId(partnerId)
+      setPortalError("")
+      setPortalSuccess("")
+      setShowPortalBox(false)
+
+      const res = await fetch(`/api/partners/${partnerId}/portal-link`, {
+        cache: "no-store",
+      })
+
+      const data = (await res.json().catch(() => null)) as PortalAccessResponse | null
+
+      if (!res.ok) {
+        throw new Error(data && "error" in (data as any) ? (data as any).error : "Αποτυχία φόρτωσης portal link.")
+      }
+
+      if (!data?.portalAccess?.portalUrl) {
+        throw new Error("Δεν υπάρχει ακόμη ενεργό portal link για αυτόν τον συνεργάτη.")
+      }
+
+      setPortalPartnerName(data?.partner?.name || "")
+      setPortalUrl(data?.portalAccess?.portalUrl || "")
+      setPortalCreatedAt(data?.portalAccess?.createdAt || null)
+      setPortalLastUsedAt(data?.portalAccess?.lastUsedAt || null)
+      setPortalSuccess("Το portal link φορτώθηκε επιτυχώς.")
+      setShowPortalBox(true)
+    } catch (err) {
+      console.error("Load portal link error:", err)
+      setPortalError(
+        err instanceof Error
+          ? err.message
+          : "Δεν ήταν δυνατή η φόρτωση του portal link."
+      )
+    } finally {
+      setPortalLoadingId(null)
+    }
+  }
+
+  async function handleCopyPortalLink() {
+    try {
+      if (!portalUrl) return
+      await navigator.clipboard.writeText(portalUrl)
+      setPortalSuccess("Το portal link αντιγράφηκε.")
+    } catch (err) {
+      console.error("Copy portal link error:", err)
+      setPortalError("Δεν ήταν δυνατή η αντιγραφή του link.")
+    }
+  }
+
   useEffect(() => {
     loadPartners()
   }, [])
@@ -177,7 +303,7 @@ export default function PartnersPage() {
           Συνεργάτες
         </h1>
         <p className="mt-2 text-sm text-slate-500">
-          Διαχείριση συνεργατών, ειδικοτήτων και λειτουργικής διαθεσιμότητας.
+          Διαχείριση συνεργατών, ειδικοτήτων, διαθεσιμότητας και πρόσβασης στο partner portal.
         </p>
       </section>
 
@@ -322,6 +448,81 @@ export default function PartnersPage() {
         )}
       </section>
 
+      {(portalError || portalSuccess || showPortalBox) && (
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="mb-4">
+            <h2 className="text-lg font-semibold text-slate-900">
+              Partner portal
+            </h2>
+          </div>
+
+          {portalError ? (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {portalError}
+            </div>
+          ) : null}
+
+          {portalSuccess ? (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+              {portalSuccess}
+            </div>
+          ) : null}
+
+          {showPortalBox && portalUrl ? (
+            <div className="mt-4 space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div>
+                <div className="text-sm font-semibold text-slate-900">
+                  Συνεργάτης
+                </div>
+                <div className="mt-1 text-sm text-slate-700">
+                  {portalPartnerName}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-sm font-semibold text-slate-900">
+                  Portal link
+                </div>
+                <div className="mt-1 break-all rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                  {portalUrl}
+                </div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                  <span className="font-semibold text-slate-900">Δημιουργία:</span>{" "}
+                  {formatDateTime(portalCreatedAt)}
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                  <span className="font-semibold text-slate-900">Τελευταία χρήση:</span>{" "}
+                  {formatDateTime(portalLastUsedAt)}
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={handleCopyPortalLink}
+                  className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                >
+                  Αντιγραφή link
+                </button>
+
+                <a
+                  href={portalUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
+                >
+                  Άνοιγμα portal
+                </a>
+              </div>
+            </div>
+          ) : null}
+        </section>
+      )}
+
       <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="flex flex-col gap-4 border-b border-slate-200 px-6 py-4 md:flex-row md:items-center md:justify-between">
           <div>
@@ -363,19 +564,22 @@ export default function PartnersPage() {
                 <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
                   Κατάσταση
                 </th>
+                <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
+                  Portal
+                </th>
               </tr>
             </thead>
 
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-10 text-sm text-slate-500">
+                  <td colSpan={7} className="px-6 py-10 text-sm text-slate-500">
                     Φόρτωση συνεργατών...
                   </td>
                 </tr>
               ) : filteredPartners.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-12 text-center text-sm text-slate-500">
+                  <td colSpan={7} className="px-6 py-12 text-center text-sm text-slate-500">
                     Δεν υπάρχουν ακόμη συνεργάτες.
                   </td>
                 </tr>
@@ -408,6 +612,31 @@ export default function PartnersPage() {
                       >
                         {getStatusLabel(partner.status)}
                       </span>
+                    </td>
+                    <td className="px-6 py-4 text-sm">
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleGeneratePortalLink(partner.id)}
+                          disabled={portalLoadingId === partner.id}
+                          className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {portalLoadingId === partner.id
+                            ? "Δημιουργία..."
+                            : "Νέο link"}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleLoadExistingPortalLink(partner.id)}
+                          disabled={portalLoadingId === partner.id}
+                          className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {portalLoadingId === partner.id
+                            ? "Φόρτωση..."
+                            : "Προβολή link"}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))

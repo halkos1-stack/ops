@@ -63,6 +63,8 @@ type TaskAssignment = {
   notes?: string | null
   responseToken?: string | null
   checklistToken?: string | null
+  responseTokenExpiresAt?: string | null
+  checklistTokenExpiresAt?: string | null
   assignmentEmailSentAt?: string | null
   checklistEmailSentAt?: string | null
   partner: Partner
@@ -185,6 +187,31 @@ type Task = {
   activityLogs?: ActivityLog[]
 }
 
+type AssignmentCreateResponse = {
+  success: boolean
+  assignment: TaskAssignment
+  portalLink?: string | null
+  assignmentEmailSent?: boolean
+  assignmentEmailSendReason?: string | null
+}
+
+type PartnerPortalLinkResponse = {
+  partner: {
+    id: string
+    name: string
+    email: string
+  }
+  portalAccess?: {
+    id: string
+    token: string
+    isActive: boolean
+    expiresAt?: string | null
+    createdAt?: string | null
+    lastUsedAt?: string | null
+    portalUrl: string
+  } | null
+}
+
 function cls(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ")
 }
@@ -217,6 +244,92 @@ function formatDateTime(value?: string | null) {
   }).format(date)
 }
 
+function mapStatusToUi(status?: string | null) {
+  switch ((status || "").trim().toLowerCase()) {
+    case "assigned":
+      return "Ανατέθηκε"
+    case "accepted":
+      return "Αποδεκτή"
+    case "rejected":
+      return "Απορρίφθηκε"
+    case "cancelled":
+      return "Ακυρώθηκε"
+    case "pending":
+      return "Σε αναμονή"
+    case "in_progress":
+      return "Σε εξέλιξη"
+    case "started":
+      return "Ξεκίνησε"
+    case "completed":
+      return "Ολοκληρώθηκε"
+    case "active":
+      return "Ενεργό"
+    case "inactive":
+      return "Ανενεργό"
+    case "open":
+      return "Ανοιχτό"
+    case "resolved":
+      return "Επιλύθηκε"
+    case "overdue":
+      return "Εκπρόθεσμο"
+    case "draft":
+      return "Πρόχειρο"
+    default:
+      return status || "—"
+  }
+}
+
+function mapPriorityToUi(priority?: string | null) {
+  switch ((priority || "").trim().toLowerCase()) {
+    case "urgent":
+      return "Επείγον"
+    case "critical":
+      return "Κρίσιμο"
+    case "high":
+      return "Υψηλή"
+    case "medium":
+      return "Μεσαία"
+    case "normal":
+      return "Κανονική"
+    case "low":
+      return "Χαμηλή"
+    default:
+      return priority || "—"
+  }
+}
+
+function mapChecklistItemTypeToUi(itemType?: string | null) {
+  switch ((itemType || "").trim().toLowerCase()) {
+    case "boolean":
+      return "Ναι / Όχι"
+    case "text":
+      return "Κείμενο"
+    case "number":
+      return "Αριθμός"
+    case "select":
+      return "Επιλογή"
+    default:
+      return itemType || "—"
+  }
+}
+
+function mapIssueTypeToUi(issueType?: string | null) {
+  switch ((issueType || "").trim().toLowerCase()) {
+    case "damage":
+      return "Ζημιά"
+    case "repair":
+      return "Βλάβη"
+    case "supplies":
+      return "Αναλώσιμα"
+    case "inspection":
+      return "Επιθεώρηση"
+    case "cleaning":
+      return "Καθαρισμός"
+    default:
+      return issueType || "—"
+  }
+}
+
 function getStatusBadgeClasses(status?: string | null) {
   const value = (status || "").toLowerCase()
 
@@ -226,7 +339,8 @@ function getStatusBadgeClasses(status?: string | null) {
     value.includes("accepted") ||
     value.includes("active") ||
     value.includes("ολοκληρ") ||
-    value.includes("αποδεκ")
+    value.includes("αποδεκ") ||
+    value.includes("ενεργ")
   ) {
     return "bg-emerald-50 text-emerald-700 border-emerald-200"
   }
@@ -247,6 +361,7 @@ function getStatusBadgeClasses(status?: string | null) {
     value.includes("open") ||
     value.includes("overdue") ||
     value.includes("απόρρ") ||
+    value.includes("ακυρ") ||
     value.includes("ανοιχ")
   ) {
     return "bg-red-50 text-red-700 border-red-200"
@@ -270,7 +385,9 @@ function getPriorityBadgeClasses(priority?: string | null) {
   if (
     value.includes("urgent") ||
     value.includes("critical") ||
-    value.includes("υψη")
+    value.includes("high") ||
+    value.includes("υψη") ||
+    value.includes("επείγ")
   ) {
     return "bg-red-50 text-red-700 border-red-200"
   }
@@ -278,7 +395,8 @@ function getPriorityBadgeClasses(priority?: string | null) {
   if (
     value.includes("normal") ||
     value.includes("medium") ||
-    value.includes("μεσα")
+    value.includes("μεσα") ||
+    value.includes("κανον")
   ) {
     return "bg-amber-50 text-amber-700 border-amber-200"
   }
@@ -389,6 +507,17 @@ export default function TaskDetailsPage() {
   const [error, setError] = useState("")
   const [task, setTask] = useState<Task | null>(null)
 
+  const [partners, setPartners] = useState<Partner[]>([])
+  const [partnersLoading, setPartnersLoading] = useState(false)
+  const [partnersError, setPartnersError] = useState("")
+
+  const [selectedPartnerId, setSelectedPartnerId] = useState("")
+  const [assignmentNotes, setAssignmentNotes] = useState("")
+  const [assigning, setAssigning] = useState(false)
+  const [assignmentError, setAssignmentError] = useState("")
+  const [assignmentSuccess, setAssignmentSuccess] = useState("")
+  const [latestPortalLink, setLatestPortalLink] = useState("")
+
   async function loadTask() {
     if (!taskId) return
 
@@ -418,13 +547,78 @@ export default function TaskDetailsPage() {
     }
   }
 
+  async function loadPartners() {
+    try {
+      setPartnersLoading(true)
+      setPartnersError("")
+
+      const res = await fetch(`/api/partners?status=active`, {
+        cache: "no-store",
+      })
+
+      const data = await res.json().catch(() => null)
+
+      if (!res.ok) {
+        throw new Error(data?.error || "Αποτυχία φόρτωσης συνεργατών.")
+      }
+
+      setPartners(Array.isArray(data) ? data : [])
+    } catch (err) {
+      console.error("Σφάλμα φόρτωσης συνεργατών:", err)
+      setPartners([])
+      setPartnersError(
+        err instanceof Error ? err.message : "Αποτυχία φόρτωσης συνεργατών."
+      )
+    } finally {
+      setPartnersLoading(false)
+    }
+  }
+
   useEffect(() => {
     loadTask()
+    loadPartners()
   }, [taskId])
 
   const latestAssignment = useMemo(() => {
     return task ? getLatestAssignment(task) : null
   }, [task])
+
+  useEffect(() => {
+    if (task?.property?.defaultPartner?.id) {
+      setSelectedPartnerId(task.property.defaultPartner.id)
+    }
+  }, [task?.property?.defaultPartner?.id])
+
+  useEffect(() => {
+    async function loadPortalLink() {
+      if (!latestAssignment?.partner?.id) {
+        setLatestPortalLink("")
+        return
+      }
+
+      try {
+        const res = await fetch(
+          `/api/partners/${latestAssignment.partner.id}/portal-link`,
+          {
+            cache: "no-store",
+          }
+        )
+
+        const data = (await res.json().catch(() => null)) as PartnerPortalLinkResponse | null
+
+        if (!res.ok) {
+          setLatestPortalLink("")
+          return
+        }
+
+        setLatestPortalLink(data?.portalAccess?.portalUrl || "")
+      } catch {
+        setLatestPortalLink("")
+      }
+    }
+
+    loadPortalLink()
+  }, [latestAssignment?.partner?.id])
 
   const duration = useMemo(() => {
     if (!task) return "—"
@@ -434,6 +628,80 @@ export default function TaskDetailsPage() {
       latestAssignment?.completedAt || task.checklistRun?.completedAt
     )
   }, [task, latestAssignment])
+
+  async function handleCreateAssignment() {
+    if (!task || !selectedPartnerId) {
+      setAssignmentError("Επέλεξε συνεργάτη πριν δημιουργήσεις ανάθεση.")
+      return
+    }
+
+    try {
+      setAssigning(true)
+      setAssignmentError("")
+      setAssignmentSuccess("")
+
+      const res = await fetch("/api/task-assignments", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          taskId: task.id,
+          partnerId: selectedPartnerId,
+          notes: assignmentNotes,
+        }),
+      })
+
+      const data = (await res.json().catch(() => null)) as AssignmentCreateResponse | null
+
+      if (!res.ok) {
+        throw new Error(
+          data && "error" in (data as any)
+            ? (data as any).error
+            : "Αποτυχία δημιουργίας ανάθεσης."
+        )
+      }
+
+      setAssignmentSuccess(
+        data?.assignmentEmailSent
+          ? "Η ανάθεση δημιουργήθηκε και στάλθηκε email στον συνεργάτη."
+          : "Η ανάθεση δημιουργήθηκε. Χρησιμοποίησε το link portal συνεργάτη παρακάτω."
+      )
+
+      setLatestPortalLink(data?.portalLink || "")
+      setAssignmentNotes("")
+
+      await loadTask()
+    } catch (err) {
+      console.error("Σφάλμα δημιουργίας ανάθεσης:", err)
+      setAssignmentError(
+        err instanceof Error ? err.message : "Αποτυχία δημιουργίας ανάθεσης."
+      )
+    } finally {
+      setAssigning(false)
+    }
+  }
+
+  async function copyToClipboard(value: string, successText: string) {
+    try {
+      await navigator.clipboard.writeText(value)
+      setAssignmentSuccess(successText)
+      setAssignmentError("")
+    } catch {
+      setAssignmentError("Αποτυχία αντιγραφής στο πρόχειρο.")
+    }
+  }
+
+  const filteredPartners = useMemo(() => {
+    if (!task?.property?.defaultPartner?.id) return partners
+
+    const unique = new Map<string, Partner>()
+    for (const partner of partners) {
+      unique.set(partner.id, partner)
+    }
+
+    return Array.from(unique.values())
+  }, [partners, task?.property?.defaultPartner?.id])
 
   if (loading) {
     return (
@@ -484,7 +752,7 @@ export default function TaskDetailsPage() {
                   getStatusBadgeClasses(task.status)
                 )}
               >
-                {task.status || "—"}
+                {mapStatusToUi(task.status)}
               </span>
 
               <span
@@ -493,7 +761,7 @@ export default function TaskDetailsPage() {
                   getPriorityBadgeClasses(task.priority)
                 )}
               >
-                {task.priority || "normal"}
+                {mapPriorityToUi(task.priority || "normal")}
               </span>
 
               <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
@@ -650,6 +918,132 @@ export default function TaskDetailsPage() {
 
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="mb-5">
+              <h2 className="text-2xl font-bold text-slate-950">Διαχείριση ανάθεσης</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Ανάθεσε την εργασία σε συνεργάτη και πάρε link portal.
+              </p>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-700">
+                  Επιλογή συνεργάτη
+                </label>
+                <select
+                  value={selectedPartnerId}
+                  onChange={(e) => setSelectedPartnerId(e.target.value)}
+                  className="w-full rounded-2xl border border-slate-300 px-4 py-3 outline-none transition focus:border-blue-500"
+                >
+                  <option value="">Επέλεξε συνεργάτη</option>
+                  {filteredPartners.map((partner) => (
+                    <option key={partner.id} value={partner.id}>
+                      {partner.name} · {partner.specialty} · {partner.email}
+                    </option>
+                  ))}
+                </select>
+
+                {partnersLoading ? (
+                  <p className="mt-2 text-xs text-slate-500">Φόρτωση συνεργατών...</p>
+                ) : null}
+
+                {partnersError ? (
+                  <p className="mt-2 text-xs text-red-600">{partnersError}</p>
+                ) : null}
+
+                {task.property.defaultPartner ? (
+                  <p className="mt-2 text-xs text-slate-500">
+                    Προεπιλεγμένος συνεργάτης ακινήτου:{" "}
+                    {task.property.defaultPartner.name}
+                  </p>
+                ) : null}
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-700">
+                  Σημειώσεις ανάθεσης
+                </label>
+                <textarea
+                  rows={4}
+                  value={assignmentNotes}
+                  onChange={(e) => setAssignmentNotes(e.target.value)}
+                  className="w-full rounded-2xl border border-slate-300 px-4 py-3 outline-none transition focus:border-blue-500"
+                  placeholder="Προαιρετικές οδηγίες προς συνεργάτη"
+                />
+              </div>
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={handleCreateAssignment}
+                disabled={assigning}
+                className="rounded-2xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {assigning ? "Δημιουργία ανάθεσης..." : "Ανάθεση σε συνεργάτη"}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setAssignmentNotes("")
+                  setAssignmentError("")
+                  setAssignmentSuccess("")
+                }}
+                className="rounded-2xl border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+              >
+                Καθαρισμός
+              </button>
+            </div>
+
+            {assignmentError ? (
+              <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {assignmentError}
+              </div>
+            ) : null}
+
+            {assignmentSuccess ? (
+              <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                {assignmentSuccess}
+              </div>
+            ) : null}
+
+            {latestPortalLink ? (
+              <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-sm font-semibold text-slate-900">
+                  Link portal συνεργάτη
+                </p>
+                <p className="mt-2 break-all text-sm text-slate-600">
+                  {latestPortalLink}
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      copyToClipboard(
+                        latestPortalLink,
+                        "Το link portal συνεργάτη αντιγράφηκε."
+                      )
+                    }
+                    className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    Αντιγραφή link
+                  </button>
+
+                  <a
+                    href={latestPortalLink}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    Άνοιγμα portal
+                  </a>
+                </div>
+              </div>
+            ) : null}
+          </section>
+
+          <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="mb-5">
               <h2 className="text-2xl font-bold text-slate-950">Αναθέσεις</h2>
               <p className="mt-1 text-sm text-slate-500">
                 Ιστορικό ανάθεσης, αποδοχής, έναρξης και ολοκλήρωσης.
@@ -683,7 +1077,7 @@ export default function TaskDetailsPage() {
                           getStatusBadgeClasses(assignment.status)
                         )}
                       >
-                        {assignment.status}
+                        {mapStatusToUi(assignment.status)}
                       </span>
                     </div>
 
@@ -793,7 +1187,7 @@ export default function TaskDetailsPage() {
                         getStatusBadgeClasses(task.checklistRun.status)
                       )}
                     >
-                      {task.checklistRun.status}
+                      {mapStatusToUi(task.checklistRun.status)}
                     </span>
                   </div>
 
@@ -843,7 +1237,7 @@ export default function TaskDetailsPage() {
                           </div>
 
                           <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
-                            {answer.templateItem.itemType}
+                            {mapChecklistItemTypeToUi(answer.templateItem.itemType)}
                           </span>
                         </div>
 
@@ -928,7 +1322,7 @@ export default function TaskDetailsPage() {
                             getStatusBadgeClasses(issue.status)
                           )}
                         >
-                          {issue.status || "—"}
+                          {mapStatusToUi(issue.status)}
                         </span>
 
                         <span
@@ -937,13 +1331,13 @@ export default function TaskDetailsPage() {
                             getPriorityBadgeClasses(issue.severity)
                           )}
                         >
-                          {issue.severity || "—"}
+                          {mapPriorityToUi(issue.severity)}
                         </span>
                       </div>
                     </div>
 
                     <div className="mt-3 text-xs text-slate-500">
-                      {issue.issueType} • {formatDateTime(issue.createdAt)}
+                      {mapIssueTypeToUi(issue.issueType)} • {formatDateTime(issue.createdAt)}
                     </div>
                   </div>
                 ))}
@@ -976,7 +1370,7 @@ export default function TaskDetailsPage() {
                           {log.message || log.action}
                         </p>
                         <p className="mt-1 text-xs text-slate-500">
-                          {log.actorType || "system"} • {log.actorName || "—"} •{" "}
+                          {mapStatusToUi(log.actorType || "system")} • {log.actorName || "—"} •{" "}
                           {log.action}
                         </p>
                       </div>
@@ -1021,7 +1415,7 @@ export default function TaskDetailsPage() {
                 <strong>Τύπος:</strong> {mapPropertyTypeToUi(task.property.type)}
               </div>
               <div>
-                <strong>Κατάσταση:</strong> {task.property.status}
+                <strong>Κατάσταση:</strong> {mapStatusToUi(task.property.status)}
               </div>
             </div>
 
@@ -1065,7 +1459,7 @@ export default function TaskDetailsPage() {
                   <strong>Ειδικότητα:</strong> {latestAssignment.partner.specialty}
                 </div>
                 <div>
-                  <strong>Κατάσταση:</strong> {latestAssignment.status}
+                  <strong>Κατάσταση:</strong> {mapStatusToUi(latestAssignment.status)}
                 </div>
                 <div>
                   <strong>Ανάθεση:</strong> {formatDateTime(latestAssignment.assignedAt)}
@@ -1078,6 +1472,18 @@ export default function TaskDetailsPage() {
                 </div>
                 <div>
                   <strong>Ολοκλήρωση:</strong> {formatDateTime(latestAssignment.completedAt)}
+                </div>
+                <div>
+                  <strong>Email ανάθεσης:</strong>{" "}
+                  {latestAssignment.assignmentEmailSentAt
+                    ? formatDateTime(latestAssignment.assignmentEmailSentAt)
+                    : "Δεν έχει σταλεί"}
+                </div>
+                <div>
+                  <strong>Email checklist:</strong>{" "}
+                  {latestAssignment.checklistEmailSentAt
+                    ? formatDateTime(latestAssignment.checklistEmailSentAt)
+                    : "Δεν έχει σταλεί"}
                 </div>
               </div>
             )}
@@ -1110,7 +1516,7 @@ export default function TaskDetailsPage() {
                   <strong>Check-out:</strong> {formatDate(task.booking.checkOutDate)}
                 </div>
                 <div>
-                  <strong>Κατάσταση:</strong> {task.booking.status || "—"}
+                  <strong>Κατάσταση:</strong> {mapStatusToUi(task.booking.status)}
                 </div>
               </div>
             )}
