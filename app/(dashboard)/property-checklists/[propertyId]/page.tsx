@@ -61,10 +61,10 @@ type NewItemDraft = {
 
 const texts = {
   el: {
-    pageEyebrow: "Πρότυπα checklist ακινήτου",
-    pageTitleFallback: "Checklist ακινήτου",
+    pageEyebrow: "Πρότυπα λίστας καθαριότητας ακινήτου",
+    pageTitleFallback: "Λίστα καθαριότητας ακινήτου",
     pageSubtitle:
-      "Ανά ακίνητο επιτρέπονται πολλά πρότυπα checklist, αλλά μόνο ένα είναι το κύριο πρότυπο της βασικής ροής.",
+      "Εδώ διαχειρίζεσαι μόνο τη λογική των προτύπων καθαριότητας του ακινήτου. Τα αναλώσιμα διαχειρίζονται ξεχωριστά από τη σελίδα αναλωσίμων και όχι ως checklist templates.",
     backToChecklists: "Επιστροφή στα checklists",
     backToProperty: "Επιστροφή στο ακίνητο",
 
@@ -73,20 +73,20 @@ const texts = {
     activeTemplates: "Ενεργά πρότυπα",
     inactiveTemplates: "Ανενεργά πρότυπα",
 
-    filterAllSubtitle: "Όλα τα πρότυπα του ακινήτου",
-    filterPrimarySubtitle: "Μόνο τα κύρια πρότυπα",
+    filterAllSubtitle: "Όλα τα πρότυπα καθαριότητας του ακινήτου",
+    filterPrimarySubtitle: "Μόνο το κύριο πρότυπο",
     filterActiveSubtitle: "Μόνο τα ενεργά πρότυπα",
     filterInactiveSubtitle: "Μόνο τα ανενεργά πρότυπα",
 
-    showNewTemplate: "Νέο πρότυπο checklist",
-    hideNewTemplate: "Απόκρυψη φόρμας νέου προτύπου",
+    showNewTemplate: "Νέο πρότυπο",
+    hideNewTemplate: "Απόκρυψη φόρμας",
 
-    newTemplateTitle: "Νέο πρότυπο checklist",
+    newTemplateTitle: "Νέο πρότυπο καθαριότητας",
     newTemplateSubtitle:
-      "Δημιούργησε νέο πρότυπο για την κύρια ροή ή για ειδικές χρήσεις όπως ζημιές, βλάβες, αναλώσιμα, επιθεώρηση και φωτογραφική τεκμηρίωση.",
+      "Δημιούργησε νέο πρότυπο για τη βασική ροή καθαριότητας ή για ειδικές βοηθητικές περιπτώσεις καθαριότητας / επιθεώρησης.",
 
     templateTitle: "Τίτλος προτύπου",
-    templateTitlePlaceholder: "π.χ. Βασική checklist ετοιμότητας ακινήτου",
+    templateTitlePlaceholder: "π.χ. Βασική λίστα εργασιών ακινήτου",
 
     templateDescription: "Περιγραφή",
     templateDescriptionPlaceholder:
@@ -96,9 +96,9 @@ const texts = {
     activeStatus: "Κατάσταση",
     setAsPrimary: "Ορισμός ως κύριο πρότυπο του ακινήτου",
 
-    checklistItems: "Στοιχεία checklist",
+    checklistItems: "Στοιχεία λίστας",
     checklistItemsSubtitle:
-      "Όρισε τα βήματα που θα εκτελούνται σε κάθε run της λίστας.",
+      "Όρισε τα βήματα που θα εκτελούνται σε κάθε εκτέλεση της λίστας καθαριότητας.",
 
     itemLabel: "Τίτλος στοιχείου",
     itemLabelPlaceholder: "π.χ. Έλεγχος κουζίνας",
@@ -112,7 +112,7 @@ const texts = {
 
     itemChoices: "Επιλογές",
     itemChoicesSubtitle:
-      "Πρόσθεσε όσες επιλογές θέλεις. Ο συνεργάτης θα μπορεί να επιλέγει μία από αυτές.",
+      "Πρόσθεσε τις επιλογές που θα εμφανίζονται στον συνεργάτη.",
     choicePlaceholder: "π.χ. Καλή",
     addChoice: "Προσθήκη επιλογής",
     removeChoice: "Αφαίρεση επιλογής",
@@ -128,7 +128,7 @@ const texts = {
 
     existingTemplates: "Υπάρχοντα πρότυπα",
     existingTemplatesSubtitle:
-      "Λίστα των προτύπων checklist του ακινήτου. Κάθε πρότυπο ανοίγει ξεχωριστά από το κουμπί προβολής.",
+      "Εδώ εμφανίζονται μόνο τα πρότυπα καθαριότητας του ακινήτου. Τα παλιά πρότυπα αναλωσίμων αποκλείονται από αυτή τη σελίδα.",
     noTemplates: "Δεν υπάρχουν πρότυπα για αυτό το ακίνητο.",
     noTemplatesForFilter: "Δεν υπάρχουν πρότυπα για το συγκεκριμένο φίλτρο.",
 
@@ -162,10 +162,10 @@ const texts = {
     languageEnglish: "English",
   },
   en: {
-    pageEyebrow: "Property checklist templates",
-    pageTitleFallback: "Property checklist",
+    pageEyebrow: "Property cleaning checklist templates",
+    pageTitleFallback: "Property cleaning checklist",
     pageSubtitle:
-      "Each property can have multiple checklist templates, but only one can be the primary template for the core workflow.",
+      "Manage only the cleaning checklist logic of the property here. Supplies are managed separately in the supplies page and not as checklist templates.",
     backToChecklists: "Back to checklists",
     backToProperty: "Back to property",
 
@@ -174,20 +174,20 @@ const texts = {
     activeTemplates: "Active templates",
     inactiveTemplates: "Inactive templates",
 
-    filterAllSubtitle: "All templates for this property",
-    filterPrimarySubtitle: "Only primary templates",
+    filterAllSubtitle: "All cleaning templates for this property",
+    filterPrimarySubtitle: "Only the primary template",
     filterActiveSubtitle: "Only active templates",
     filterInactiveSubtitle: "Only inactive templates",
 
-    showNewTemplate: "New checklist template",
-    hideNewTemplate: "Hide new template form",
+    showNewTemplate: "New template",
+    hideNewTemplate: "Hide form",
 
-    newTemplateTitle: "New checklist template",
+    newTemplateTitle: "New cleaning template",
     newTemplateSubtitle:
-      "Create a new template for the core workflow or for special uses like damage, issues, supplies, inspection and photo documentation.",
+      "Create a new template for the main cleaning workflow or for helper cleaning / inspection cases.",
 
     templateTitle: "Template title",
-    templateTitlePlaceholder: "e.g. Main property readiness checklist",
+    templateTitlePlaceholder: "e.g. Main property cleaning list",
 
     templateDescription: "Description",
     templateDescriptionPlaceholder: "Short description of this template.",
@@ -198,7 +198,7 @@ const texts = {
 
     checklistItems: "Checklist items",
     checklistItemsSubtitle:
-      "Define the steps that will run each time this checklist is executed.",
+      "Define the steps that will run each time this cleaning checklist is executed.",
 
     itemLabel: "Item title",
     itemLabelPlaceholder: "e.g. Kitchen inspection",
@@ -212,7 +212,7 @@ const texts = {
 
     itemChoices: "Choices",
     itemChoicesSubtitle:
-      "Add as many options as you want. The partner will be able to select one of them.",
+      "Add the options that will be shown to the partner.",
     choicePlaceholder: "e.g. Good",
     addChoice: "Add choice",
     removeChoice: "Remove choice",
@@ -228,7 +228,7 @@ const texts = {
 
     existingTemplates: "Existing templates",
     existingTemplatesSubtitle:
-      "List of property checklist templates. Each template opens separately with its view button.",
+      "Only property cleaning templates are shown here. Legacy supplies templates are excluded from this page.",
     noTemplates: "There are no templates for this property.",
     noTemplatesForFilter: "There are no templates for this filter.",
 

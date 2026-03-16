@@ -45,30 +45,36 @@ type PropertyListItem = {
     status: string
     checkInDate: string
     checkOutDate: string
+    checkInTime?: string | null
   }>
   tasks?: Array<{
     id: string
     status: string
-    priority?: string
-    taskType?: string
-    scheduledDate?: string
+    priority?: string | null
+    taskType?: string | null
+    scheduledDate?: string | null
+    assignments?: Array<{
+      id: string
+      status: string
+      assignedAt?: string | null
+      acceptedAt?: string | null
+      rejectedAt?: string | null
+    }>
+    checklistRun?: {
+      id: string
+      status: string
+      startedAt?: string | null
+      completedAt?: string | null
+    } | null
   }>
   issues?: Array<{
     id: string
     status: string
-    severity?: string
-  }>
-  checklistTemplates?: Array<{
-    id: string
-    title: string
-    templateType: string
-    isPrimary: boolean
-    isActive: boolean
+    severity?: string | null
   }>
 }
 
 type CreatePropertyFormState = {
-  code: string
   name: string
   address: string
   city: string
@@ -84,18 +90,9 @@ type CreatePropertyFormState = {
   notes: string
 }
 
-type PropertyMetricFilter =
-  | "all"
-  | "active"
-  | "inactive"
-  | "maintenance"
-  | "archived"
-  | "with_open_issues"
-  | "with_pending_tasks"
-  | "without_partner"
+type MetricFilter = "all" | "active" | "inactive" | "ready" | "requires_action"
 
 const initialCreateForm: CreatePropertyFormState = {
-  code: "",
   name: "",
   address: "",
   city: "",
@@ -122,17 +119,6 @@ function normalizeDate(value?: string | null) {
   return date
 }
 
-function formatDate(value: string | null | undefined, locale: string) {
-  const date = normalizeDate(value)
-  if (!date) return "—"
-
-  return new Intl.DateTimeFormat(locale, {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).format(date)
-}
-
 function formatDateTime(value: string | null | undefined, locale: string) {
   const date = normalizeDate(value)
   if (!date) return "—"
@@ -144,6 +130,25 @@ function formatDateTime(value: string | null | undefined, locale: string) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(date)
+}
+
+function combineCheckInDateTime(
+  checkInDate?: string | null,
+  checkInTime?: string | null
+) {
+  const date = normalizeDate(checkInDate)
+  if (!date) return null
+
+  if (checkInTime && /^\d{2}:\d{2}$/.test(checkInTime)) {
+    const [hours, minutes] = checkInTime.split(":").map(Number)
+    const merged = new Date(date)
+    merged.setHours(hours, minutes, 0, 0)
+    return merged
+  }
+
+  const merged = new Date(date)
+  merged.setHours(15, 0, 0, 0)
+  return merged
 }
 
 function getStatusBadgeClasses(status?: string | null) {
@@ -175,7 +180,7 @@ function getStatusBadgeClasses(status?: string | null) {
 
 function getMetricCardClasses(
   active: boolean,
-  tone: "default" | "green" | "slate" | "amber" | "red" | "blue"
+  tone: "default" | "green" | "slate" | "amber" | "red"
 ) {
   if (active) {
     switch (tone) {
@@ -187,8 +192,6 @@ function getMetricCardClasses(
         return "border-amber-300 bg-amber-50 ring-2 ring-amber-200"
       case "red":
         return "border-red-300 bg-red-50 ring-2 ring-red-200"
-      case "blue":
-        return "border-blue-300 bg-blue-50 ring-2 ring-blue-200"
       default:
         return "border-slate-300 bg-slate-50 ring-2 ring-slate-200"
     }
@@ -203,41 +206,25 @@ function getPropertiesPageTexts(language: "el" | "en") {
       locale: "en-GB",
       title: "Properties",
       subtitle:
-        "Complete portfolio view with status, partners, tasks and open issues.",
-      calendar: "Calendar",
+        "Clean operational view with dynamic filters, readiness status and critical alerts.",
       newProperty: "New property",
       loading: "Loading properties...",
       loadError: "Failed to load property data.",
-      listTitle: "Properties list",
-      listSubtitlePrefix: "",
-      listSubtitleMiddle: "of",
-      listSubtitleSuffix: "properties",
+      listTitle: "Properties",
       noResults: "No properties found with the current filters.",
 
       search: "Search",
       searchPlaceholder: "Name, code, address, city...",
-      status: "Status",
       type: "Type",
       city: "City",
-      defaultPartner: "Default partner",
       sort: "Sort",
       clearFilters: "Clear filters",
 
-      allStatuses: "All",
-      statusActive: "Active",
-      statusInactive: "Inactive",
-      statusMaintenance: "Maintenance",
-      statusArchived: "Archived",
-
       allTypes: "All",
       allCities: "All",
-      allPartners: "All",
-      noPartner: "Without partner",
 
       sortUpdatedDesc: "Most recently updated",
       sortUpdatedAsc: "Oldest update",
-      sortCreatedDesc: "Newest created",
-      sortCreatedAsc: "Oldest created",
       sortNameAsc: "Name A-Z",
       sortNameDesc: "Name Z-A",
       sortCityAsc: "City A-Z",
@@ -246,42 +233,21 @@ function getPropertiesPageTexts(language: "el" | "en") {
       total: "Total properties",
       active: "Active",
       inactive: "Inactive",
-      maintenance: "Maintenance",
-      archived: "Archived",
-      pendingTasks: "Pending tasks",
-      openIssues: "Open issues",
-      withoutPartnerMetric: "Without partner",
+      ready: "Ready",
+      requiresAction: "Needs action",
 
       property: "Property",
-      location: "Location",
-      features: "Features",
-      partner: "Partner",
-      operations: "Operations",
+      address: "Address",
+      readiness: "Readiness",
       updated: "Updated",
       actions: "Actions",
-      code: "Code",
-      propertyType: "Type",
-      createdAt: "Created",
-      lastUpdated: "Last update",
-
-      bookings: "Bookings",
-      activeTasks: "Active tasks",
-      openIssuesInline: "Open issues",
-      primaryChecklist: "Primary checklist",
-
-      notAssigned: "Not assigned",
       view: "View",
-      checklists: "Checklists",
 
-      createTitle: "New property",
-      createSubtitle: "Create a new property with all basic details.",
-      close: "Close",
-      cancel: "Cancel",
-      saveProperty: "Save property",
-      saving: "Creating...",
-      createError: "Failed to create property.",
+      propertyReady: "Ready",
+      propertyNeedsAction: "Needs action",
+      criticalAlert: "Critical before check-in",
+      noCriticalAlert: "No critical alert",
 
-      formCode: "Code *",
       formName: "Name *",
       formAddress: "Address *",
       formCity: "City *",
@@ -296,7 +262,6 @@ function getPropertiesPageTexts(language: "el" | "en") {
       formDefaultPartner: "Default partner",
       formNotes: "Notes",
 
-      placeholderCode: "e.g. PR-001",
       placeholderName: "e.g. Villa Marina",
       placeholderAddress: "Street, number",
       placeholderCity: "e.g. Heraklion",
@@ -313,11 +278,23 @@ function getPropertiesPageTexts(language: "el" | "en") {
       other: "Other",
       greece: "Greece",
 
-      portfolioHint: "Dynamic portfolio view based on filters and metrics.",
-      filterAll: "All",
-      filterWithIssues: "With open issues",
-      filterWithPendingTasks: "With pending tasks",
-      filterWithoutPartner: "Without partner",
+      statusActive: "Active",
+      statusInactive: "Inactive",
+      statusMaintenance: "Maintenance",
+      statusArchived: "Archived",
+
+      noPartner: "Without partner",
+      createTitle: "New property",
+      createSubtitle:
+        "The property code is generated automatically from the organization.",
+      close: "Close",
+      cancel: "Cancel",
+      saveProperty: "Save property",
+      saving: "Creating...",
+      createError: "Failed to create property.",
+
+      pageHint:
+        "The counters work as dynamic filters. The list stays intentionally clean.",
     }
   }
 
@@ -325,85 +302,48 @@ function getPropertiesPageTexts(language: "el" | "en") {
     locale: "el-GR",
     title: "Ακίνητα",
     subtitle:
-      "Πλήρης εικόνα χαρτοφυλακίου, κατάστασης, συνεργατών, εργασιών και ανοιχτών θεμάτων.",
-    calendar: "Ημερολόγιο",
+      "Καθαρή επιχειρησιακή εικόνα με δυναμικά φίλτρα, ετοιμότητα και κρίσιμα alerts.",
     newProperty: "Νέο ακίνητο",
     loading: "Φόρτωση ακινήτων...",
     loadError: "Αποτυχία φόρτωσης δεδομένων ακινήτων.",
-    listTitle: "Λίστα ακινήτων",
-    listSubtitlePrefix: "",
-    listSubtitleMiddle: "από",
-    listSubtitleSuffix: "ακίνητα",
+    listTitle: "Ακίνητα",
     noResults: "Δεν βρέθηκαν ακίνητα με τα τρέχοντα φίλτρα.",
 
     search: "Αναζήτηση",
     searchPlaceholder: "Όνομα, κωδικός, διεύθυνση, πόλη...",
-    status: "Κατάσταση",
     type: "Τύπος",
     city: "Πόλη",
-    defaultPartner: "Προεπιλεγμένος συνεργάτης",
     sort: "Ταξινόμηση",
     clearFilters: "Καθαρισμός φίλτρων",
 
-    allStatuses: "Όλες",
-    statusActive: "Ενεργό",
-    statusInactive: "Ανενεργό",
-    statusMaintenance: "Σε συντήρηση",
-    statusArchived: "Αρχειοθετημένο",
-
     allTypes: "Όλοι",
     allCities: "Όλες",
-    allPartners: "Όλοι",
-    noPartner: "Χωρίς συνεργάτη",
 
     sortUpdatedDesc: "Πιο πρόσφατη ενημέρωση",
     sortUpdatedAsc: "Παλαιότερη ενημέρωση",
-    sortCreatedDesc: "Νεότερη δημιουργία",
-    sortCreatedAsc: "Παλαιότερη δημιουργία",
     sortNameAsc: "Όνομα Α-Ω",
     sortNameDesc: "Όνομα Ω-Α",
     sortCityAsc: "Πόλη Α-Ω",
     sortCityDesc: "Πόλη Ω-Α",
 
-    total: "Σύνολο ακινήτων",
+    total: "Συνολικά ακίνητα",
     active: "Ενεργά",
     inactive: "Ανενεργά",
-    maintenance: "Σε συντήρηση",
-    archived: "Αρχειοθετημένα",
-    pendingTasks: "Εκκρεμείς εργασίες",
-    openIssues: "Ανοιχτά θέματα",
-    withoutPartnerMetric: "Χωρίς συνεργάτη",
+    ready: "Έτοιμα",
+    requiresAction: "Θέλουν ενέργειες",
 
     property: "Ακίνητο",
-    location: "Τοποθεσία",
-    features: "Χαρακτηριστικά",
-    partner: "Συνεργάτης",
-    operations: "Λειτουργία",
+    address: "Διεύθυνση",
+    readiness: "Κατάσταση",
     updated: "Ενημέρωση",
     actions: "Ενέργειες",
-    code: "Κωδικός",
-    propertyType: "Τύπος",
-    createdAt: "Δημιουργία",
-    lastUpdated: "Τελευταία ενημέρωση",
-
-    bookings: "Κρατήσεις",
-    activeTasks: "Ενεργές εργασίες",
-    openIssuesInline: "Ανοιχτά θέματα",
-    primaryChecklist: "Κύρια checklist",
-
-    notAssigned: "Δεν έχει οριστεί",
     view: "Προβολή",
-    checklists: "Checklists",
 
-    createTitle: "Νέο ακίνητο",
-    createSubtitle: "Δημιουργία νέου ακινήτου με πλήρη βασικά στοιχεία.",
-    close: "Κλείσιμο",
-    cancel: "Ακύρωση",
-    saveProperty: "Αποθήκευση ακινήτου",
-    saving: "Δημιουργία...",
-    createError: "Αποτυχία δημιουργίας ακινήτου.",
+    propertyReady: "Έτοιμο",
+    propertyNeedsAction: "Θέλει ενέργειες",
+    criticalAlert: "Κρίσιμο πριν το check-in",
+    noCriticalAlert: "Χωρίς κρίσιμο alert",
 
-    formCode: "Κωδικός *",
     formName: "Όνομα *",
     formAddress: "Διεύθυνση *",
     formCity: "Πόλη *",
@@ -418,7 +358,6 @@ function getPropertiesPageTexts(language: "el" | "en") {
     formDefaultPartner: "Προεπιλεγμένος συνεργάτης",
     formNotes: "Σημειώσεις",
 
-    placeholderCode: "π.χ. PR-001",
     placeholderName: "π.χ. Villa Marina",
     placeholderAddress: "Οδός, αριθμός",
     placeholderCity: "π.χ. Ηράκλειο",
@@ -435,11 +374,23 @@ function getPropertiesPageTexts(language: "el" | "en") {
     other: "Άλλο",
     greece: "Ελλάδα",
 
-    portfolioHint: "Δυναμική προβολή χαρτοφυλακίου με βάση φίλτρα και μετρητές.",
-    filterAll: "Όλα",
-    filterWithIssues: "Με ανοιχτά θέματα",
-    filterWithPendingTasks: "Με εκκρεμείς εργασίες",
-    filterWithoutPartner: "Χωρίς συνεργάτη",
+    statusActive: "Ενεργό",
+    statusInactive: "Ανενεργό",
+    statusMaintenance: "Σε συντήρηση",
+    statusArchived: "Αρχειοθετημένο",
+
+    noPartner: "Χωρίς συνεργάτη",
+    createTitle: "Νέο ακίνητο",
+    createSubtitle:
+      "Ο κωδικός του ακινήτου δημιουργείται αυτόματα από τον οργανισμό.",
+    close: "Κλείσιμο",
+    cancel: "Ακύρωση",
+    saveProperty: "Αποθήκευση ακινήτου",
+    saving: "Δημιουργία...",
+    createError: "Αποτυχία δημιουργίας ακινήτου.",
+
+    pageHint:
+      "Οι μετρητές λειτουργούν ως δυναμικά φίλτρα. Η λίστα μένει σκόπιμα καθαρή.",
   }
 }
 
@@ -530,36 +481,211 @@ function typeLabel(language: "el" | "en", type?: string | null) {
       return "Άλλο"
     default:
       return type
-    }
+  }
 }
 
-function propertyMatchesMetricFilter(
-  property: PropertyListItem,
-  metricFilter: PropertyMetricFilter
-) {
-  const issues = safeArray(property.issues)
-  const tasks = safeArray(property.tasks)
-
-  const openIssues = issues.filter((issue) => issue.status === "open").length
-  const pendingTasks = tasks.filter((task) =>
-    ["pending", "assigned", "accepted", "in_progress"].includes(task.status)
+function getOpenIssuesCount(property: PropertyListItem) {
+  return safeArray(property.issues).filter((issue) =>
+    ["open", "in_progress"].includes(String(issue.status || "").toLowerCase())
   ).length
+}
 
+function isTaskStillOperationallyOpen(
+  task: NonNullable<PropertyListItem["tasks"]>[number]
+) {
+  const taskStatus = String(task?.status || "").toLowerCase()
+  const assignmentStatus = String(task?.assignments?.[0]?.status || "").toLowerCase()
+  const checklistStatus = String(task?.checklistRun?.status || "").toLowerCase()
+
+  if (["completed", "cancelled", "archived", "closed"].includes(taskStatus)) {
+    return false
+  }
+
+  if (
+    ["pending", "assigned", "accepted", "in_progress", "new"].includes(taskStatus)
+  ) {
+    return true
+  }
+
+  if (
+    ["pending", "assigned", "sent", "accepted", "waiting_acceptance"].includes(
+      assignmentStatus
+    )
+  ) {
+    return true
+  }
+
+  if (
+    ["pending", "in_progress", "submitted", "needs_review"].includes(
+      checklistStatus
+    )
+  ) {
+    return true
+  }
+
+  return false
+}
+
+function getOpenTasksCount(property: PropertyListItem) {
+  return safeArray(property.tasks).filter((task) =>
+    isTaskStillOperationallyOpen(task)
+  ).length
+}
+
+function getNextUpcomingBooking(property: PropertyListItem) {
+  const now = Date.now()
+
+  return safeArray(property.bookings)
+    .map((booking) => {
+      const checkInAt = combineCheckInDateTime(
+        booking.checkInDate,
+        booking.checkInTime || null
+      )
+
+      return {
+        ...booking,
+        checkInAt,
+      }
+    })
+    .filter((booking) => {
+      const status = String(booking.status || "").toLowerCase()
+      return (
+        booking.checkInAt &&
+        booking.checkInAt.getTime() >= now &&
+        ["confirmed", "pending"].includes(status)
+      )
+    })
+    .sort((a, b) => {
+      return (
+        (a.checkInAt?.getTime() || Number.MAX_SAFE_INTEGER) -
+        (b.checkInAt?.getTime() || Number.MAX_SAFE_INTEGER)
+      )
+    })[0]
+}
+
+function hasCriticalCheckInAlert(property: PropertyListItem) {
+  const nextBooking = getNextUpcomingBooking(property)
+  if (!nextBooking?.checkInAt) return false
+
+  const openIssues = getOpenIssuesCount(property)
+  if (openIssues <= 0) return false
+
+  const diffMs = nextBooking.checkInAt.getTime() - Date.now()
+  const threeHoursMs = 3 * 60 * 60 * 1000
+
+  return diffMs >= 0 && diffMs <= threeHoursMs
+}
+
+function isPropertyOperationallyReady(property: PropertyListItem) {
+  const openIssues = getOpenIssuesCount(property)
+  const openTasks = getOpenTasksCount(property)
+  const criticalAlert = hasCriticalCheckInAlert(property)
+
+  return openIssues === 0 && openTasks === 0 && !criticalAlert
+}
+
+function getPropertyReadinessDetails(
+  property: PropertyListItem,
+  language: "el" | "en"
+) {
+  const openTasks = getOpenTasksCount(property)
+  const openIssues = getOpenIssuesCount(property)
+  const criticalAlert = hasCriticalCheckInAlert(property)
+  const ready = isPropertyOperationallyReady(property)
+
+  if (language === "en") {
+    if (ready) {
+      return {
+        label: "Ready",
+        detail: "No critical alert",
+      }
+    }
+
+    if (openTasks > 0 && openIssues > 0) {
+      return {
+        label: "Needs action",
+        detail: `${openTasks} open tasks · ${openIssues} open issues`,
+      }
+    }
+
+    if (openTasks > 0) {
+      return {
+        label: "Needs action",
+        detail: `${openTasks} open tasks`,
+      }
+    }
+
+    if (openIssues > 0) {
+      return {
+        label: "Needs action",
+        detail: `${openIssues} open issues`,
+      }
+    }
+
+    if (criticalAlert) {
+      return {
+        label: "Needs action",
+        detail: "Critical before check-in",
+      }
+    }
+
+    return {
+      label: "Needs action",
+      detail: "Operational action required",
+    }
+  }
+
+  if (ready) {
+    return {
+      label: "Έτοιμο",
+      detail: "Χωρίς κρίσιμο alert",
+    }
+  }
+
+  if (openTasks > 0 && openIssues > 0) {
+    return {
+      label: "Θέλει ενέργειες",
+      detail: `${openTasks} ανοιχτές εργασίες · ${openIssues} ανοιχτά θέματα`,
+    }
+  }
+
+  if (openTasks > 0) {
+    return {
+      label: "Θέλει ενέργειες",
+      detail: `${openTasks} ανοιχτές εργασίες`,
+    }
+  }
+
+  if (openIssues > 0) {
+    return {
+      label: "Θέλει ενέργειες",
+      detail: `${openIssues} ανοιχτά θέματα`,
+    }
+  }
+
+  if (criticalAlert) {
+    return {
+      label: "Θέλει ενέργειες",
+      detail: "Κρίσιμο πριν το check-in",
+    }
+  }
+
+  return {
+    label: "Θέλει ενέργειες",
+    detail: "Απαιτείται επιχειρησιακή ενέργεια",
+  }
+}
+
+function matchesMetricFilter(property: PropertyListItem, metricFilter: MetricFilter) {
   switch (metricFilter) {
     case "active":
-      return (property.status || "").toLowerCase() === "active"
+      return String(property.status || "").toLowerCase() === "active"
     case "inactive":
-      return (property.status || "").toLowerCase() === "inactive"
-    case "maintenance":
-      return (property.status || "").toLowerCase() === "maintenance"
-    case "archived":
-      return (property.status || "").toLowerCase() === "archived"
-    case "with_open_issues":
-      return openIssues > 0
-    case "with_pending_tasks":
-      return pendingTasks > 0
-    case "without_partner":
-      return !property.defaultPartnerId
+      return String(property.status || "").toLowerCase() === "inactive"
+    case "ready":
+      return isPropertyOperationallyReady(property)
+    case "requires_action":
+      return !isPropertyOperationallyReady(property)
     case "all":
     default:
       return true
@@ -576,12 +702,10 @@ export default function PropertiesPage() {
   const [error, setError] = useState<string | null>(null)
 
   const [search, setSearch] = useState("")
-  const [statusFilter, setStatusFilter] = useState("all")
   const [typeFilter, setTypeFilter] = useState("all")
   const [cityFilter, setCityFilter] = useState("all")
-  const [partnerFilter, setPartnerFilter] = useState("all")
   const [sortBy, setSortBy] = useState("updatedAt_desc")
-  const [metricFilter, setMetricFilter] = useState<PropertyMetricFilter>("all")
+  const [metricFilter, setMetricFilter] = useState<MetricFilter>("all")
 
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [createForm, setCreateForm] =
@@ -605,18 +729,18 @@ export default function PropertiesPage() {
       const propertyData = Array.isArray(propertiesJson)
         ? propertiesJson
         : Array.isArray(propertiesJson?.data)
-        ? propertiesJson.data
-        : Array.isArray(propertiesJson?.properties)
-        ? propertiesJson.properties
-        : []
+          ? propertiesJson.data
+          : Array.isArray(propertiesJson?.properties)
+            ? propertiesJson.properties
+            : []
 
       const partnerData = Array.isArray(partnersJson)
         ? partnersJson
         : Array.isArray(partnersJson?.data)
-        ? partnersJson.data
-        : Array.isArray(partnersJson?.partners)
-        ? partnersJson.partners
-        : []
+          ? partnersJson.data
+          : Array.isArray(partnersJson?.partners)
+            ? partnersJson.partners
+            : []
 
       setProperties(propertyData)
       setPartners(partnerData)
@@ -649,51 +773,27 @@ export default function PropertiesPage() {
 
   const summary = useMemo(() => {
     const active = properties.filter(
-      (item) => (item.status || "").toLowerCase() === "active"
+      (item) => String(item.status || "").toLowerCase() === "active"
     ).length
 
     const inactive = properties.filter(
-      (item) => (item.status || "").toLowerCase() === "inactive"
+      (item) => String(item.status || "").toLowerCase() === "inactive"
     ).length
 
-    const maintenance = properties.filter(
-      (item) => (item.status || "").toLowerCase() === "maintenance"
+    const ready = properties.filter((item) =>
+      isPropertyOperationallyReady(item)
     ).length
 
-    const archived = properties.filter(
-      (item) => (item.status || "").toLowerCase() === "archived"
-    ).length
-
-    const openIssues = properties.reduce((count, property) => {
-      return (
-        count +
-        safeArray(property.issues).filter((issue) => issue.status === "open")
-          .length
-      )
-    }, 0)
-
-    const pendingTasks = properties.reduce((count, property) => {
-      return (
-        count +
-        safeArray(property.tasks).filter((task) =>
-          ["pending", "assigned", "accepted", "in_progress"].includes(task.status)
-        ).length
-      )
-    }, 0)
-
-    const withoutPartner = properties.filter(
-      (property) => !property.defaultPartnerId
+    const requiresAction = properties.filter(
+      (item) => !isPropertyOperationallyReady(item)
     ).length
 
     return {
       total: properties.length,
       active,
       inactive,
-      maintenance,
-      archived,
-      openIssues,
-      pendingTasks,
-      withoutPartner,
+      ready,
+      requiresAction,
     }
   }, [properties])
 
@@ -710,50 +810,29 @@ export default function PropertiesPage() {
         property.region?.toLowerCase().includes(term) ||
         property.country?.toLowerCase().includes(term)
 
-      const matchesStatus =
-        statusFilter === "all" ||
-        (property.status || "").toLowerCase() === statusFilter.toLowerCase()
-
       const matchesType =
         typeFilter === "all" ||
-        (property.type || "").toLowerCase() === typeFilter.toLowerCase()
+        String(property.type || "").toLowerCase() === typeFilter.toLowerCase()
 
       const matchesCity =
         cityFilter === "all" ||
-        (property.city || "").toLowerCase() === cityFilter.toLowerCase()
+        String(property.city || "").toLowerCase() === cityFilter.toLowerCase()
 
-      const matchesPartner =
-        partnerFilter === "all" ||
-        (partnerFilter === "none"
-          ? !property.defaultPartnerId
-          : property.defaultPartnerId === partnerFilter)
+      const matchesMetric = matchesMetricFilter(property, metricFilter)
 
-      const matchesMetric = propertyMatchesMetricFilter(property, metricFilter)
-
-      return (
-        matchesSearch &&
-        matchesStatus &&
-        matchesType &&
-        matchesCity &&
-        matchesPartner &&
-        matchesMetric
-      )
+      return matchesSearch && matchesType && matchesCity && matchesMetric
     })
 
     rows.sort((a, b) => {
       switch (sortBy) {
         case "name_asc":
-          return (a.name || "").localeCompare(b.name || "", texts.locale)
+          return String(a.name || "").localeCompare(String(b.name || ""), texts.locale)
         case "name_desc":
-          return (b.name || "").localeCompare(a.name || "", texts.locale)
+          return String(b.name || "").localeCompare(String(a.name || ""), texts.locale)
         case "city_asc":
-          return (a.city || "").localeCompare(b.city || "", texts.locale)
+          return String(a.city || "").localeCompare(String(b.city || ""), texts.locale)
         case "city_desc":
-          return (b.city || "").localeCompare(a.city || "", texts.locale)
-        case "createdAt_desc":
-          return +new Date(b.createdAt) - +new Date(a.createdAt)
-        case "createdAt_asc":
-          return +new Date(a.createdAt) - +new Date(b.createdAt)
+          return String(b.city || "").localeCompare(String(a.city || ""), texts.locale)
         case "updatedAt_asc":
           return +new Date(a.updatedAt) - +new Date(b.updatedAt)
         case "updatedAt_desc":
@@ -763,17 +842,7 @@ export default function PropertiesPage() {
     })
 
     return rows
-  }, [
-    properties,
-    search,
-    statusFilter,
-    typeFilter,
-    cityFilter,
-    partnerFilter,
-    sortBy,
-    metricFilter,
-    texts.locale,
-  ])
+  }, [properties, search, typeFilter, cityFilter, sortBy, metricFilter, texts.locale])
 
   function openCreateDrawer() {
     setCreateError(null)
@@ -808,7 +877,6 @@ export default function PropertiesPage() {
 
     try {
       const payload = {
-        code: createForm.code.trim(),
         name: createForm.name.trim(),
         address: createForm.address.trim(),
         city: createForm.city.trim(),
@@ -851,10 +919,8 @@ export default function PropertiesPage() {
 
   function resetFilters() {
     setSearch("")
-    setStatusFilter("all")
     setTypeFilter("all")
     setCityFilter("all")
-    setPartnerFilter("all")
     setSortBy("updatedAt_desc")
     setMetricFilter("all")
   }
@@ -873,13 +939,6 @@ export default function PropertiesPage() {
           </div>
 
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-            <Link
-              href="/calendar"
-              className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-            >
-              {texts.calendar}
-            </Link>
-
             <button
               type="button"
               onClick={openCreateDrawer}
@@ -890,7 +949,7 @@ export default function PropertiesPage() {
           </div>
         </div>
 
-        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
+        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
           <button
             type="button"
             onClick={() => setMetricFilter("all")}
@@ -935,115 +994,35 @@ export default function PropertiesPage() {
 
           <button
             type="button"
-            onClick={() => setMetricFilter("maintenance")}
+            onClick={() => setMetricFilter("ready")}
             className={`rounded-2xl border p-5 text-left shadow-sm transition ${getMetricCardClasses(
-              metricFilter === "maintenance",
-              "amber"
+              metricFilter === "ready",
+              "green"
             )}`}
           >
-            <div className="text-sm text-slate-500">{texts.maintenance}</div>
-            <div className="mt-2 text-3xl font-bold text-amber-700">
-              {summary.maintenance}
+            <div className="text-sm text-slate-500">{texts.ready}</div>
+            <div className="mt-2 text-3xl font-bold text-emerald-700">
+              {summary.ready}
             </div>
           </button>
 
           <button
             type="button"
-            onClick={() => setMetricFilter("with_pending_tasks")}
+            onClick={() => setMetricFilter("requires_action")}
             className={`rounded-2xl border p-5 text-left shadow-sm transition ${getMetricCardClasses(
-              metricFilter === "with_pending_tasks",
-              "amber"
-            )}`}
-          >
-            <div className="text-sm text-slate-500">{texts.pendingTasks}</div>
-            <div className="mt-2 text-3xl font-bold text-amber-700">
-              {summary.pendingTasks}
-            </div>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setMetricFilter("with_open_issues")}
-            className={`rounded-2xl border p-5 text-left shadow-sm transition ${getMetricCardClasses(
-              metricFilter === "with_open_issues",
+              metricFilter === "requires_action",
               "red"
             )}`}
           >
-            <div className="text-sm text-slate-500">{texts.openIssues}</div>
+            <div className="text-sm text-slate-500">{texts.requiresAction}</div>
             <div className="mt-2 text-3xl font-bold text-red-700">
-              {summary.openIssues}
-            </div>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setMetricFilter("without_partner")}
-            className={`rounded-2xl border p-5 text-left shadow-sm transition ${getMetricCardClasses(
-              metricFilter === "without_partner",
-              "blue"
-            )}`}
-          >
-            <div className="text-sm text-slate-500">
-              {texts.withoutPartnerMetric}
-            </div>
-            <div className="mt-2 text-3xl font-bold text-blue-700">
-              {summary.withoutPartner}
+              {summary.requiresAction}
             </div>
           </button>
         </section>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="mb-4 flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => setMetricFilter("all")}
-              className={`rounded-xl px-3 py-2 text-sm font-medium transition ${
-                metricFilter === "all"
-                  ? "bg-slate-950 text-white"
-                  : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-              }`}
-            >
-              {texts.filterAll}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setMetricFilter("with_open_issues")}
-              className={`rounded-xl px-3 py-2 text-sm font-medium transition ${
-                metricFilter === "with_open_issues"
-                  ? "bg-red-600 text-white"
-                  : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-              }`}
-            >
-              {texts.filterWithIssues}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setMetricFilter("with_pending_tasks")}
-              className={`rounded-xl px-3 py-2 text-sm font-medium transition ${
-                metricFilter === "with_pending_tasks"
-                  ? "bg-amber-500 text-white"
-                  : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-              }`}
-            >
-              {texts.filterWithPendingTasks}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setMetricFilter("without_partner")}
-              className={`rounded-xl px-3 py-2 text-sm font-medium transition ${
-                metricFilter === "without_partner"
-                  ? "bg-blue-600 text-white"
-                  : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-              }`}
-            >
-              {texts.filterWithoutPartner}
-            </button>
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
             <div className="xl:col-span-2">
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
                 {texts.search}
@@ -1054,23 +1033,6 @@ export default function PropertiesPage() {
                 placeholder={texts.searchPlaceholder}
                 className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-slate-900"
               />
-            </div>
-
-            <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-                {texts.status}
-              </label>
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
-              >
-                <option value="all">{texts.allStatuses}</option>
-                <option value="active">{texts.statusActive}</option>
-                <option value="inactive">{texts.statusInactive}</option>
-                <option value="maintenance">{texts.statusMaintenance}</option>
-                <option value="archived">{texts.statusArchived}</option>
-              </select>
             </div>
 
             <div>
@@ -1111,27 +1073,6 @@ export default function PropertiesPage() {
 
             <div>
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-                {texts.defaultPartner}
-              </label>
-              <select
-                value={partnerFilter}
-                onChange={(e) => setPartnerFilter(e.target.value)}
-                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
-              >
-                <option value="all">{texts.allPartners}</option>
-                <option value="none">{texts.noPartner}</option>
-                {partners.map((partner) => (
-                  <option key={partner.id} value={partner.id}>
-                    {partner.name} ({partner.code})
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
-            <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
                 {texts.sort}
               </label>
               <select
@@ -1141,28 +1082,28 @@ export default function PropertiesPage() {
               >
                 <option value="updatedAt_desc">{texts.sortUpdatedDesc}</option>
                 <option value="updatedAt_asc">{texts.sortUpdatedAsc}</option>
-                <option value="createdAt_desc">{texts.sortCreatedDesc}</option>
-                <option value="createdAt_asc">{texts.sortCreatedAsc}</option>
                 <option value="name_asc">{texts.sortNameAsc}</option>
                 <option value="name_desc">{texts.sortNameDesc}</option>
                 <option value="city_asc">{texts.sortCityAsc}</option>
                 <option value="city_desc">{texts.sortCityDesc}</option>
               </select>
             </div>
+          </div>
 
-            <div className="flex items-end">
-              <button
-                type="button"
-                onClick={resetFilters}
-                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-              >
-                {texts.clearFilters}
-              </button>
-            </div>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+            <div className="text-xs text-slate-500">{texts.pageHint}</div>
+
+            <button
+              type="button"
+              onClick={resetFilters}
+              className="rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              {texts.clearFilters}
+            </button>
           </div>
         </div>
 
-        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-200 px-4 py-4 sm:px-6">
             <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
               <div>
@@ -1170,12 +1111,9 @@ export default function PropertiesPage() {
                   {texts.listTitle}
                 </h2>
                 <p className="text-sm text-slate-500">
-                  {filteredProperties.length} {texts.listSubtitleMiddle}{" "}
-                  {properties.length} {texts.listSubtitleSuffix}
+                  {filteredProperties.length} / {properties.length}
                 </p>
               </div>
-
-              <div className="text-xs text-slate-500">{texts.portfolioHint}</div>
             </div>
           </div>
 
@@ -1192,13 +1130,10 @@ export default function PropertiesPage() {
                   <thead className="bg-slate-50 text-slate-600">
                     <tr>
                       <th className="px-4 py-3 font-semibold">{texts.property}</th>
-                      <th className="px-4 py-3 font-semibold">{texts.location}</th>
-                      <th className="px-4 py-3 font-semibold">{texts.features}</th>
-                      <th className="px-4 py-3 font-semibold">{texts.status}</th>
-                      <th className="px-4 py-3 font-semibold">{texts.partner}</th>
-                      <th className="px-4 py-3 font-semibold">{texts.operations}</th>
+                      <th className="px-4 py-3 font-semibold">{texts.address}</th>
+                      <th className="px-4 py-3 font-semibold">{texts.readiness}</th>
                       <th className="px-4 py-3 font-semibold">{texts.updated}</th>
-                      <th className="px-4 py-3 font-semibold text-right">
+                      <th className="px-4 py-3 text-right font-semibold">
                         {texts.actions}
                       </th>
                     </tr>
@@ -1206,23 +1141,11 @@ export default function PropertiesPage() {
 
                   <tbody className="divide-y divide-slate-100">
                     {filteredProperties.map((property) => {
-                      const bookings = safeArray(property.bookings)
-                      const tasks = safeArray(property.tasks)
-                      const issues = safeArray(property.issues)
-                      const templates = safeArray(property.checklistTemplates)
-
-                      const openIssues = issues.filter(
-                        (issue) => issue.status === "open"
-                      ).length
-
-                      const activeTasks = tasks.filter((task) =>
-                        ["pending", "assigned", "accepted", "in_progress"].includes(
-                          task.status
-                        )
-                      ).length
-
-                      const primaryTemplate = templates.find(
-                        (template) => template.isPrimary
+                      const criticalAlert = hasCriticalCheckInAlert(property)
+                      const ready = isPropertyOperationallyReady(property)
+                      const readiness = getPropertyReadinessDetails(
+                        property,
+                        language
                       )
 
                       return (
@@ -1232,10 +1155,11 @@ export default function PropertiesPage() {
                               {property.name}
                             </div>
                             <div className="mt-1 text-xs text-slate-500">
-                              {texts.code}: {property.code}
+                              {property.code}
                             </div>
                             <div className="mt-1 text-xs text-slate-500">
-                              {texts.propertyType}: {typeLabel(language, property.type)}
+                              {typeLabel(language, property.type)} ·{" "}
+                              {statusLabel(language, property.status)}
                             </div>
                           </td>
 
@@ -1244,95 +1168,45 @@ export default function PropertiesPage() {
                             <div className="mt-1 text-xs text-slate-500">
                               {property.city}, {property.region}
                             </div>
-                            <div className="mt-1 text-xs text-slate-500">
-                              {property.postalCode} · {property.country}
-                            </div>
                           </td>
 
                           <td className="px-4 py-4 align-top">
-                            <div className="text-slate-900">
-                              {property.bedrooms} υπν. · {property.bathrooms} μπάν. ·{" "}
-                              {property.maxGuests} επισκ.
-                            </div>
-                            <div className="mt-1 text-xs text-slate-500">
-                              {texts.createdAt}:{" "}
-                              {formatDate(property.createdAt, texts.locale)}
-                            </div>
-                          </td>
-
-                          <td className="px-4 py-4 align-top">
-                            <span
-                              className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${getStatusBadgeClasses(
-                                property.status
-                              )}`}
-                            >
-                              {statusLabel(language, property.status)}
-                            </span>
-                          </td>
-
-                          <td className="px-4 py-4 align-top">
-                            {property.defaultPartner ? (
-                              <>
-                                <div className="font-medium text-slate-900">
-                                  {property.defaultPartner.name}
-                                </div>
-                                <div className="mt-1 text-xs text-slate-500">
-                                  {property.defaultPartner.specialty}
-                                </div>
-                                <div className="mt-1 text-xs text-slate-500">
-                                  {property.defaultPartner.email}
-                                </div>
-                              </>
-                            ) : (
-                              <span className="text-slate-400">
-                                {texts.notAssigned}
+                            <div className="flex flex-col gap-2">
+                              <span
+                                className={`inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold ${
+                                  ready
+                                    ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
+                                    : "bg-amber-50 text-amber-700 ring-1 ring-amber-200"
+                                }`}
+                              >
+                                {readiness.label}
                               </span>
-                            )}
-                          </td>
 
-                          <td className="px-4 py-4 align-top">
-                            <div className="space-y-1 text-xs text-slate-600">
-                              <div>
-                                {texts.bookings}: {bookings.length}
-                              </div>
-                              <div>
-                                {texts.activeTasks}: {activeTasks}
-                              </div>
-                              <div>
-                                {texts.openIssuesInline}: {openIssues}
-                              </div>
-                              <div>
-                                {texts.primaryChecklist}:{" "}
-                                {primaryTemplate ? primaryTemplate.title : "—"}
+                              {criticalAlert ? (
+                                <span className="inline-flex w-fit rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 ring-1 ring-red-200">
+                                  {texts.criticalAlert}
+                                </span>
+                              ) : null}
+
+                              <div className="text-xs text-slate-500">
+                                {readiness.detail}
                               </div>
                             </div>
                           </td>
 
                           <td className="px-4 py-4 align-top">
-                            <div className="text-xs text-slate-500">
-                              {texts.lastUpdated}
-                            </div>
-                            <div className="mt-1 text-sm text-slate-900">
+                            <div className="text-sm text-slate-900">
                               {formatDateTime(property.updatedAt, texts.locale)}
                             </div>
                           </td>
 
                           <td className="px-4 py-4 align-top text-right">
-                            <div className="flex justify-end gap-2">
-                              <Link
-                                href={`/properties/${property.id}`}
-                                className="inline-flex items-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                              >
-                                {texts.view}
-                              </Link>
-
-                              <Link
-                                href={`/property-checklists/${property.id}`}
-                                className="inline-flex items-center rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"
-                              >
-                                {texts.checklists}
-                              </Link>
-                            </div>
+                            <Link
+                              href={`/properties/${property.id}`}
+                              className="inline-flex items-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                            >
+                              {texts.view}
+                            </Link>
                           </td>
                         </tr>
                       )
@@ -1343,23 +1217,11 @@ export default function PropertiesPage() {
 
               <div className="grid gap-4 p-4 sm:p-6 xl:hidden">
                 {filteredProperties.map((property) => {
-                  const bookings = safeArray(property.bookings)
-                  const tasks = safeArray(property.tasks)
-                  const issues = safeArray(property.issues)
-                  const templates = safeArray(property.checklistTemplates)
-
-                  const openIssues = issues.filter(
-                    (issue) => issue.status === "open"
-                  ).length
-
-                  const activeTasks = tasks.filter((task) =>
-                    ["pending", "assigned", "accepted", "in_progress"].includes(
-                      task.status
-                    )
-                  ).length
-
-                  const primaryTemplate = templates.find(
-                    (template) => template.isPrimary
+                  const criticalAlert = hasCriticalCheckInAlert(property)
+                  const ready = isPropertyOperationallyReady(property)
+                  const readiness = getPropertyReadinessDetails(
+                    property,
+                    language
                   )
 
                   return (
@@ -1367,16 +1229,13 @@ export default function PropertiesPage() {
                       key={property.id}
                       className="rounded-2xl border border-slate-200 p-4 shadow-sm"
                     >
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <div className="text-base font-semibold text-slate-900">
                             {property.name}
                           </div>
                           <div className="mt-1 text-xs text-slate-500">
-                            {texts.code}: {property.code}
-                          </div>
-                          <div className="mt-1 text-xs text-slate-500">
-                            {typeLabel(language, property.type)}
+                            {property.code}
                           </div>
                         </div>
 
@@ -1389,103 +1248,50 @@ export default function PropertiesPage() {
                         </span>
                       </div>
 
-                      <div className="mt-4 space-y-3 text-sm">
-                        <div>
-                          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            {texts.location}
-                          </div>
-                          <div className="mt-1 text-slate-900">
-                            {property.address}
-                          </div>
-                          <div className="mt-1 text-slate-500">
-                            {property.city}, {property.region}
-                          </div>
-                          <div className="mt-1 text-slate-500">
-                            {property.postalCode} · {property.country}
-                          </div>
-                        </div>
+                      <div className="mt-4 text-sm text-slate-900">
+                        {property.address}
+                      </div>
+                      <div className="mt-1 text-sm text-slate-500">
+                        {property.city}, {property.region}
+                      </div>
 
-                        <div>
-                          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            {texts.features}
-                          </div>
-                          <div className="mt-1 text-slate-900">
-                            {property.bedrooms} υπν. · {property.bathrooms} μπάν. ·{" "}
-                            {property.maxGuests} επισκ.
-                          </div>
-                          <div className="mt-1 text-slate-500">
-                            {texts.createdAt}:{" "}
-                            {formatDate(property.createdAt, texts.locale)}
-                          </div>
-                        </div>
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        <span
+                          className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
+                            ready
+                              ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
+                              : "bg-amber-50 text-amber-700 ring-1 ring-amber-200"
+                          }`}
+                        >
+                          {readiness.label}
+                        </span>
 
-                        <div>
-                          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            {texts.partner}
-                          </div>
-                          {property.defaultPartner ? (
-                            <>
-                              <div className="mt-1 font-medium text-slate-900">
-                                {property.defaultPartner.name}
-                              </div>
-                              <div className="mt-1 text-slate-500">
-                                {property.defaultPartner.specialty}
-                              </div>
-                              <div className="mt-1 text-slate-500">
-                                {property.defaultPartner.email}
-                              </div>
-                            </>
-                          ) : (
-                            <div className="mt-1 text-slate-400">
-                              {texts.notAssigned}
-                            </div>
-                          )}
-                        </div>
+                        {criticalAlert ? (
+                          <span className="inline-flex rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 ring-1 ring-red-200">
+                            {texts.criticalAlert}
+                          </span>
+                        ) : null}
+                      </div>
 
-                        <div>
-                          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            {texts.operations}
-                          </div>
-                          <div className="mt-1 grid grid-cols-2 gap-2 text-sm text-slate-600">
-                            <div>
-                              {texts.bookings}: {bookings.length}
-                            </div>
-                            <div>
-                              {texts.activeTasks}: {activeTasks}
-                            </div>
-                            <div>
-                              {texts.openIssuesInline}: {openIssues}
-                            </div>
-                            <div>
-                              {texts.primaryChecklist}:{" "}
-                              {primaryTemplate ? primaryTemplate.title : "—"}
-                            </div>
-                          </div>
-                        </div>
+                      <div className="mt-3 text-xs text-slate-500">
+                        {readiness.detail}
+                      </div>
 
-                        <div>
-                          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            {texts.lastUpdated}
-                          </div>
-                          <div className="mt-1 text-slate-900">
-                            {formatDateTime(property.updatedAt, texts.locale)}
-                          </div>
+                      <div className="mt-4">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          {texts.updated}
+                        </div>
+                        <div className="mt-1 text-sm text-slate-900">
+                          {formatDateTime(property.updatedAt, texts.locale)}
                         </div>
                       </div>
 
-                      <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                      <div className="mt-4">
                         <Link
                           href={`/properties/${property.id}`}
-                          className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                          className="inline-flex w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
                         >
                           {texts.view}
-                        </Link>
-
-                        <Link
-                          href={`/property-checklists/${property.id}`}
-                          className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-3 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
-                        >
-                          {texts.checklists}
                         </Link>
                       </div>
                     </div>
@@ -1542,19 +1348,6 @@ export default function PropertiesPage() {
                     <div className="grid gap-4 md:grid-cols-2">
                       <div>
                         <label className="mb-1 block text-sm font-medium text-slate-700">
-                          {texts.formCode}
-                        </label>
-                        <input
-                          value={createForm.code}
-                          onChange={(e) => updateCreateField("code", e.target.value)}
-                          className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
-                          placeholder={texts.placeholderCode}
-                          required
-                        />
-                      </div>
-
-                      <div>
-                        <label className="mb-1 block text-sm font-medium text-slate-700">
                           {texts.formName}
                         </label>
                         <input
@@ -1564,6 +1357,25 @@ export default function PropertiesPage() {
                           placeholder={texts.placeholderName}
                           required
                         />
+                      </div>
+
+                      <div>
+                        <label className="mb-1 block text-sm font-medium text-slate-700">
+                          {texts.formType}
+                        </label>
+                        <select
+                          value={createForm.type}
+                          onChange={(e) => updateCreateField("type", e.target.value)}
+                          className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
+                        >
+                          <option value={texts.apartment}>{texts.apartment}</option>
+                          <option value={texts.villa}>{texts.villa}</option>
+                          <option value={texts.studio}>{texts.studio}</option>
+                          <option value={texts.house}>{texts.house}</option>
+                          <option value={texts.maisonette}>{texts.maisonette}</option>
+                          <option value={texts.loft}>{texts.loft}</option>
+                          <option value={texts.other}>{texts.other}</option>
+                        </select>
                       </div>
 
                       <div className="md:col-span-2">
@@ -1636,25 +1448,6 @@ export default function PropertiesPage() {
 
                       <div>
                         <label className="mb-1 block text-sm font-medium text-slate-700">
-                          {texts.formType}
-                        </label>
-                        <select
-                          value={createForm.type}
-                          onChange={(e) => updateCreateField("type", e.target.value)}
-                          className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
-                        >
-                          <option value={texts.apartment}>{texts.apartment}</option>
-                          <option value={texts.villa}>{texts.villa}</option>
-                          <option value={texts.studio}>{texts.studio}</option>
-                          <option value={texts.house}>{texts.house}</option>
-                          <option value={texts.maisonette}>{texts.maisonette}</option>
-                          <option value={texts.loft}>{texts.loft}</option>
-                          <option value={texts.other}>{texts.other}</option>
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="mb-1 block text-sm font-medium text-slate-700">
                           {texts.formStatus}
                         </label>
                         <select
@@ -1666,6 +1459,26 @@ export default function PropertiesPage() {
                           <option value="inactive">{texts.statusInactive}</option>
                           <option value="maintenance">{texts.statusMaintenance}</option>
                           <option value="archived">{texts.statusArchived}</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="mb-1 block text-sm font-medium text-slate-700">
+                          {texts.formDefaultPartner}
+                        </label>
+                        <select
+                          value={createForm.defaultPartnerId}
+                          onChange={(e) =>
+                            updateCreateField("defaultPartnerId", e.target.value)
+                          }
+                          className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
+                        >
+                          <option value="">{texts.noPartner}</option>
+                          {partners.map((partner) => (
+                            <option key={partner.id} value={partner.id}>
+                              {partner.name} ({partner.code})
+                            </option>
+                          ))}
                         </select>
                       </div>
 
@@ -1712,26 +1525,6 @@ export default function PropertiesPage() {
                           }
                           className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
                         />
-                      </div>
-
-                      <div>
-                        <label className="mb-1 block text-sm font-medium text-slate-700">
-                          {texts.formDefaultPartner}
-                        </label>
-                        <select
-                          value={createForm.defaultPartnerId}
-                          onChange={(e) =>
-                            updateCreateField("defaultPartnerId", e.target.value)
-                          }
-                          className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
-                        >
-                          <option value="">{texts.noPartner}</option>
-                          {partners.map((partner) => (
-                            <option key={partner.id} value={partner.id}>
-                              {partner.name} ({partner.code})
-                            </option>
-                          ))}
-                        </select>
                       </div>
 
                       <div className="md:col-span-2">

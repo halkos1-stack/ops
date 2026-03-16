@@ -152,7 +152,7 @@ type ActivityLog = {
   message?: string | null
   actorType?: string | null
   actorName?: string | null
-  metadata?: any
+  metadata?: unknown
   createdAt?: string | null
 }
 
@@ -193,6 +193,9 @@ type AssignmentCreateResponse = {
   portalLink?: string | null
   assignmentEmailSent?: boolean
   assignmentEmailSendReason?: string | null
+  error?: string
+  blockingStatus?: string
+  blockingAssignmentId?: string
 }
 
 type PartnerPortalLinkResponse = {
@@ -244,6 +247,20 @@ function formatDateTime(value?: string | null) {
   }).format(date)
 }
 
+function formatDateTimeCompact(value?: string | null) {
+  if (!value) return "—"
+
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return "—"
+
+  return new Intl.DateTimeFormat("el-GR", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date)
+}
+
 function mapStatusToUi(status?: string | null) {
   switch ((status || "").trim().toLowerCase()) {
     case "assigned":
@@ -274,6 +291,8 @@ function mapStatusToUi(status?: string | null) {
       return "Εκπρόθεσμο"
     case "draft":
       return "Πρόχειρο"
+    case "submitted":
+      return "Υποβλήθηκε"
     default:
       return status || "—"
   }
@@ -308,6 +327,8 @@ function mapChecklistItemTypeToUi(itemType?: string | null) {
       return "Αριθμός"
     case "select":
       return "Επιλογή"
+    case "photo":
+      return "Φωτογραφία"
     default:
       return itemType || "—"
   }
@@ -327,6 +348,42 @@ function mapIssueTypeToUi(issueType?: string | null) {
       return "Καθαρισμός"
     default:
       return issueType || "—"
+  }
+}
+
+function mapTaskTypeToUi(taskType?: string | null) {
+  switch ((taskType || "").toLowerCase()) {
+    case "cleaning":
+      return "Καθαρισμός"
+    case "inspection":
+      return "Επιθεώρηση"
+    case "damage":
+      return "Ζημιές"
+    case "repair":
+      return "Βλάβες"
+    case "supplies":
+      return "Αναλώσιμα"
+    case "photos":
+      return "Φωτογραφική τεκμηρίωση"
+    default:
+      return taskType || "-"
+  }
+}
+
+function mapPropertyTypeToUi(type?: string | null) {
+  switch ((type || "").toLowerCase()) {
+    case "apartment":
+      return "Διαμέρισμα"
+    case "villa":
+      return "Βίλα"
+    case "house":
+      return "Κατοικία"
+    case "studio":
+      return "Στούντιο"
+    case "maisonette":
+      return "Μεζονέτα"
+    default:
+      return type || "-"
   }
 }
 
@@ -408,42 +465,6 @@ function getPriorityBadgeClasses(priority?: string | null) {
   return "bg-slate-50 text-slate-700 border-slate-200"
 }
 
-function mapTaskTypeToUi(taskType?: string | null) {
-  switch ((taskType || "").toLowerCase()) {
-    case "cleaning":
-      return "Καθαρισμός"
-    case "inspection":
-      return "Επιθεώρηση"
-    case "damage":
-      return "Ζημιές"
-    case "repair":
-      return "Βλάβες"
-    case "supplies":
-      return "Αναλώσιμα"
-    case "photos":
-      return "Φωτογραφική τεκμηρίωση"
-    default:
-      return taskType || "-"
-  }
-}
-
-function mapPropertyTypeToUi(type?: string | null) {
-  switch ((type || "").toLowerCase()) {
-    case "apartment":
-      return "Διαμέρισμα"
-    case "villa":
-      return "Βίλα"
-    case "house":
-      return "Κατοικία"
-    case "studio":
-      return "Στούντιο"
-    case "maisonette":
-      return "Μεζονέτα"
-    default:
-      return type || "-"
-  }
-}
-
 function calculateDuration(start?: string | null, end?: string | null) {
   if (!start || !end) return "—"
 
@@ -497,6 +518,150 @@ function renderAnswerValue(answer: ChecklistAnswer) {
   }
 
   return "—"
+}
+
+function getTaskWorkflowHelp(status?: string | null) {
+  const value = String(status || "").toLowerCase()
+
+  switch (value) {
+    case "pending":
+      return "Νέα εργασία — χρειάζεται ανάθεση σε συνεργάτη."
+    case "assigned":
+      return "Ανατεθειμένη — αναμονή αποδοχής από τον συνεργάτη."
+    case "accepted":
+      return "Ο συνεργάτης αποδέχτηκε την εργασία."
+    case "in_progress":
+      return "Η εργασία βρίσκεται σε εξέλιξη."
+    case "completed":
+      return "Η εργασία ολοκληρώθηκε και η λίστα υποβλήθηκε."
+    case "cancelled":
+      return "Η εργασία έχει ακυρωθεί."
+    default:
+      return "Παρακολούθηση κατάστασης και ενεργειών της εργασίας."
+  }
+}
+
+function getChecklistStatusHelp(run?: ChecklistRun | null) {
+  if (!run) return "Δεν υπάρχει συνδεδεμένη λίστα για αυτή την εργασία."
+
+  const status = String(run.status || "").toLowerCase()
+
+  if (run.completedAt || status === "completed" || status === "submitted") {
+    return "Η λίστα έχει υποβληθεί."
+  }
+
+  if (run.startedAt || status === "in_progress" || status === "started") {
+    return "Η λίστα έχει ξεκινήσει αλλά δεν έχει ολοκληρωθεί ακόμη."
+  }
+
+  if (status === "pending") {
+    return "Η λίστα είναι έτοιμη αλλά δεν έχει ξεκινήσει."
+  }
+
+  return "Η λίστα συνδέεται με την εργασία και περιμένει εκτέλεση."
+}
+
+function getAssignmentButtonLabel(task: Task, latestAssignment: TaskAssignment | null) {
+  const status = String(task.status || "").toLowerCase()
+
+  if (!latestAssignment) return "Ανάθεση σε συνεργάτη"
+  if (status === "pending") return "Νέα ανάθεση"
+  if (status === "assigned") return "Αλλαγή / νέα ανάθεση"
+  if (status === "accepted") return "Αλλαγή συνεργάτη"
+  if (status === "in_progress") return "Επανεκχώρηση εργασίας"
+  if (status === "completed") return "Νέα ανάθεση"
+  return "Ανάθεση σε συνεργάτη"
+}
+
+function getChecklistButtonLabel(task: Task) {
+  if (!task.checklistRun?.template?.id) return "Διαχείριση λίστας"
+  return "Επεξεργασία λίστας"
+}
+
+function getChecklistSubmitted(task: Task) {
+  const run = task.checklistRun
+  if (!run) return false
+
+  const status = String(run.status || "").toLowerCase()
+  return Boolean(run.completedAt) || status === "completed" || status === "submitted"
+}
+
+function getPrimaryDateTimeForDeadline(task: Task) {
+  if (task.dueDate) {
+    const due = new Date(task.dueDate)
+    if (!Number.isNaN(due.getTime())) return due
+  }
+
+  if (task.scheduledDate) {
+    const datePart = String(task.scheduledDate).slice(0, 10)
+    const timePart =
+      task.scheduledEndTime && /^\d{2}:\d{2}/.test(task.scheduledEndTime)
+        ? String(task.scheduledEndTime).slice(0, 5)
+        : task.scheduledStartTime && /^\d{2}:\d{2}/.test(task.scheduledStartTime)
+        ? String(task.scheduledStartTime).slice(0, 5)
+        : "23:59"
+
+    const composed = new Date(`${datePart}T${timePart}:00`)
+    if (!Number.isNaN(composed.getTime())) return composed
+  }
+
+  return null
+}
+
+function isTaskOverdue(task: Task) {
+  const status = String(task.status || "").toLowerCase()
+  if (["completed", "cancelled"].includes(status)) return false
+
+  const deadline = getPrimaryDateTimeForDeadline(task)
+  if (!deadline) return false
+
+  return Date.now() > deadline.getTime()
+}
+
+function getBorderlineAlertText(task: Task) {
+  const deadline = getPrimaryDateTimeForDeadline(task)
+  if (!deadline) return "Η εργασία έχει ξεπεράσει τον προγραμματισμένο χρόνο."
+
+  return `Η εργασία δεν έχει εκτελεστεί στον χρόνο που έχει οριστεί (${formatDateTime(
+    deadline.toISOString()
+  )}).`
+}
+
+function getCurrentExecutionWindow(task: Task) {
+  const date = formatDate(task.scheduledDate)
+  const start = task.scheduledStartTime || "—"
+  const end = task.scheduledEndTime ? ` - ${task.scheduledEndTime}` : ""
+  return `${date} · ${start}${end}`
+}
+
+function StatCard({
+  label,
+  value,
+}: {
+  label: string
+  value: string | number
+}) {
+  return (
+    <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+      <p className="text-sm font-medium text-slate-500">{label}</p>
+      <p className="mt-3 text-2xl font-bold text-slate-950 break-words">{value}</p>
+    </div>
+  )
+}
+
+function FieldCard({
+  label,
+  value,
+}: {
+  label: string
+  value: string
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 p-4">
+      <p className="text-sm text-slate-500">{label}</p>
+      <p className="mt-1 text-sm font-semibold text-slate-900 break-words">{value}</p>
+    </div>
+  )
 }
 
 export default function TaskDetailsPage() {
@@ -629,6 +794,16 @@ export default function TaskDetailsPage() {
     )
   }, [task, latestAssignment])
 
+  const checklistSubmitted = useMemo(() => {
+    if (!task) return false
+    return getChecklistSubmitted(task)
+  }, [task])
+
+  const overdue = useMemo(() => {
+    if (!task) return false
+    return isTaskOverdue(task)
+  }, [task])
+
   async function handleCreateAssignment() {
     if (!task || !selectedPartnerId) {
       setAssignmentError("Επέλεξε συνεργάτη πριν δημιουργήσεις ανάθεση.")
@@ -655,11 +830,13 @@ export default function TaskDetailsPage() {
       const data = (await res.json().catch(() => null)) as AssignmentCreateResponse | null
 
       if (!res.ok) {
-        throw new Error(
-          data && "error" in (data as any)
-            ? (data as any).error
-            : "Αποτυχία δημιουργίας ανάθεσης."
-        )
+        const message =
+          data?.error ||
+          (res.status === 409
+            ? "Η εργασία δεν μπορεί να ανατεθεί ξανά αυτή τη στιγμή."
+            : "Αποτυχία δημιουργίας ανάθεσης.")
+
+        throw new Error(message)
       }
 
       setAssignmentSuccess(
@@ -715,9 +892,7 @@ export default function TaskDetailsPage() {
     return (
       <div className="space-y-6">
         <div className="rounded-3xl border border-red-200 bg-red-50 p-8 shadow-sm">
-          <h1 className="text-xl font-bold text-red-700">
-            Δεν βρέθηκε η εργασία
-          </h1>
+          <h1 className="text-xl font-bold text-red-700">Δεν βρέθηκε η εργασία</h1>
           <p className="mt-2 text-sm text-red-600">
             Η εργασία που ζητήθηκε δεν υπάρχει ή δεν μπορεί να φορτωθεί.
           </p>
@@ -737,11 +912,12 @@ export default function TaskDetailsPage() {
 
   return (
     <div className="space-y-6">
-      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div>
+      <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+        <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+          <div className="min-w-0 flex-1">
             <p className="text-sm text-slate-500">Λεπτομέρειες εργασίας</p>
-            <h1 className="mt-2 text-3xl font-bold text-slate-950">
+
+            <h1 className="mt-2 text-2xl font-bold tracking-tight text-slate-950 sm:text-3xl">
               {task.title}
             </h1>
 
@@ -767,10 +943,20 @@ export default function TaskDetailsPage() {
               <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
                 {mapTaskTypeToUi(task.taskType)}
               </span>
+
+              {task.checklistRun?.template?.title ? (
+                <span className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
+                  Λίστα: {task.checklistRun.template.title}
+                </span>
+              ) : null}
             </div>
 
-            <p className="mt-3 text-sm text-slate-500">
+            <p className="mt-3 text-sm text-slate-600">
               {task.property.name} • {task.property.code} • {task.property.address}
+            </p>
+
+            <p className="mt-2 text-sm text-slate-500">
+              {getTaskWorkflowHelp(task.status)}
             </p>
           </div>
 
@@ -790,6 +976,28 @@ export default function TaskDetailsPage() {
             </Link>
           </div>
         </div>
+
+        {overdue ? (
+          <div className="mt-5 rounded-2xl border border-red-200 bg-red-50 p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-red-700">
+                  Alert καθυστέρησης εργασίας
+                </p>
+                <p className="mt-1 text-sm text-red-700">
+                  {getBorderlineAlertText(task)}
+                </p>
+              </div>
+
+              <Link
+                href={`/properties/${task.property.id}/tasks`}
+                className="inline-flex shrink-0 items-center rounded-xl border border-red-200 bg-white px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-100"
+              >
+                Άνοιγμα εργασιών ακινήτου
+              </Link>
+            </div>
+          </div>
+        ) : null}
       </section>
 
       {error ? (
@@ -798,96 +1006,115 @@ export default function TaskDetailsPage() {
         </div>
       ) : null}
 
-      <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
-        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm font-medium text-slate-500">Ημερομηνία</p>
-          <p className="mt-3 text-2xl font-bold text-slate-950">
-            {formatDate(task.scheduledDate)}
-          </p>
-        </div>
-
-        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm font-medium text-slate-500">Προγραμματισμένη ώρα</p>
-          <p className="mt-3 text-2xl font-bold text-slate-950">
-            {task.scheduledStartTime || "—"}
-            {task.scheduledEndTime ? ` - ${task.scheduledEndTime}` : ""}
-          </p>
-        </div>
-
-        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm font-medium text-slate-500">Διάρκεια</p>
-          <p className="mt-3 text-2xl font-bold text-slate-950">{duration}</p>
-        </div>
-
-        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm font-medium text-slate-500">Checklist απαντήσεις</p>
-          <p className="mt-3 text-2xl font-bold text-slate-950">
-            {task.checklistRun?.answers?.length || 0}
-          </p>
-        </div>
-
-        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm font-medium text-slate-500">Συμβάντα</p>
-          <p className="mt-3 text-2xl font-bold text-slate-950">
-            {task.issues?.length || 0}
-          </p>
-        </div>
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <StatCard label="Ημερομηνία" value={formatDate(task.scheduledDate)} />
+        <StatCard label="Παράθυρο εκτέλεσης" value={getCurrentExecutionWindow(task)} />
+        <StatCard label="Διάρκεια" value={duration} />
+        <StatCard
+          label="Ενεργή λίστα"
+          value={task.checklistRun?.template?.title || "Χωρίς λίστα"}
+        />
+        <StatCard
+          label="Κατάσταση λίστας"
+          value={checklistSubmitted ? "Υποβλήθηκε" : "Δεν υποβλήθηκε"}
+        />
       </section>
 
       <section className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-        <div className="xl:col-span-2 space-y-6">
+        <div className="space-y-6 xl:col-span-2">
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="mb-5">
-              <h2 className="text-2xl font-bold text-slate-950">Στοιχεία εργασίας</h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Βασικά δεδομένα, περιγραφή και κανόνες εκτέλεσης.
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="min-w-0">
+                <h2 className="text-2xl font-bold text-slate-950">Πεδίο εργασίας</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Καθαρή εικόνα της εργασίας, του προγραμματισμού, της λίστας και των
+                  ενεργειών που χρειάζονται.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={handleCreateAssignment}
+                  disabled={assigning || !selectedPartnerId}
+                  className="inline-flex items-center rounded-2xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {assigning
+                    ? "Δημιουργία ανάθεσης..."
+                    : getAssignmentButtonLabel(task, latestAssignment)}
+                </button>
+
+                {task.checklistRun?.template?.id ? (
+                  <Link
+                    href={`/property-checklists/${task.property.id}/templates/${task.checklistRun.template.id}`}
+                    className="inline-flex items-center rounded-2xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    {getChecklistButtonLabel(task)}
+                  </Link>
+                ) : (
+                  <Link
+                    href={`/property-checklists/${task.property.id}`}
+                    className="inline-flex items-center rounded-2xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    Διαχείριση λίστας
+                  </Link>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <FieldCard label="Τίτλος" value={task.title} />
+              <FieldCard label="Κατηγορία" value={mapTaskTypeToUi(task.taskType)} />
+              <FieldCard label="Κατάσταση εργασίας" value={mapStatusToUi(task.status)} />
+              <FieldCard label="Προτεραιότητα" value={mapPriorityToUi(task.priority || "normal")} />
+
+              <FieldCard label="Ημερομηνία" value={formatDate(task.scheduledDate)} />
+              <FieldCard
+                label="Ώρα εκτέλεσης"
+                value={`${task.scheduledStartTime || "—"}${
+                  task.scheduledEndTime ? ` - ${task.scheduledEndTime}` : ""
+                }`}
+              />
+              <FieldCard
+                label="Ενεργή λίστα"
+                value={task.checklistRun?.template?.title || "Χωρίς λίστα"}
+              />
+              <FieldCard
+                label="Κατάσταση λίστας"
+                value={checklistSubmitted ? "Υποβλήθηκε" : "Δεν υποβλήθηκε"}
+              />
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <p className="text-sm font-semibold text-slate-900">Οδηγία κατάστασης</p>
+              <p className="mt-1 text-sm text-slate-700">{getTaskWorkflowHelp(task.status)}</p>
+            </div>
+
+            <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <p className="text-sm font-semibold text-slate-900">Οδηγία λίστας</p>
+              <p className="mt-1 text-sm text-slate-700">
+                {getChecklistStatusHelp(task.checklistRun)}
               </p>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
+            {task.description ? (
+              <div className="mt-4 rounded-2xl border border-slate-200 p-4">
+                <p className="text-sm text-slate-500">Περιγραφή εργασίας</p>
+                <p className="mt-1 whitespace-pre-line text-sm text-slate-800">
+                  {task.description}
+                </p>
+              </div>
+            ) : null}
+
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
               <div className="rounded-2xl border border-slate-200 p-4">
-                <p className="text-sm text-slate-500">Τίτλος</p>
-                <p className="mt-1 text-sm font-semibold text-slate-900">
-                  {task.title}
-                </p>
-              </div>
-
-              <div className="rounded-2xl border border-slate-200 p-4">
-                <p className="text-sm text-slate-500">Κατηγορία</p>
-                <p className="mt-1 text-sm font-semibold text-slate-900">
-                  {mapTaskTypeToUi(task.taskType)}
-                </p>
-              </div>
-
-              <div className="rounded-2xl border border-slate-200 p-4">
-                <p className="text-sm text-slate-500">Πηγή</p>
-                <p className="mt-1 text-sm font-semibold text-slate-900">
-                  {task.source || "—"}
-                </p>
-              </div>
-
-              <div className="rounded-2xl border border-slate-200 p-4">
-                <p className="text-sm text-slate-500">Ολοκλήρωση</p>
-                <p className="mt-1 text-sm font-semibold text-slate-900">
-                  {formatDateTime(task.completedAt)}
-                </p>
-              </div>
-
-              <div className="md:col-span-2 rounded-2xl border border-slate-200 p-4">
-                <p className="text-sm text-slate-500">Περιγραφή</p>
-                <p className="mt-1 text-sm text-slate-800">
-                  {task.description || "Δεν υπάρχει περιγραφή εργασίας."}
-                </p>
-              </div>
-
-              <div className="md:col-span-2 rounded-2xl border border-slate-200 p-4">
                 <p className="text-sm text-slate-500">Σημειώσεις διαχειριστή</p>
                 <p className="mt-1 text-sm text-slate-800">
                   {task.notes || "Δεν υπάρχουν σημειώσεις."}
                 </p>
               </div>
 
-              <div className="md:col-span-2 rounded-2xl border border-slate-200 p-4">
+              <div className="rounded-2xl border border-slate-200 p-4">
                 <p className="text-sm text-slate-500">Τελικό αποτέλεσμα</p>
                 <p className="mt-1 text-sm text-slate-800">
                   {task.resultNotes || "Δεν υπάρχουν τελικές σημειώσεις."}
@@ -952,8 +1179,7 @@ export default function TaskDetailsPage() {
 
                 {task.property.defaultPartner ? (
                   <p className="mt-2 text-xs text-slate-500">
-                    Προεπιλεγμένος συνεργάτης ακινήτου:{" "}
-                    {task.property.defaultPartner.name}
+                    Προεπιλεγμένος συνεργάτης ακινήτου: {task.property.defaultPartner.name}
                   </p>
                 ) : null}
               </div>
@@ -979,7 +1205,9 @@ export default function TaskDetailsPage() {
                 disabled={assigning}
                 className="rounded-2xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {assigning ? "Δημιουργία ανάθεσης..." : "Ανάθεση σε συνεργάτη"}
+                {assigning
+                  ? "Δημιουργία ανάθεσης..."
+                  : getAssignmentButtonLabel(task, latestAssignment)}
               </button>
 
               <button
@@ -1009,12 +1237,8 @@ export default function TaskDetailsPage() {
 
             {latestPortalLink ? (
               <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                <p className="text-sm font-semibold text-slate-900">
-                  Link portal συνεργάτη
-                </p>
-                <p className="mt-2 break-all text-sm text-slate-600">
-                  {latestPortalLink}
-                </p>
+                <p className="text-sm font-semibold text-slate-900">Link portal συνεργάτη</p>
+                <p className="mt-2 break-all text-sm text-slate-600">{latestPortalLink}</p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button
                     type="button"
@@ -1082,71 +1306,28 @@ export default function TaskDetailsPage() {
                     </div>
 
                     <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                      <div className="rounded-xl border border-slate-200 p-3">
-                        <p className="text-xs text-slate-500">Ανάθεση</p>
-                        <p className="mt-1 text-sm font-medium text-slate-900">
-                          {formatDateTime(assignment.assignedAt)}
-                        </p>
-                      </div>
-
-                      <div className="rounded-xl border border-slate-200 p-3">
-                        <p className="text-xs text-slate-500">Αποδοχή</p>
-                        <p className="mt-1 text-sm font-medium text-slate-900">
-                          {formatDateTime(assignment.acceptedAt)}
-                        </p>
-                      </div>
-
-                      <div className="rounded-xl border border-slate-200 p-3">
-                        <p className="text-xs text-slate-500">Απόρριψη</p>
-                        <p className="mt-1 text-sm font-medium text-slate-900">
-                          {formatDateTime(assignment.rejectedAt)}
-                        </p>
-                      </div>
-
-                      <div className="rounded-xl border border-slate-200 p-3">
-                        <p className="text-xs text-slate-500">Έναρξη</p>
-                        <p className="mt-1 text-sm font-medium text-slate-900">
-                          {formatDateTime(assignment.startedAt)}
-                        </p>
-                      </div>
-
-                      <div className="rounded-xl border border-slate-200 p-3">
-                        <p className="text-xs text-slate-500">Ολοκλήρωση</p>
-                        <p className="mt-1 text-sm font-medium text-slate-900">
-                          {formatDateTime(assignment.completedAt)}
-                        </p>
-                      </div>
-
-                      <div className="rounded-xl border border-slate-200 p-3">
-                        <p className="text-xs text-slate-500">Διάρκεια</p>
-                        <p className="mt-1 text-sm font-medium text-slate-900">
-                          {calculateDuration(
-                            assignment.startedAt,
-                            assignment.completedAt
-                          )}
-                        </p>
-                      </div>
+                      <FieldCard label="Ανάθεση" value={formatDateTime(assignment.assignedAt)} />
+                      <FieldCard label="Αποδοχή" value={formatDateTime(assignment.acceptedAt)} />
+                      <FieldCard label="Απόρριψη" value={formatDateTime(assignment.rejectedAt)} />
+                      <FieldCard label="Έναρξη" value={formatDateTime(assignment.startedAt)} />
+                      <FieldCard label="Ολοκλήρωση" value={formatDateTime(assignment.completedAt)} />
+                      <FieldCard
+                        label="Διάρκεια"
+                        value={calculateDuration(assignment.startedAt, assignment.completedAt)}
+                      />
                     </div>
 
                     {assignment.rejectionReason ? (
                       <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4">
-                        <p className="text-sm font-semibold text-red-700">
-                          Αιτιολογία απόρριψης
-                        </p>
-                        <p className="mt-1 text-sm text-red-700">
-                          {assignment.rejectionReason}
-                        </p>
+                        <p className="text-sm font-semibold text-red-700">Αιτιολογία απόρριψης</p>
+                        <p className="mt-1 text-sm text-red-700">{assignment.rejectionReason}</p>
                       </div>
                     ) : null}
 
                     {assignment.notes ? (
                       <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                        <p className="text-sm font-semibold text-slate-700">
-                          Σημειώσεις ανάθεσης
-                        </p>
-                        <p className="mt-1 text-sm text-slate-700">
-                          {assignment.notes}
-                        </p>
+                        <p className="text-sm font-semibold text-slate-700">Σημειώσεις ανάθεσης</p>
+                        <p className="mt-1 text-sm text-slate-700">{assignment.notes}</p>
                       </div>
                     ) : null}
                   </div>
@@ -1156,11 +1337,22 @@ export default function TaskDetailsPage() {
           </section>
 
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="mb-5">
-              <h2 className="text-2xl font-bold text-slate-950">Checklist run</h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Πρότυπο, κατάσταση, χρονισμοί και απαντήσεις checklist.
-              </p>
+            <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h2 className="text-2xl font-bold text-slate-950">Checklist run</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Πρότυπο, κατάσταση, χρονισμοί και απαντήσεις checklist.
+                </p>
+              </div>
+
+              {task.checklistRun?.template?.id ? (
+                <Link
+                  href={`/property-checklists/${task.property.id}/templates/${task.checklistRun.template.id}`}
+                  className="inline-flex items-center rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  {getChecklistButtonLabel(task)}
+                </Link>
+              ) : null}
             </div>
 
             {!task.checklistRun ? (
@@ -1192,26 +1384,18 @@ export default function TaskDetailsPage() {
                   </div>
 
                   <div className="mt-4 grid gap-3 md:grid-cols-3">
-                    <div className="rounded-xl border border-slate-200 p-3">
-                      <p className="text-xs text-slate-500">Έναρξη checklist</p>
-                      <p className="mt-1 text-sm font-medium text-slate-900">
-                        {formatDateTime(task.checklistRun.startedAt)}
-                      </p>
-                    </div>
-
-                    <div className="rounded-xl border border-slate-200 p-3">
-                      <p className="text-xs text-slate-500">Ολοκλήρωση checklist</p>
-                      <p className="mt-1 text-sm font-medium text-slate-900">
-                        {formatDateTime(task.checklistRun.completedAt)}
-                      </p>
-                    </div>
-
-                    <div className="rounded-xl border border-slate-200 p-3">
-                      <p className="text-xs text-slate-500">Απαντήσεις</p>
-                      <p className="mt-1 text-sm font-medium text-slate-900">
-                        {task.checklistRun.answers?.length || 0}
-                      </p>
-                    </div>
+                    <FieldCard
+                      label="Έναρξη checklist"
+                      value={formatDateTime(task.checklistRun.startedAt)}
+                    />
+                    <FieldCard
+                      label="Ολοκλήρωση checklist"
+                      value={formatDateTime(task.checklistRun.completedAt)}
+                    />
+                    <FieldCard
+                      label="Απαντήσεις"
+                      value={String(task.checklistRun.answers?.length || 0)}
+                    />
                   </div>
                 </div>
 
@@ -1242,19 +1426,8 @@ export default function TaskDetailsPage() {
                         </div>
 
                         <div className="mt-4 grid gap-3 md:grid-cols-2">
-                          <div className="rounded-xl border border-slate-200 p-3">
-                            <p className="text-xs text-slate-500">Απάντηση</p>
-                            <p className="mt-1 text-sm font-medium text-slate-900">
-                              {renderAnswerValue(answer)}
-                            </p>
-                          </div>
-
-                          <div className="rounded-xl border border-slate-200 p-3">
-                            <p className="text-xs text-slate-500">Σημειώσεις</p>
-                            <p className="mt-1 text-sm font-medium text-slate-900">
-                              {answer.notes || "—"}
-                            </p>
-                          </div>
+                          <FieldCard label="Απάντηση" value={String(renderAnswerValue(answer))} />
+                          <FieldCard label="Σημειώσεις" value={answer.notes || "—"} />
                         </div>
 
                         {answer.photoUrls &&
@@ -1307,9 +1480,7 @@ export default function TaskDetailsPage() {
                   >
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                       <div>
-                        <p className="text-sm font-semibold text-slate-950">
-                          {issue.title}
-                        </p>
+                        <p className="text-sm font-semibold text-slate-950">{issue.title}</p>
                         <p className="mt-1 text-sm text-slate-500">
                           {issue.description || "Δεν υπάρχει περιγραφή."}
                         </p>
@@ -1370,13 +1541,12 @@ export default function TaskDetailsPage() {
                           {log.message || log.action}
                         </p>
                         <p className="mt-1 text-xs text-slate-500">
-                          {mapStatusToUi(log.actorType || "system")} • {log.actorName || "—"} •{" "}
-                          {log.action}
+                          {log.actorName || log.actorType || "Σύστημα"} • {log.action}
                         </p>
                       </div>
 
                       <div className="text-xs text-slate-500">
-                        {formatDateTime(log.createdAt)}
+                        {formatDateTimeCompact(log.createdAt)}
                       </div>
                     </div>
                   </div>

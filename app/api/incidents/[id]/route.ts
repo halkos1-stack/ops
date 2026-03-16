@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import { requireApiAppAccess, buildTenantWhere } from "@/lib/route-access"
 
 type RouteContext = {
   params: Promise<{
@@ -7,12 +8,40 @@ type RouteContext = {
   }>
 }
 
-export async function GET(_: NextRequest, context: RouteContext) {
+function toNullableString(value: unknown) {
+  if (value === undefined || value === null) return null
+  const text = String(value).trim()
+  return text === "" ? null : text
+}
+
+function mapIssueToIncidentLike(issue: any) {
+  return {
+    id: issue.id,
+    code: `ISS-${String(issue.id).slice(-8).toUpperCase()}`,
+    propertyId: issue.propertyId,
+    linkedTaskId: issue.taskId,
+    type: issue.issueType,
+    title: issue.title,
+    description: issue.description,
+    severity: issue.severity,
+    status: issue.status,
+    createdAt: issue.createdAt,
+    updatedAt: issue.updatedAt,
+    property: issue.property,
+    task: issue.task,
+  }
+}
+
+export async function GET(_req: NextRequest, context: RouteContext) {
   try {
+    const access = await requireApiAppAccess()
+    if (!access.ok) return access.response
+
+    const { auth } = access
     const { id } = await context.params
 
-    const incident = await prisma.incident.findUnique({
-      where: { id },
+    const issue = await prisma.issue.findFirst({
+      where: buildTenantWhere(auth, { id }),
       include: {
         property: {
           select: {
@@ -28,23 +57,22 @@ export async function GET(_: NextRequest, context: RouteContext) {
             id: true,
             title: true,
             status: true,
-            date: true,
+            scheduledDate: true,
           },
         },
       },
     })
 
-    if (!incident) {
+    if (!issue) {
       return NextResponse.json(
         { error: "Το συμβάν δεν βρέθηκε." },
         { status: 404 }
       )
     }
 
-    return NextResponse.json(incident)
+    return NextResponse.json(mapIssueToIncidentLike(issue))
   } catch (error) {
     console.error("GET /api/incidents/[id] error:", error)
-
     return NextResponse.json(
       { error: "Αποτυχία φόρτωσης συμβάντος." },
       { status: 500 }
@@ -54,100 +82,36 @@ export async function GET(_: NextRequest, context: RouteContext) {
 
 export async function PUT(request: NextRequest, context: RouteContext) {
   try {
+    const access = await requireApiAppAccess()
+    if (!access.ok) return access.response
+
+    const { auth } = access
     const { id } = await context.params
     const body = await request.json()
 
-    const existingIncident = await prisma.incident.findUnique({
-      where: { id },
-      select: { id: true },
+    const existing = await prisma.issue.findFirst({
+      where: buildTenantWhere(auth, { id }),
+      select: {
+        id: true,
+      },
     })
 
-    if (!existingIncident) {
+    if (!existing) {
       return NextResponse.json(
         { error: "Το συμβάν δεν βρέθηκε." },
         { status: 404 }
       )
     }
 
-    const propertyId =
-      body.propertyId !== undefined ? String(body.propertyId || "").trim() : undefined
-
-    const type =
-      body.type !== undefined ? String(body.type || "").trim() : undefined
-
-    const title =
-      body.title !== undefined ? String(body.title || "").trim() : undefined
-
-    const description =
-      body.description !== undefined
-        ? String(body.description || "").trim()
-        : undefined
-
-    const severity =
-      body.severity !== undefined ? String(body.severity || "").trim() : undefined
-
-    const status =
-      body.status !== undefined ? String(body.status || "").trim() : undefined
-
-    const linkedTaskId =
-      body.linkedTaskId !== undefined
-        ? body.linkedTaskId && String(body.linkedTaskId).trim() !== ""
-          ? String(body.linkedTaskId).trim()
-          : null
-        : undefined
-
-    if (propertyId !== undefined && !propertyId) {
-      return NextResponse.json(
-        { error: "Το propertyId δεν μπορεί να είναι κενό." },
-        { status: 400 }
-      )
-    }
-
-    if (type !== undefined && !type) {
-      return NextResponse.json(
-        { error: "Ο τύπος συμβάντος δεν μπορεί να είναι κενός." },
-        { status: 400 }
-      )
-    }
-
-    if (propertyId) {
-      const property = await prisma.property.findUnique({
-        where: { id: propertyId },
-        select: { id: true },
-      })
-
-      if (!property) {
-        return NextResponse.json(
-          { error: "Το ακίνητο δεν βρέθηκε." },
-          { status: 404 }
-        )
-      }
-    }
-
-    if (linkedTaskId) {
-      const task = await prisma.task.findUnique({
-        where: { id: linkedTaskId },
-        select: { id: true },
-      })
-
-      if (!task) {
-        return NextResponse.json(
-          { error: "Η συνδεδεμένη εργασία δεν βρέθηκε." },
-          { status: 404 }
-        )
-      }
-    }
-
-    const updatedIncident = await prisma.incident.update({
+    const updated = await prisma.issue.update({
       where: { id },
       data: {
-        ...(propertyId !== undefined ? { propertyId } : {}),
-        ...(type !== undefined ? { type } : {}),
-        ...(title !== undefined ? { title: title || null } : {}),
-        ...(description !== undefined ? { description: description || null } : {}),
-        ...(severity !== undefined ? { severity } : {}),
-        ...(status !== undefined ? { status } : {}),
-        ...(linkedTaskId !== undefined ? { linkedTaskId } : {}),
+        ...(body.type !== undefined ? { issueType: toNullableString(body.type) || "general" } : {}),
+        ...(body.title !== undefined ? { title: toNullableString(body.title) || "Νέο συμβάν" } : {}),
+        ...(body.description !== undefined ? { description: toNullableString(body.description) } : {}),
+        ...(body.severity !== undefined ? { severity: toNullableString(body.severity) || "medium" } : {}),
+        ...(body.status !== undefined ? { status: toNullableString(body.status) || "open" } : {}),
+        ...(body.linkedTaskId !== undefined ? { taskId: toNullableString(body.linkedTaskId) } : {}),
       },
       include: {
         property: {
@@ -167,10 +131,9 @@ export async function PUT(request: NextRequest, context: RouteContext) {
       },
     })
 
-    return NextResponse.json(updatedIncident)
+    return NextResponse.json(mapIssueToIncidentLike(updated))
   } catch (error) {
     console.error("PUT /api/incidents/[id] error:", error)
-
     return NextResponse.json(
       { error: "Αποτυχία ενημέρωσης συμβάντος." },
       { status: 500 }
@@ -178,30 +141,37 @@ export async function PUT(request: NextRequest, context: RouteContext) {
   }
 }
 
-export async function DELETE(_: NextRequest, context: RouteContext) {
+export async function DELETE(_req: NextRequest, context: RouteContext) {
   try {
+    const access = await requireApiAppAccess()
+    if (!access.ok) return access.response
+
+    const { auth } = access
     const { id } = await context.params
 
-    const existingIncident = await prisma.incident.findUnique({
-      where: { id },
-      select: { id: true },
+    const existing = await prisma.issue.findFirst({
+      where: buildTenantWhere(auth, { id }),
+      select: {
+        id: true,
+      },
     })
 
-    if (!existingIncident) {
+    if (!existing) {
       return NextResponse.json(
         { error: "Το συμβάν δεν βρέθηκε." },
         { status: 404 }
       )
     }
 
-    await prisma.incident.delete({
-      where: { id },
+    await prisma.issue.delete({
+      where: {
+        id,
+      },
     })
 
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error("DELETE /api/incidents/[id] error:", error)
-
     return NextResponse.json(
       { error: "Αποτυχία διαγραφής συμβάντος." },
       { status: 500 }

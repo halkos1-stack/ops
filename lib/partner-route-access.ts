@@ -8,7 +8,7 @@ export type PartnerRouteAccessContext = {
   organizationId: string
   organizationRole: "PARTNER"
   partnerId: string
-  partnerFullName: string
+  partnerName: string
 }
 
 export async function requireApiPartnerAccess(): Promise<
@@ -40,11 +40,12 @@ export async function requireApiPartnerAccess(): Promise<
   const partner = await prisma.partner.findFirst({
     where: {
       organizationId: auth.organizationId,
-      userId: auth.userId,
+      email: auth.email,
+      status: "active",
     },
     select: {
       id: true,
-      fullName: true,
+      name: true,
       organizationId: true,
     },
   })
@@ -53,7 +54,7 @@ export async function requireApiPartnerAccess(): Promise<
     return {
       ok: false,
       response: NextResponse.json(
-        { error: "Δεν βρέθηκε εγγραφή συνεργάτη για τον τρέχοντα χρήστη." },
+        { error: "Δεν βρέθηκε ενεργός συνεργάτης για τον τρέχοντα χρήστη." },
         { status: 403 }
       ),
     }
@@ -67,7 +68,7 @@ export async function requireApiPartnerAccess(): Promise<
       organizationId: partner.organizationId,
       organizationRole: "PARTNER",
       partnerId: partner.id,
-      partnerFullName: partner.fullName,
+      partnerName: partner.name,
     },
   }
 }
@@ -92,8 +93,8 @@ export function buildPartnerChecklistRunWhere(
   extraWhere?: Record<string, unknown>
 ) {
   return {
-    organizationId: auth.organizationId,
     task: {
+      organizationId: auth.organizationId,
       assignments: {
         some: {
           partnerId: auth.partnerId,
@@ -133,8 +134,8 @@ export async function canPartnerAccessChecklistRun(
   const run = await prisma.taskChecklistRun.findFirst({
     where: {
       id: runId,
-      organizationId: auth.organizationId,
       task: {
+        organizationId: auth.organizationId,
         assignments: {
           some: {
             partnerId: auth.partnerId,

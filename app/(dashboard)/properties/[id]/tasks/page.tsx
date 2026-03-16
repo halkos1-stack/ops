@@ -158,13 +158,13 @@ type PropertyTasksResponse = {
 }
 
 type TaskFilter =
-  | "all"
+  | "all_open"
   | "pending"
   | "assigned"
   | "accepted"
   | "in_progress"
-  | "completed"
-  | "cancelled"
+  | "without_assignment"
+  | "with_checklist"
 
 type CreateTaskFormState = {
   title: string
@@ -197,35 +197,40 @@ function getTexts(language: "el" | "en") {
       breadcrumbsProperties: "Properties",
       breadcrumbsTasks: "Property tasks",
       pageTitle: "Property tasks",
+      pageSubtitle:
+        "This page shows only open tasks for the selected property.",
       backToProperty: "Back to property",
       newTask: "New task",
       closeForm: "Close form",
+      completedHistory: "Completed task history",
+
       status: {
         active: "Active",
         inactive: "Inactive",
         maintenance: "Maintenance",
         archived: "Archived",
-        pending: "Pending",
+        pending: "New",
         assigned: "Assigned",
         accepted: "Accepted",
         in_progress: "In progress",
         completed: "Completed",
         cancelled: "Cancelled",
       },
+
       metrics: {
-        total: "Total",
-        pending: "Pending",
+        allOpen: "Open tasks",
+        pending: "New",
         assigned: "Assigned",
         accepted: "Accepted",
         inProgress: "In progress",
         completed: "Completed",
+        withoutAssignment: "Without assignment",
         withChecklist: "With checklist",
-        withIssues: "With issues",
       },
+
       create: {
         title: "New property task",
-        subtitle:
-          "Create a new task already connected to this property.",
+        subtitle: "Create a new task linked directly to this property.",
         taskTitle: "Task title",
         taskType: "Task type",
         source: "Source",
@@ -251,45 +256,37 @@ function getTexts(language: "el" | "en") {
         fallbackChecklist: "Use property primary checklist (if available)",
         checklistDisabled: "Checklist is disabled",
       },
-      filters: {
-        all: "All",
-        pending: "Pending",
-        assigned: "Assigned",
-        accepted: "Accepted",
-        inProgress: "In progress",
-        completed: "Completed",
-        cancelled: "Cancelled",
-        searchPlaceholder: "Search task...",
-      },
+
       list: {
-        title: "Property task list",
-        subtitle: "All tasks related to this property appear here.",
-        noTasks: "No tasks match the current filters.",
+        title: "Open property tasks",
+        subtitle: "Operational view of tasks that still need action.",
+        noTasks: "No open tasks found.",
         viewTask: "View task",
-        assignment: "Assignment",
-        checklist: "Checklist",
-        booking: "Booking",
-        issuesPhotos: "Issues / Photos",
-        requirements: "Requirements",
-        notAssigned: "Not assigned",
+        activeChecklist: "Active checklist",
         noChecklist: "No checklist",
         noBooking: "No booking",
-        issues: "issues",
-        photos: "photos",
-        noRequirements: "No special requirements",
-        checklistWord: "Checklist",
-        photosWord: "Photos",
-        approvalWord: "Approval",
-        date: "Date",
-        time: "Time",
-        createdAt: "Created",
-        priorityPrefix: "Priority",
+        notAssigned: "Not assigned",
         notes: "Notes",
         result: "Result",
       },
+
+      fields: {
+        date: "Date",
+        time: "Time",
+        booking: "Booking",
+        partner: "Assigned partner",
+        status: "Task status",
+        nextStep: "Next step",
+        actionGuide: "What is needed now",
+        checklistStatus: "Checklist status",
+        requirements: "Requirements",
+        createdAt: "Created",
+      },
+
       loading: "Loading property tasks...",
       errorTitle: "Property tasks loading error",
       backToProperties: "Back to properties",
+
       types: {
         apartment: "Apartment",
         villa: "Villa",
@@ -297,18 +294,27 @@ function getTexts(language: "el" | "en") {
         studio: "Studio",
         maisonette: "Maisonette",
       },
+
       sources: {
         manual: "Manual",
         platform: "Platform",
         booking: "Booking",
         system: "System",
       },
+
       priorities: {
         low: "Low",
         normal: "Normal",
         medium: "Medium",
         high: "High",
         urgent: "Urgent",
+      },
+
+      requirements: {
+        checklist: "Checklist",
+        photos: "Photos",
+        approval: "Approval",
+        none: "No special requirements",
       },
     }
   }
@@ -318,35 +324,41 @@ function getTexts(language: "el" | "en") {
     breadcrumbsProperties: "Ακίνητα",
     breadcrumbsTasks: "Εργασίες ακινήτου",
     pageTitle: "Εργασίες ακινήτου",
+    pageSubtitle:
+      "Η σελίδα αυτή δείχνει μόνο τις ανοιχτές εργασίες του συγκεκριμένου ακινήτου.",
     backToProperty: "Επιστροφή στο ακίνητο",
     newTask: "Νέα εργασία",
     closeForm: "Κλείσιμο φόρμας",
+    completedHistory: "Ιστορικό ολοκληρωμένων εργασιών",
+
     status: {
       active: "Ενεργό",
       inactive: "Ανενεργό",
       maintenance: "Σε συντήρηση",
       archived: "Αρχειοθετημένο",
-      pending: "Εκκρεμεί",
+      pending: "Νέα",
       assigned: "Ανατέθηκε",
       accepted: "Αποδεκτή",
       in_progress: "Σε εξέλιξη",
       completed: "Ολοκληρωμένη",
       cancelled: "Ακυρωμένη",
     },
+
     metrics: {
-      total: "Σύνολο",
-      pending: "Εκκρεμείς",
+      allOpen: "Ανοιχτές εργασίες",
+      pending: "Νέες",
       assigned: "Ανατεθειμένες",
       accepted: "Αποδεκτές",
       inProgress: "Σε εξέλιξη",
       completed: "Ολοκληρωμένες",
+      withoutAssignment: "Χωρίς ανάθεση",
       withChecklist: "Με checklist",
-      withIssues: "Με θέματα",
     },
+
     create: {
       title: "Νέα εργασία ακινήτου",
       subtitle:
-        "Δημιουργία νέας εργασίας ήδη συνδεδεμένης με το συγκεκριμένο ακίνητο.",
+        "Δημιουργία νέας εργασίας συνδεδεμένης απευθείας με το συγκεκριμένο ακίνητο.",
       taskTitle: "Τίτλος εργασίας",
       taskType: "Τύπος εργασίας",
       source: "Πηγή",
@@ -372,46 +384,38 @@ function getTexts(language: "el" | "en") {
       fallbackChecklist: "Χρήση κύριου checklist ακινήτου (αν υπάρχει)",
       checklistDisabled: "Το checklist είναι απενεργοποιημένο",
     },
-    filters: {
-      all: "Όλες",
-      pending: "Εκκρεμείς",
-      assigned: "Ανατεθειμένες",
-      accepted: "Αποδεκτές",
-      inProgress: "Σε εξέλιξη",
-      completed: "Ολοκληρωμένες",
-      cancelled: "Ακυρωμένες",
-      searchPlaceholder: "Αναζήτηση εργασίας...",
-    },
+
     list: {
-      title: "Λίστα εργασιών ακινήτου",
+      title: "Ανοιχτές εργασίες ακινήτου",
       subtitle:
-        "Εδώ εμφανίζονται όλες οι εργασίες που συνδέονται με το συγκεκριμένο ακίνητο.",
-      noTasks: "Δεν υπάρχουν εργασίες που να ταιριάζουν με τα τρέχοντα φίλτρα.",
+        "Καθαρή εικόνα μόνο για εργασίες που χρειάζονται ακόμη ενέργεια.",
+      noTasks: "Δεν υπάρχουν ανοιχτές εργασίες.",
       viewTask: "Προβολή εργασίας",
-      assignment: "Ανάθεση",
-      checklist: "Checklist",
-      booking: "Κράτηση",
-      issuesPhotos: "Θέματα / Φωτογραφίες",
-      requirements: "Απαιτήσεις",
-      notAssigned: "Δεν έχει ανατεθεί",
-      noChecklist: "Δεν υπάρχει",
+      activeChecklist: "Ενεργή λίστα",
+      noChecklist: "Δεν υπάρχει λίστα",
       noBooking: "Χωρίς κράτηση",
-      issues: "θέματα",
-      photos: "φωτογραφίες",
-      noRequirements: "Καμία ειδική απαίτηση",
-      checklistWord: "Checklist",
-      photosWord: "Φωτογραφίες",
-      approvalWord: "Έγκριση",
-      date: "Ημερομηνία",
-      time: "Ώρα",
-      createdAt: "Δημιουργία",
-      priorityPrefix: "Προτεραιότητα",
+      notAssigned: "Δεν έχει ανατεθεί",
       notes: "Σημειώσεις",
       result: "Αποτέλεσμα",
     },
+
+    fields: {
+      date: "Ημερομηνία",
+      time: "Ώρα",
+      booking: "Κράτηση",
+      partner: "Ανατεθειμένος συνεργάτης",
+      status: "Κατάσταση εργασίας",
+      nextStep: "Επόμενο βήμα",
+      actionGuide: "Τι χρειάζεται τώρα",
+      checklistStatus: "Κατάσταση λίστας",
+      requirements: "Απαιτήσεις",
+      createdAt: "Δημιουργία",
+    },
+
     loading: "Φόρτωση εργασιών ακινήτου...",
     errorTitle: "Σφάλμα φόρτωσης εργασιών ακινήτου",
     backToProperties: "Επιστροφή στα ακίνητα",
+
     types: {
       apartment: "Διαμέρισμα",
       villa: "Βίλα",
@@ -419,18 +423,27 @@ function getTexts(language: "el" | "en") {
       studio: "Στούντιο",
       maisonette: "Μεζονέτα",
     },
+
     sources: {
       manual: "Χειροκίνητη",
       platform: "Από πλατφόρμα",
       booking: "Από κράτηση",
       system: "Συστήματος",
     },
+
     priorities: {
       low: "Χαμηλή",
       normal: "Κανονική",
       medium: "Μεσαία",
       high: "Υψηλή",
       urgent: "Επείγουσα",
+    },
+
+    requirements: {
+      checklist: "Checklist",
+      photos: "Φωτογραφίες",
+      approval: "Έγκριση",
+      none: "Καμία ειδική απαίτηση",
     },
   }
 }
@@ -490,7 +503,19 @@ function checklistStatusLabel(
   status?: string | null,
   texts?: ReturnType<typeof getTexts>
 ) {
-  return taskStatusLabel(status, texts)
+  const normalized = (status || "").toLowerCase()
+
+  if (texts?.locale === "en-GB") {
+    if (normalized === "pending") return "Pending"
+    if (normalized === "in_progress") return "In progress"
+    if (normalized === "completed") return "Submitted"
+    return status || "—"
+  }
+
+  if (normalized === "pending") return "Σε αναμονή"
+  if (normalized === "in_progress") return "Σε εξέλιξη"
+  if (normalized === "completed") return "Υποβλήθηκε"
+  return status || "—"
 }
 
 function typeLabel(value?: string | null) {
@@ -531,6 +556,23 @@ function badgeClasses(status?: string | null) {
     case "critical":
     case "high":
       return "bg-red-50 text-red-700 ring-1 ring-red-200"
+    default:
+      return "bg-slate-100 text-slate-700 ring-1 ring-slate-200"
+  }
+}
+
+function priorityBadgeClasses(priority?: string | null) {
+  switch ((priority || "").toLowerCase()) {
+    case "urgent":
+    case "critical":
+      return "bg-red-50 text-red-700 ring-1 ring-red-200"
+    case "high":
+      return "bg-amber-50 text-amber-700 ring-1 ring-amber-200"
+    case "medium":
+    case "normal":
+      return "bg-sky-50 text-sky-700 ring-1 ring-sky-200"
+    case "low":
+      return "bg-slate-100 text-slate-700 ring-1 ring-slate-200"
     default:
       return "bg-slate-100 text-slate-700 ring-1 ring-slate-200"
   }
@@ -584,6 +626,82 @@ function getInitialCreateForm(): CreateTaskFormState {
   }
 }
 
+function isOpenTask(task: PropertyTask) {
+  return ["pending", "assigned", "accepted", "in_progress"].includes(
+    String(task.status || "").toLowerCase()
+  )
+}
+
+function getTaskActionGuide(
+  task: PropertyTask,
+  texts: ReturnType<typeof getTexts>
+) {
+  const status = String(task.status || "").toLowerCase()
+  const checklistStatus = String(task.checklistRun?.status || "").toLowerCase()
+
+  if (status === "pending") {
+    return {
+      step: "Ανάθεση συνεργάτη",
+      guide: "Η εργασία είναι νέα και χρειάζεται ανάθεση.",
+    }
+  }
+
+  if (status === "assigned") {
+    return {
+      step: "Αναμονή αποδοχής",
+      guide: "Η εργασία έχει ανατεθεί και περιμένει αποδοχή.",
+    }
+  }
+
+  if (status === "accepted" && task.requiresChecklist && checklistStatus !== "completed") {
+    return {
+      step: "Αναμονή υποβολής λίστας",
+      guide: "Ο συνεργάτης αποδέχτηκε την εργασία.",
+    }
+  }
+
+  if (status === "accepted" && !task.requiresChecklist) {
+    return {
+      step: "Έναρξη εκτέλεσης",
+      guide: "Ο συνεργάτης αποδέχτηκε την εργασία.",
+    }
+  }
+
+  if (status === "in_progress" && task.requiresChecklist && checklistStatus !== "completed") {
+    return {
+      step: "Αναμονή υποβολής λίστας",
+      guide: "Η εργασία εκτελείται και αναμένεται η υποβολή της λίστας.",
+    }
+  }
+
+  if (status === "in_progress" && checklistStatus === "completed") {
+    return {
+      step: "Έλεγχος και ολοκλήρωση",
+      guide: "Η λίστα υποβλήθηκε και μένει ο τελικός έλεγχος.",
+    }
+  }
+
+  return {
+    step: "Έλεγχος εργασίας",
+    guide: "Άνοιξε την εργασία για πλήρη εικόνα.",
+  }
+}
+
+function getRequirementsText(
+  task: PropertyTask,
+  texts: ReturnType<typeof getTexts>
+) {
+  const values: string[] = []
+
+  if (task.requiresChecklist) values.push(texts.requirements.checklist)
+  if (task.requiresPhotos) values.push(texts.requirements.photos)
+  if (task.requiresApproval) values.push(texts.requirements.approval)
+
+  if (values.length === 0) return texts.requirements.none
+
+  return values.join(" • ")
+}
+
 export default function PropertyTasksPage({ params }: PageProps) {
   const { id } = use(params)
   const { language } = useAppLanguage()
@@ -593,8 +711,7 @@ export default function PropertyTasksPage({ params }: PageProps) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const [activeFilter, setActiveFilter] = useState<TaskFilter>("all")
-  const [searchTerm, setSearchTerm] = useState("")
+  const [activeFilter, setActiveFilter] = useState<TaskFilter>("all_open")
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
@@ -642,61 +759,67 @@ export default function PropertyTasksPage({ params }: PageProps) {
   const bookings = safeArray(data?.bookings)
   const checklistTemplates = safeArray(data?.checklistTemplates)
 
+  const openTasks = useMemo(() => {
+    return tasks.filter(isOpenTask)
+  }, [tasks])
+
   const metrics = useMemo(() => {
-    const pending = tasks.filter((task) => task.status === "pending").length
-    const assigned = tasks.filter((task) => task.status === "assigned").length
-    const accepted = tasks.filter((task) => task.status === "accepted").length
-    const inProgress = tasks.filter((task) => task.status === "in_progress").length
+    const allOpen = openTasks.length
+    const pending = openTasks.filter((task) => task.status === "pending").length
+    const assigned = openTasks.filter((task) => task.status === "assigned").length
+    const accepted = openTasks.filter((task) => task.status === "accepted").length
+    const inProgress = openTasks.filter((task) => task.status === "in_progress").length
     const completed = tasks.filter((task) => task.status === "completed").length
-    const cancelled = tasks.filter((task) => task.status === "cancelled").length
-    const withChecklist = tasks.filter((task) => !!task.checklistRun).length
-    const withIssues = tasks.filter((task) => safeArray(task.issues).length > 0).length
+    const withoutAssignment = openTasks.filter(
+      (task) => !getLatestAssignment(task)?.partner?.id
+    ).length
+    const withChecklist = openTasks.filter((task) => !!task.checklistRun).length
 
     return {
-      total: tasks.length,
+      allOpen,
       pending,
       assigned,
       accepted,
       inProgress,
       completed,
-      cancelled,
+      withoutAssignment,
       withChecklist,
-      withIssues,
     }
-  }, [tasks])
+  }, [openTasks, tasks])
 
   const filteredTasks = useMemo(() => {
-    let result = [...tasks]
+    let result = [...openTasks]
 
-    if (activeFilter !== "all") {
-      result = result.filter((task) => task.status === activeFilter)
+    if (activeFilter === "pending") {
+      result = result.filter((task) => task.status === "pending")
     }
 
-    const term = searchTerm.trim().toLowerCase()
-
-    if (term) {
-      result = result.filter((task) => {
-        const text = [
-          task.title,
-          task.description,
-          task.taskType,
-          task.source,
-          task.priority,
-          task.status,
-          task.booking?.guestName,
-          getLatestAssignment(task)?.partner?.name,
-          task.checklistRun?.template?.title,
-        ]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase()
-
-        return text.includes(term)
-      })
+    if (activeFilter === "assigned") {
+      result = result.filter((task) => task.status === "assigned")
     }
 
-    return result
-  }, [tasks, activeFilter, searchTerm])
+    if (activeFilter === "accepted") {
+      result = result.filter((task) => task.status === "accepted")
+    }
+
+    if (activeFilter === "in_progress") {
+      result = result.filter((task) => task.status === "in_progress")
+    }
+
+    if (activeFilter === "without_assignment") {
+      result = result.filter((task) => !getLatestAssignment(task)?.partner?.id)
+    }
+
+    if (activeFilter === "with_checklist") {
+      result = result.filter((task) => !!task.checklistRun)
+    }
+
+    return result.sort((a, b) => {
+      const aDate = new Date(a.scheduledDate).getTime()
+      const bDate = new Date(b.scheduledDate).getTime()
+      return aDate - bDate
+    })
+  }, [openTasks, activeFilter])
 
   async function handleCreateTask(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -835,6 +958,8 @@ export default function PropertyTasksPage({ params }: PageProps) {
             {property.name} · {property.address}, {property.city}, {property.region},{" "}
             {property.postalCode}, {property.country}
           </p>
+
+          <p className="mt-2 text-sm text-slate-500">{texts.pageSubtitle}</p>
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -859,10 +984,18 @@ export default function PropertyTasksPage({ params }: PageProps) {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8">
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="text-sm text-slate-500">{texts.metrics.total}</div>
-          <div className="mt-2 text-3xl font-bold text-slate-900">{metrics.total}</div>
-        </div>
+        <button
+          type="button"
+          onClick={() => setActiveFilter("all_open")}
+          className={`rounded-2xl border p-5 shadow-sm text-left transition ${
+            activeFilter === "all_open"
+              ? "border-slate-900 bg-slate-50"
+              : "border-slate-200 bg-white hover:bg-slate-50"
+          }`}
+        >
+          <div className="text-sm text-slate-500">{texts.metrics.allOpen}</div>
+          <div className="mt-2 text-3xl font-bold text-slate-900">{metrics.allOpen}</div>
+        </button>
 
         <button
           type="button"
@@ -895,12 +1028,12 @@ export default function PropertyTasksPage({ params }: PageProps) {
           onClick={() => setActiveFilter("accepted")}
           className={`rounded-2xl border p-5 shadow-sm text-left transition ${
             activeFilter === "accepted"
-              ? "border-amber-300 bg-amber-50"
+              ? "border-blue-300 bg-blue-50"
               : "border-slate-200 bg-white hover:bg-slate-50"
           }`}
         >
           <div className="text-sm text-slate-500">{texts.metrics.accepted}</div>
-          <div className="mt-2 text-3xl font-bold text-amber-700">{metrics.accepted}</div>
+          <div className="mt-2 text-3xl font-bold text-blue-700">{metrics.accepted}</div>
         </button>
 
         <button
@@ -916,28 +1049,40 @@ export default function PropertyTasksPage({ params }: PageProps) {
           <div className="mt-2 text-3xl font-bold text-blue-700">{metrics.inProgress}</div>
         </button>
 
-        <button
-          type="button"
-          onClick={() => setActiveFilter("completed")}
-          className={`rounded-2xl border p-5 shadow-sm text-left transition ${
-            activeFilter === "completed"
-              ? "border-emerald-300 bg-emerald-50"
-              : "border-slate-200 bg-white hover:bg-slate-50"
-          }`}
+        <Link
+          href={`/properties/${property.id}/tasks/history`}
+          className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm text-left transition hover:bg-slate-50"
         >
           <div className="text-sm text-slate-500">{texts.metrics.completed}</div>
           <div className="mt-2 text-3xl font-bold text-emerald-700">{metrics.completed}</div>
+          <div className="mt-2 text-xs text-slate-500">{texts.completedHistory}</div>
+        </Link>
+
+        <button
+          type="button"
+          onClick={() => setActiveFilter("without_assignment")}
+          className={`rounded-2xl border p-5 shadow-sm text-left transition ${
+            activeFilter === "without_assignment"
+              ? "border-red-300 bg-red-50"
+              : "border-slate-200 bg-white hover:bg-slate-50"
+          }`}
+        >
+          <div className="text-sm text-slate-500">{texts.metrics.withoutAssignment}</div>
+          <div className="mt-2 text-3xl font-bold text-red-700">{metrics.withoutAssignment}</div>
         </button>
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <button
+          type="button"
+          onClick={() => setActiveFilter("with_checklist")}
+          className={`rounded-2xl border p-5 shadow-sm text-left transition ${
+            activeFilter === "with_checklist"
+              ? "border-slate-900 bg-slate-50"
+              : "border-slate-200 bg-white hover:bg-slate-50"
+          }`}
+        >
           <div className="text-sm text-slate-500">{texts.metrics.withChecklist}</div>
           <div className="mt-2 text-3xl font-bold text-slate-900">{metrics.withChecklist}</div>
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="text-sm text-slate-500">{texts.metrics.withIssues}</div>
-          <div className="mt-2 text-3xl font-bold text-red-700">{metrics.withIssues}</div>
-        </div>
+        </button>
       </div>
 
       {showCreateForm ? (
@@ -960,7 +1105,7 @@ export default function PropertyTasksPage({ params }: PageProps) {
                     setForm((prev) => ({ ...prev, title: e.target.value }))
                   }
                   className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
-                  placeholder={language === "en" ? "e.g. Cleaning before arrival" : "π.χ. Καθαρισμός πριν άφιξη"}
+                  placeholder="π.χ. Καθαρισμός πριν άφιξη"
                   required
                 />
               </div>
@@ -976,13 +1121,13 @@ export default function PropertyTasksPage({ params }: PageProps) {
                   }
                   className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
                 >
-                  <option value="cleaning">{language === "en" ? "Cleaning" : "Καθαρισμός"}</option>
-                  <option value="inspection">{language === "en" ? "Inspection" : "Επιθεώρηση"}</option>
-                  <option value="repair">{language === "en" ? "Repair / Maintenance" : "Βλάβη / Επισκευή"}</option>
-                  <option value="damage">{language === "en" ? "Damage" : "Ζημιά"}</option>
-                  <option value="supplies">{language === "en" ? "Supplies" : "Αναλώσιμα"}</option>
-                  <option value="photos">{language === "en" ? "Photo documentation" : "Φωτογραφική τεκμηρίωση"}</option>
-                  <option value="custom">{language === "en" ? "Other task" : "Άλλη εργασία"}</option>
+                  <option value="cleaning">Καθαρισμός</option>
+                  <option value="inspection">Επιθεώρηση</option>
+                  <option value="repair">Βλάβη / Επισκευή</option>
+                  <option value="damage">Ζημιά</option>
+                  <option value="supplies">Αναλώσιμα</option>
+                  <option value="photos">Φωτογραφική τεκμηρίωση</option>
+                  <option value="custom">Άλλη εργασία</option>
                 </select>
               </div>
 
@@ -1138,7 +1283,7 @@ export default function PropertyTasksPage({ params }: PageProps) {
                   }
                   rows={3}
                   className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
-                  placeholder={language === "en" ? "Task details" : "Λεπτομέρειες για την εργασία"}
+                  placeholder="Λεπτομέρειες για την εργασία"
                 />
               </div>
             </div>
@@ -1215,7 +1360,7 @@ export default function PropertyTasksPage({ params }: PageProps) {
                     {checklistTemplates.map((template) => (
                       <option key={template.id} value={template.id}>
                         {template.title}
-                        {template.isPrimary ? ` · ${language === "en" ? "Primary" : "Κύριο"}` : ""}
+                        {template.isPrimary ? " · Κύριο" : ""}
                         {template.templateType ? ` · ${typeLabel(template.templateType)}` : ""}
                       </option>
                     ))}
@@ -1236,7 +1381,7 @@ export default function PropertyTasksPage({ params }: PageProps) {
                   }
                   rows={3}
                   className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
-                  placeholder={language === "en" ? "Internal notes" : "Εσωτερικές σημειώσεις"}
+                  placeholder="Εσωτερικές σημειώσεις"
                 />
               </div>
 
@@ -1251,7 +1396,7 @@ export default function PropertyTasksPage({ params }: PageProps) {
                   }
                   rows={3}
                   className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
-                  placeholder={language === "en" ? "Optional field" : "Προαιρετικό πεδίο"}
+                  placeholder="Προαιρετικό πεδίο"
                 />
               </div>
             </div>
@@ -1287,45 +1432,6 @@ export default function PropertyTasksPage({ params }: PageProps) {
         </div>
       ) : null}
 
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-          <div className="flex flex-wrap gap-2">
-            {([
-              { key: "all", label: texts.filters.all },
-              { key: "pending", label: texts.filters.pending },
-              { key: "assigned", label: texts.filters.assigned },
-              { key: "accepted", label: texts.filters.accepted },
-              { key: "in_progress", label: texts.filters.inProgress },
-              { key: "completed", label: texts.filters.completed },
-              { key: "cancelled", label: texts.filters.cancelled },
-            ] as Array<{ key: TaskFilter; label: string }>).map((filter) => (
-              <button
-                key={filter.key}
-                type="button"
-                onClick={() => setActiveFilter(filter.key)}
-                className={`rounded-xl px-4 py-2 text-sm font-medium ${
-                  activeFilter === filter.key
-                    ? "bg-slate-900 text-white"
-                    : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
-                }`}
-              >
-                {filter.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="w-full xl:w-80">
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder={texts.filters.searchPlaceholder}
-              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
-            />
-          </div>
-        </div>
-      </div>
-
       <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         <div className="border-b border-slate-200 px-5 py-4">
           <h2 className="text-lg font-semibold text-slate-900">{texts.list.title}</h2>
@@ -1338,157 +1444,190 @@ export default function PropertyTasksPage({ params }: PageProps) {
           <div className="divide-y divide-slate-100">
             {filteredTasks.map((task) => {
               const latestAssignment = getLatestAssignment(task)
-              const issueCount = safeArray(task.issues).length
-              const photoCount = safeArray(task.taskPhotos).length
-              const checklistAnswers = safeArray(task.checklistRun?.answers).length
+              const taskGuide = getTaskActionGuide(task, texts)
+              const activeChecklistName =
+                task.checklistRun?.template?.title || texts.list.noChecklist
 
               return (
                 <div key={task.id} className="p-5">
-                  <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <div className="font-semibold text-slate-900">{task.title}</div>
+                  <div className="flex flex-col gap-4">
+                    <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="font-semibold text-slate-900">{task.title}</div>
 
-                        <span
-                          className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${badgeClasses(
-                            task.status
-                          )}`}
+                          <span
+                            className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${badgeClasses(
+                              task.status
+                            )}`}
+                          >
+                            {taskStatusLabel(task.status, texts)}
+                          </span>
+
+                          <span
+                            className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${priorityBadgeClasses(
+                              task.priority
+                            )}`}
+                          >
+                            {priorityLabel(task.priority, texts)}
+                          </span>
+
+                          <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200">
+                            {typeLabel(task.taskType)}
+                          </span>
+
+                          <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200">
+                            {sourceLabel(task.source, texts)}
+                          </span>
+                        </div>
+
+                        {task.description ? (
+                          <div className="mt-2 text-sm text-slate-700">{task.description}</div>
+                        ) : null}
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <Link
+                          href={`/tasks/${task.id}`}
+                          className="inline-flex items-center rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
                         >
+                          {texts.list.viewTask}
+                        </Link>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          {texts.fields.status}
+                        </div>
+                        <div className="mt-2 text-sm font-semibold text-slate-900">
                           {taskStatusLabel(task.status, texts)}
-                        </span>
-
-                        <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200">
-                          {typeLabel(task.taskType)}
-                        </span>
-
-                        <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200">
-                          {sourceLabel(task.source, texts)}
-                        </span>
-
-                        <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200">
-                          {texts.list.priorityPrefix}: {priorityLabel(task.priority, texts)}
-                        </span>
+                        </div>
+                        <div className="mt-2 text-sm text-slate-600">
+                          {taskGuide.guide}
+                        </div>
                       </div>
 
-                      {task.description ? (
-                        <div className="mt-2 text-sm text-slate-700">{task.description}</div>
-                      ) : null}
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          {texts.fields.nextStep}
+                        </div>
+                        <div className="mt-2 text-sm font-semibold text-slate-900">
+                          {taskGuide.step}
+                        </div>
+                        <div className="mt-2 text-sm text-slate-600">
+                          {texts.fields.actionGuide}
+                        </div>
+                      </div>
 
-                      <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-500">
-                        <span>
-                          {texts.list.date}: {formatDate(task.scheduledDate, texts.locale)}
-                        </span>
-                        <span>•</span>
-                        <span>
-                          {texts.list.time}: {task.scheduledStartTime || "—"}
-                          {task.scheduledEndTime ? ` - ${task.scheduledEndTime}` : ""}
-                        </span>
-                        <span>•</span>
-                        <span>
-                          {texts.list.createdAt}: {formatDateTime(task.createdAt, texts.locale)}
-                        </span>
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          {texts.list.activeChecklist}
+                        </div>
+                        <div className="mt-2 text-sm font-semibold text-slate-900">
+                          {activeChecklistName}
+                        </div>
+                        <div className="mt-2 text-sm text-slate-600">
+                          {texts.fields.checklistStatus}:{" "}
+                          {task.checklistRun
+                            ? checklistStatusLabel(task.checklistRun.status, texts)
+                            : "—"}
+                        </div>
                       </div>
                     </div>
 
-                    <div className="flex flex-wrap gap-2">
-                      <Link
-                        href={`/tasks/${task.id}`}
-                        className="inline-flex items-center rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
-                      >
-                        {texts.list.viewTask}
-                      </Link>
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                      <InfoBox
+                        label={texts.fields.date}
+                        value={formatDate(task.scheduledDate, texts.locale)}
+                      />
+
+                      <InfoBox
+                        label={texts.fields.time}
+                        value={`${task.scheduledStartTime || "—"}${
+                          task.scheduledEndTime ? ` - ${task.scheduledEndTime}` : ""
+                        }`}
+                      />
+
+                      <InfoBox
+                        label={texts.fields.partner}
+                        value={latestAssignment?.partner?.name || texts.list.notAssigned}
+                      />
+
+                      <InfoBox
+                        label={texts.fields.booking}
+                        value={
+                          task.booking?.guestName
+                            ? `${task.booking.guestName} · ${formatDate(
+                                task.booking.checkInDate,
+                                texts.locale
+                              )}`
+                            : texts.list.noBooking
+                        }
+                      />
                     </div>
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          {texts.fields.requirements}
+                        </div>
+                        <div className="mt-2 text-sm text-slate-900">
+                          {getRequirementsText(task, texts)}
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          {texts.fields.createdAt}
+                        </div>
+                        <div className="mt-2 text-sm text-slate-900">
+                          {formatDateTime(task.createdAt, texts.locale)}
+                        </div>
+                        <div className="mt-2 text-sm text-slate-600">
+                          {latestAssignment
+                            ? assignmentStatusLabel(latestAssignment.status, texts)
+                            : texts.list.notAssigned}
+                        </div>
+                      </div>
+                    </div>
+
+                    {task.notes ? (
+                      <div className="text-sm text-slate-600">
+                        {texts.list.notes}: {task.notes}
+                      </div>
+                    ) : null}
+
+                    {task.resultNotes ? (
+                      <div className="text-sm text-slate-600">
+                        {texts.list.result}: {task.resultNotes}
+                      </div>
+                    ) : null}
                   </div>
-
-                  <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-                    <div className="rounded-xl bg-slate-50 p-3">
-                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        {texts.list.assignment}
-                      </div>
-                      <div className="mt-1 text-sm text-slate-900">
-                        {latestAssignment?.partner?.name || texts.list.notAssigned}
-                      </div>
-                      <div className="mt-1 text-xs text-slate-500">
-                        {latestAssignment
-                          ? assignmentStatusLabel(latestAssignment.status, texts)
-                          : "—"}
-                      </div>
-                    </div>
-
-                    <div className="rounded-xl bg-slate-50 p-3">
-                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        {texts.list.checklist}
-                      </div>
-                      <div className="mt-1 text-sm text-slate-900">
-                        {task.checklistRun?.template?.title || texts.list.noChecklist}
-                      </div>
-                      <div className="mt-1 text-xs text-slate-500">
-                        {task.checklistRun
-                          ? `${checklistStatusLabel(task.checklistRun.status, texts)} · ${checklistAnswers}`
-                          : "—"}
-                      </div>
-                    </div>
-
-                    <div className="rounded-xl bg-slate-50 p-3">
-                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        {texts.list.booking}
-                      </div>
-                      <div className="mt-1 text-sm text-slate-900">
-                        {task.booking?.guestName || texts.list.noBooking}
-                      </div>
-                      <div className="mt-1 text-xs text-slate-500">
-                        {task.booking
-                          ? `${task.booking.sourcePlatform} · ${formatDate(task.booking.checkInDate, texts.locale)}`
-                          : "—"}
-                      </div>
-                    </div>
-
-                    <div className="rounded-xl bg-slate-50 p-3">
-                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        {texts.list.issuesPhotos}
-                      </div>
-                      <div className="mt-1 text-sm text-slate-900">
-                        {issueCount} {texts.list.issues}
-                      </div>
-                      <div className="mt-1 text-xs text-slate-500">
-                        {photoCount} {texts.list.photos}
-                      </div>
-                    </div>
-
-                    <div className="rounded-xl bg-slate-50 p-3">
-                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        {texts.list.requirements}
-                      </div>
-                      <div className="mt-1 text-sm text-slate-900">
-                        {task.requiresChecklist ? `${texts.list.checklistWord} ` : ""}
-                        {task.requiresPhotos ? `${texts.list.photosWord} ` : ""}
-                        {task.requiresApproval ? `${texts.list.approvalWord} ` : ""}
-                        {!task.requiresChecklist &&
-                        !task.requiresPhotos &&
-                        !task.requiresApproval
-                          ? texts.list.noRequirements
-                          : ""}
-                      </div>
-                    </div>
-                  </div>
-
-                  {task.notes ? (
-                    <div className="mt-3 text-sm text-slate-600">
-                      {texts.list.notes}: {task.notes}
-                    </div>
-                  ) : null}
-
-                  {task.resultNotes ? (
-                    <div className="mt-2 text-sm text-slate-600">
-                      {texts.list.result}: {task.resultNotes}
-                    </div>
-                  ) : null}
                 </div>
               )
             })}
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+function InfoBox({
+  label,
+  value,
+}: {
+  label: string
+  value: string
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+        {label}
+      </div>
+      <div className="mt-2 text-sm font-semibold text-slate-900">{value}</div>
     </div>
   )
 }

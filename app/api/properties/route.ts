@@ -41,6 +41,55 @@ function normalizePropertyStatus(value: unknown) {
   return "active"
 }
 
+function buildOrganizationPrefix(name: string) {
+  const cleaned = name
+    .trim()
+    .replace(/\s+/g, "")
+    .replace(/[^\p{L}\p{N}]/gu, "")
+    .toUpperCase()
+
+  if (!cleaned) return "ORG"
+  if (cleaned.length >= 3) return cleaned.slice(0, 3)
+  return cleaned.padEnd(3, "X")
+}
+
+async function generateNextPropertyCode(
+  organizationId: string,
+  organizationName: string
+) {
+  const prefix = buildOrganizationPrefix(organizationName)
+
+  const existing = await prisma.property.findMany({
+    where: {
+      organizationId,
+      code: {
+        startsWith: prefix,
+      },
+    },
+    select: {
+      code: true,
+    },
+  })
+
+  let maxNumber = 0
+
+  for (const row of existing) {
+    const code = String(row.code || "")
+    const suffix = code.slice(prefix.length)
+    const match = suffix.match(/(\d+)$/)
+
+    if (match) {
+      const num = Number(match[1])
+      if (!Number.isNaN(num) && num > maxNumber) {
+        maxNumber = num
+      }
+    }
+  }
+
+  const nextNumber = maxNumber + 1
+  return `${prefix}${String(nextNumber).padStart(4, "0")}`
+}
+
 async function getFullPropertyList(where: Record<string, unknown>) {
   return prisma.property.findMany({
     where,
@@ -59,18 +108,21 @@ async function getFullPropertyList(where: Record<string, unknown>) {
           status: true,
         },
       },
+
       bookings: {
         select: {
           id: true,
           status: true,
           checkInDate: true,
           checkOutDate: true,
+          checkInTime: true,
         },
         orderBy: {
           checkInDate: "desc",
         },
         take: 10,
       },
+
       tasks: {
         select: {
           id: true,
@@ -78,12 +130,36 @@ async function getFullPropertyList(where: Record<string, unknown>) {
           priority: true,
           taskType: true,
           scheduledDate: true,
+
+          assignments: {
+            orderBy: {
+              assignedAt: "desc",
+            },
+            take: 1,
+            select: {
+              id: true,
+              status: true,
+              assignedAt: true,
+              acceptedAt: true,
+              rejectedAt: true,
+            },
+          },
+
+          checklistRun: {
+            select: {
+              id: true,
+              status: true,
+              startedAt: true,
+              completedAt: true,
+            },
+          },
         },
         orderBy: {
           scheduledDate: "desc",
         },
         take: 20,
       },
+
       issues: {
         select: {
           id: true,
@@ -94,16 +170,6 @@ async function getFullPropertyList(where: Record<string, unknown>) {
           createdAt: "desc",
         },
         take: 20,
-      },
-      checklistTemplates: {
-        select: {
-          id: true,
-          title: true,
-          templateType: true,
-          isPrimary: true,
-          isActive: true,
-        },
-        orderBy: [{ isPrimary: "desc" }, { createdAt: "desc" }],
       },
     },
   })
@@ -199,6 +265,7 @@ export async function POST(req: NextRequest) {
       where: { id: organizationId },
       select: {
         id: true,
+        name: true,
         isActive: true,
       },
     })
@@ -210,7 +277,6 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const code = toRequiredString(body.code, "code")
     const name = toRequiredString(body.name, "name")
     const address = toRequiredString(body.address, "address")
     const city = toRequiredString(body.city, "city")
@@ -224,23 +290,6 @@ export async function POST(req: NextRequest) {
     const maxGuests = toNonNegativeInt(body.maxGuests, 0)
     const notes = toNullableString(body.notes)
     const defaultPartnerId = toNullableString(body.defaultPartnerId)
-
-    const duplicateCode = await prisma.property.findFirst({
-      where: {
-        organizationId,
-        code,
-      },
-      select: {
-        id: true,
-      },
-    })
-
-    if (duplicateCode) {
-      return NextResponse.json(
-        { error: "Υπάρχει ήδη ακίνητο με αυτόν τον κωδικό." },
-        { status: 400 }
-      )
-    }
 
     if (defaultPartnerId) {
       const partner = await prisma.partner.findFirst({
@@ -258,6 +307,45 @@ export async function POST(req: NextRequest) {
           { error: "Ο προεπιλεγμένος συνεργάτης δεν ανήκει στον ίδιο οργανισμό." },
           { status: 400 }
         )
+      }
+    }
+
+    let code = await generateNextPropertyCode(organizationId, organization.name)
+
+    const duplicateCode = await prisma.property.findFirst({
+      where: {
+        organizationId,
+        code,
+      },
+      select: {
+        id: true,
+      },
+    })
+
+    if (duplicateCode) {
+      let counter = 2
+
+      while (counter < 1000) {
+        const candidate = `${buildOrganizationPrefix(organization.name)}${String(
+          counter
+        ).padStart(4, "0")}`
+
+        const exists = await prisma.property.findFirst({
+          where: {
+            organizationId,
+            code: candidate,
+          },
+          select: {
+            id: true,
+          },
+        })
+
+        if (!exists) {
+          code = candidate
+          break
+        }
+
+        counter += 1
       }
     }
 
@@ -297,18 +385,21 @@ export async function POST(req: NextRequest) {
             status: true,
           },
         },
+
         bookings: {
           select: {
             id: true,
             status: true,
             checkInDate: true,
             checkOutDate: true,
+            checkInTime: true,
           },
           orderBy: {
             checkInDate: "desc",
           },
           take: 10,
         },
+
         tasks: {
           select: {
             id: true,
@@ -316,12 +407,36 @@ export async function POST(req: NextRequest) {
             priority: true,
             taskType: true,
             scheduledDate: true,
+
+            assignments: {
+              orderBy: {
+                assignedAt: "desc",
+              },
+              take: 1,
+              select: {
+                id: true,
+                status: true,
+                assignedAt: true,
+                acceptedAt: true,
+                rejectedAt: true,
+              },
+            },
+
+            checklistRun: {
+              select: {
+                id: true,
+                status: true,
+                startedAt: true,
+                completedAt: true,
+              },
+            },
           },
           orderBy: {
             scheduledDate: "desc",
           },
           take: 20,
         },
+
         issues: {
           select: {
             id: true,
@@ -332,16 +447,6 @@ export async function POST(req: NextRequest) {
             createdAt: "desc",
           },
           take: 20,
-        },
-        checklistTemplates: {
-          select: {
-            id: true,
-            title: true,
-            templateType: true,
-            isPrimary: true,
-            isActive: true,
-          },
-          orderBy: [{ isPrimary: "desc" }, { createdAt: "desc" }],
         },
       },
     })

@@ -21,14 +21,6 @@ type ChecklistItemInput = {
   requiresPhoto?: unknown
   opensIssueOnFail?: unknown
   optionsText?: unknown
-
-  issueTypeOnFail?: unknown
-  issueSeverityOnFail?: unknown
-  failureValuesText?: unknown
-
-  linkedSupplyItemId?: unknown
-  supplyUpdateMode?: unknown
-  supplyQuantity?: unknown
 }
 
 function toNullableString(value: unknown) {
@@ -59,12 +51,6 @@ function toNumberValue(value: unknown, fallback = 0) {
   return Number.isFinite(num) ? num : fallback
 }
 
-function toNullableNumber(value: unknown) {
-  if (value === undefined || value === null || value === "") return null
-  const num = Number(value)
-  return Number.isFinite(num) ? num : null
-}
-
 function normalizeTemplateType(value: unknown) {
   const normalized = toStringValue(value, "main").toLowerCase()
 
@@ -74,53 +60,29 @@ function normalizeTemplateType(value: unknown) {
   return "main"
 }
 
-function normalizeIssueType(value: unknown, fallbackCategory?: string | null) {
-  const normalized = toStringValue(value).toLowerCase()
+function normalizeItemType(value: unknown) {
+  const normalized = toStringValue(value, "boolean").toLowerCase()
 
   if (
-    ["damage", "repair", "supplies", "inspection", "cleaning", "general"].includes(
-      normalized
-    )
+    [
+      "boolean",
+      "yes_no",
+      "pass_fail",
+      "checkbox",
+      "text",
+      "number",
+      "numeric",
+      "select",
+      "choice",
+      "dropdown",
+      "photo",
+      "image",
+    ].includes(normalized)
   ) {
     return normalized
   }
 
-  const category = String(fallbackCategory || "").toLowerCase()
-
-  if (
-    category.includes("supply") ||
-    category.includes("stock") ||
-    category.includes("inventory")
-  ) {
-    return "supplies"
-  }
-
-  if (category.includes("damage")) return "damage"
-  if (category.includes("repair")) return "repair"
-  if (category.includes("clean")) return "cleaning"
-  if (category.includes("inspection")) return "inspection"
-
-  return "general"
-}
-
-function normalizeIssueSeverity(value: unknown) {
-  const normalized = toStringValue(value, "medium").toLowerCase()
-
-  if (["low", "medium", "high", "critical"].includes(normalized)) {
-    return normalized
-  }
-
-  return "medium"
-}
-
-function normalizeSupplyUpdateMode(value: unknown) {
-  const normalized = toStringValue(value, "none").toLowerCase()
-
-  if (["none", "set_stock", "consume", "flag_low"].includes(normalized)) {
-    return normalized
-  }
-
-  return "none"
+  return "boolean"
 }
 
 function normalizeItems(items: unknown): Array<{
@@ -151,81 +113,67 @@ function normalizeItems(items: unknown): Array<{
 
       if (!label) return null
 
-      const category = toNullableString(input.category) ?? "inspection"
-
       return {
         label,
         description: toNullableString(input.description),
-        itemType: toNullableString(input.itemType)?.toLowerCase() ?? "boolean",
+        itemType: normalizeItemType(input.itemType),
         isRequired: toBoolean(input.isRequired, true),
         sortOrder: toNumberValue(input.sortOrder, index + 1),
-        category,
+        category: toNullableString(input.category) ?? "inspection",
         requiresPhoto: toBoolean(input.requiresPhoto, false),
         opensIssueOnFail: toBoolean(input.opensIssueOnFail, false),
         optionsText: toNullableString(input.optionsText),
 
-        issueTypeOnFail: normalizeIssueType(input.issueTypeOnFail, category),
-        issueSeverityOnFail: normalizeIssueSeverity(input.issueSeverityOnFail),
-        failureValuesText: toNullableString(input.failureValuesText),
+        issueTypeOnFail: "general",
+        issueSeverityOnFail: "medium",
+        failureValuesText: null,
 
-        linkedSupplyItemId: toNullableString(input.linkedSupplyItemId),
-        supplyUpdateMode: normalizeSupplyUpdateMode(input.supplyUpdateMode),
-        supplyQuantity: toNullableNumber(input.supplyQuantity),
+        linkedSupplyItemId: null,
+        supplyUpdateMode: "none",
+        supplyQuantity: null,
       }
     })
     .filter((item): item is NonNullable<typeof item> => item !== null)
 }
 
-async function getSupplyCatalog() {
-  return prisma.supplyItem.findMany({
-    where: {
-      isActive: true,
-    },
-    orderBy: [{ category: "asc" }, { name: "asc" }],
-    select: {
-      id: true,
-      code: true,
-      name: true,
-      category: true,
-      unit: true,
-      minimumStock: true,
-      isActive: true,
-    },
-  })
-}
-
-async function validateLinkedSupplyItems(
+function isLegacySupplyTemplate(template: {
+  title: string
+  description: string | null
   items: Array<{
+    category: string | null
     linkedSupplyItemId: string | null
+    supplyUpdateMode: string
   }>
-) {
-  const ids = [
-    ...new Set(
-      items.map((item) => item.linkedSupplyItemId).filter(Boolean)
-    ),
-  ] as string[]
+}) {
+  const title = String(template.title || "").toLowerCase()
+  const description = String(template.description || "").toLowerCase()
 
-  if (ids.length === 0) return
+  if (
+    title.includes("αναλωσι") ||
+    title.includes("suppl") ||
+    description.includes("αναλωσι") ||
+    description.includes("suppl")
+  ) {
+    return true
+  }
 
-  const found = await prisma.supplyItem.findMany({
-    where: {
-      id: {
-        in: ids,
-      },
-      isActive: true,
-    },
-    select: {
-      id: true,
-    },
+  if (!template.items.length) return false
+
+  const supplyLikeItems = template.items.filter((item) => {
+    const category = String(item.category || "").toLowerCase()
+    const mode = String(item.supplyUpdateMode || "").toLowerCase()
+
+    return (
+      !!item.linkedSupplyItemId ||
+      mode !== "none" ||
+      category.includes("supply") ||
+      category.includes("stock") ||
+      category.includes("inventory") ||
+      category.includes("αναλω")
+    )
   })
 
-  const foundIds = new Set(found.map((row) => row.id))
-
-  for (const id of ids) {
-    if (!foundIds.has(id)) {
-      throw new Error("Υπάρχει item checklist με μη έγκυρο συνδεδεμένο αναλώσιμο.")
-    }
-  }
+  return supplyLikeItems.length > 0
 }
 
 export async function GET(_req: NextRequest, context: RouteContext) {
@@ -264,35 +212,42 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       )
     }
 
-    const [templates, supplyCatalog] = await Promise.all([
-      prisma.propertyChecklistTemplate.findMany({
-        where: {
-          propertyId,
-          organizationId: property.organizationId,
-        },
-        orderBy: [{ isPrimary: "desc" }, { createdAt: "desc" }],
-        include: {
-          items: {
-            orderBy: {
-              sortOrder: "asc",
-            },
-            include: {
-              supplyItem: {
-                select: {
-                  id: true,
-                  code: true,
-                  name: true,
-                  category: true,
-                  unit: true,
-                  minimumStock: true,
-                },
-              },
-            },
+    const rawTemplates = await prisma.propertyChecklistTemplate.findMany({
+      where: {
+        propertyId,
+        organizationId: property.organizationId,
+      },
+      orderBy: [{ isPrimary: "desc" }, { createdAt: "desc" }],
+      include: {
+        items: {
+          orderBy: {
+            sortOrder: "asc",
+          },
+          select: {
+            id: true,
+            label: true,
+            description: true,
+            itemType: true,
+            isRequired: true,
+            sortOrder: true,
+            category: true,
+            requiresPhoto: true,
+            opensIssueOnFail: true,
+            optionsText: true,
+            issueTypeOnFail: true,
+            issueSeverityOnFail: true,
+            failureValuesText: true,
+            linkedSupplyItemId: true,
+            supplyUpdateMode: true,
+            supplyQuantity: true,
           },
         },
-      }),
-      getSupplyCatalog(),
-    ])
+      },
+    })
+
+    const templates = rawTemplates.filter(
+      (template) => !isLegacySupplyTemplate(template)
+    )
 
     const primaryTemplate =
       templates.find((template) => template.isPrimary) ?? null
@@ -306,7 +261,6 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       },
       templates,
       primaryTemplate,
-      supplyCatalog,
     })
   } catch (error) {
     console.error("Property checklist templates GET error:", error)
@@ -367,7 +321,12 @@ export async function POST(req: NextRequest, context: RouteContext) {
       )
     }
 
-    await validateLinkedSupplyItems(items)
+    if (items.length === 0) {
+      return NextResponse.json(
+        { error: "Το πρότυπο πρέπει να περιέχει τουλάχιστον ένα στοιχείο." },
+        { status: 400 }
+      )
+    }
 
     const template = await prisma.$transaction(async (tx) => {
       if (isPrimary) {
@@ -400,18 +359,6 @@ export async function POST(req: NextRequest, context: RouteContext) {
           items: {
             orderBy: {
               sortOrder: "asc",
-            },
-            include: {
-              supplyItem: {
-                select: {
-                  id: true,
-                  code: true,
-                  name: true,
-                  category: true,
-                  unit: true,
-                  minimumStock: true,
-                },
-              },
             },
           },
           property: {

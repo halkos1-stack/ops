@@ -1,45 +1,33 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { requireApiAppAccess, canAccessOrganization } from "@/lib/route-access"
-import {
-  SUPPLY_PRESETS,
-  getSupplyPresetByKey,
-  buildCustomSupplyCode,
-} from "@/lib/supply-presets"
+import { SUPPLY_STATUS_OPTIONS, getSupplyPresetByCode } from "@/lib/supply-presets"
 
 type RouteContext = {
   params: Promise<{
     id: string
+    propertySupplyId: string
   }>
 }
 
-function toNullableString(value: unknown) {
-  if (value === undefined || value === null) return null
-  const text = String(value).trim()
+function toText(value: unknown) {
+  return String(value ?? "").trim()
+}
+
+function toNullableText(value: unknown) {
+  const text = String(value ?? "").trim()
   return text === "" ? null : text
 }
 
-function toStringValue(value: unknown, fallback = "") {
-  if (value === undefined || value === null) return fallback
-  return String(value).trim()
-}
-
-function toNumberValue(value: unknown, fallback = 0) {
-  if (value === undefined || value === null || value === "") return fallback
-  const num = Number(value)
-  return Number.isFinite(num) ? num : fallback
-}
-
-function toNullableNumber(value: unknown) {
+function toNumberOrNull(value: unknown) {
   if (value === undefined || value === null || value === "") return null
   const num = Number(value)
-  if (!Number.isFinite(num)) return null
-  return num
+  return Number.isFinite(num) ? num : null
 }
 
-async function getPropertyBase(id: string) {
+async function getPropertyBase(propertyId: string) {
   return prisma.property.findUnique({
-    where: { id },
+    where: { id: propertyId },
     select: {
       id: true,
       organizationId: true,
@@ -55,11 +43,252 @@ async function getPropertyBase(id: string) {
   })
 }
 
-async function getPropertySupplies(propertyId: string) {
-  return prisma.property.findUnique({
+function buildSupplyChecklistLabel(name: string) {
+  return `Επάρκεια ${name}`
+}
+
+async function getOrCreateSupplyTemplate(
+  propertyId: string,
+  organizationId: string
+) {
+  const existing = await prisma.propertyChecklistTemplate.findFirst({
+    where: {
+      propertyId,
+      organizationId,
+      templateType: "supplies",
+      isActive: true,
+    },
+    include: {
+      items: {
+        orderBy: {
+          sortOrder: "asc",
+        },
+      },
+    },
+    orderBy: {
+      updatedAt: "desc",
+    },
+  })
+
+  if (existing) return existing
+
+  return prisma.propertyChecklistTemplate.create({
+    data: {
+      propertyId,
+      organizationId,
+      title: "Λίστα αναλωσίμων",
+      description:
+        "Δυναμική λίστα αναλωσίμων και αναφοράς ζημιών / βλαβών για το ακίνητο.",
+      templateType: "supplies",
+      isPrimary: false,
+      isActive: true,
+    },
+    include: {
+      items: {
+        orderBy: {
+          sortOrder: "asc",
+        },
+      },
+    },
+  })
+}
+
+async function ensureIssueReportItem(params: {
+  templateId: string
+  issueType: "damage" | "repair"
+  label: string
+  description: string
+  sortOrder: number
+}) {
+  const existing = await prisma.propertyChecklistTemplateItem.findFirst({
+    where: {
+      templateId: params.templateId,
+      category: "issue_report",
+      issueTypeOnFail: params.issueType,
+    },
+  })
+
+  if (existing) {
+    return prisma.propertyChecklistTemplateItem.update({
+      where: { id: existing.id },
+      data: {
+        label: params.label,
+        description: params.description,
+        itemType: "text",
+        isRequired: false,
+        sortOrder: params.sortOrder,
+        category: "issue_report",
+        requiresPhoto: false,
+        opensIssueOnFail: false,
+        issueTypeOnFail: params.issueType,
+        issueSeverityOnFail: "medium",
+        failureValuesText: null,
+        linkedSupplyItemId: null,
+        supplyUpdateMode: "none",
+        supplyQuantity: null,
+      },
+    })
+  }
+
+  return prisma.propertyChecklistTemplateItem.create({
+    data: {
+      templateId: params.templateId,
+      label: params.label,
+      description: params.description,
+      itemType: "text",
+      isRequired: false,
+      sortOrder: params.sortOrder,
+      category: "issue_report",
+      requiresPhoto: false,
+      opensIssueOnFail: false,
+      optionsText: null,
+      issueTypeOnFail: params.issueType,
+      issueSeverityOnFail: "medium",
+      failureValuesText: null,
+      linkedSupplyItemId: null,
+      supplyUpdateMode: "none",
+      supplyQuantity: null,
+    },
+  })
+}
+
+async function syncSupplyTemplate(propertyId: string, organizationId: string) {
+  const template = await getOrCreateSupplyTemplate(propertyId, organizationId)
+
+  const propertySupplies = await prisma.propertySupply.findMany({
+    where: {
+      propertyId,
+    },
+    include: {
+      supplyItem: true,
+    },
+    orderBy: [
+      {
+        supplyItem: {
+          name: "asc",
+        },
+      },
+    ],
+  })
+
+  const activeSupplyIds = new Set(propertySupplies.map((row) => row.supplyItemId))
+
+  const existingItems = await prisma.propertyChecklistTemplateItem.findMany({
+    where: {
+      templateId: template.id,
+    },
+    orderBy: {
+      sortOrder: "asc",
+    },
+  })
+
+  const supplyItems = existingItems.filter(
+    (item) => String(item.category || "").toLowerCase() === "supplies"
+  )
+
+  for (const existing of supplyItems) {
+    if (!existing.linkedSupplyItemId) continue
+    if (!activeSupplyIds.has(existing.linkedSupplyItemId)) {
+      await prisma.propertyChecklistTemplateItem.delete({
+        where: { id: existing.id },
+      })
+    }
+  }
+
+  let sortOrder = 10
+
+  for (const row of propertySupplies) {
+    const preset = getSupplyPresetByCode(row.supplyItem.code)
+    const existing = existingItems.find(
+      (item) => item.linkedSupplyItemId === row.supplyItemId
+    )
+
+    const label =
+      preset?.checklistLabelEl || buildSupplyChecklistLabel(row.supplyItem.name)
+
+    const description =
+      preset
+        ? `Κατάσταση αναλωσίμου: ${row.supplyItem.name}`
+        : `Κατάσταση custom αναλωσίμου: ${row.supplyItem.name}`
+
+    const data = {
+      label,
+      description,
+      itemType: "select",
+      isRequired: true,
+      sortOrder,
+      category: "supplies",
+      requiresPhoto: false,
+      opensIssueOnFail: false,
+      optionsText: SUPPLY_STATUS_OPTIONS.join("\n"),
+      issueTypeOnFail: "supplies",
+      issueSeverityOnFail: "medium",
+      failureValuesText: null,
+      linkedSupplyItemId: row.supplyItemId,
+      supplyUpdateMode: "status_map",
+      supplyQuantity: null,
+    }
+
+    if (existing) {
+      await prisma.propertyChecklistTemplateItem.update({
+        where: { id: existing.id },
+        data,
+      })
+    } else {
+      await prisma.propertyChecklistTemplateItem.create({
+        data: {
+          templateId: template.id,
+          ...data,
+        },
+      })
+    }
+
+    sortOrder += 10
+  }
+
+  await ensureIssueReportItem({
+    templateId: template.id,
+    issueType: "damage",
+    label: "Αναφορά ζημιάς",
+    description:
+      "Καταχώρισε ελεύθερα οποιαδήποτε ζημιά εντόπισες στο ακίνητο.",
+    sortOrder,
+  })
+
+  sortOrder += 10
+
+  await ensureIssueReportItem({
+    templateId: template.id,
+    issueType: "repair",
+    label: "Αναφορά βλάβης",
+    description:
+      "Καταχώρισε ελεύθερα οποιαδήποτε βλάβη ή τεχνικό θέμα εντόπισες στο ακίνητο.",
+    sortOrder,
+  })
+
+  return prisma.propertyChecklistTemplate.findUnique({
+    where: {
+      id: template.id,
+    },
+    include: {
+      items: {
+        orderBy: {
+          sortOrder: "asc",
+        },
+        include: {
+          supplyItem: true,
+        },
+      },
+    },
+  })
+}
+
+async function buildResponse(propertyId: string) {
+  const property = await prisma.property.findUnique({
     where: { id: propertyId },
     select: {
       id: true,
+      organizationId: true,
       code: true,
       name: true,
       address: true,
@@ -69,170 +298,73 @@ async function getPropertySupplies(propertyId: string) {
       country: true,
       status: true,
       propertySupplies: {
+        include: {
+          supplyItem: true,
+        },
         orderBy: [
           {
-            updatedAt: "desc",
+            supplyItem: {
+              name: "asc",
+            },
           },
         ],
+      },
+    },
+  })
+
+  if (!property) return null
+
+  const supplyTemplate = await prisma.propertyChecklistTemplate.findFirst({
+    where: {
+      propertyId,
+      organizationId: property.organizationId,
+      templateType: "supplies",
+      isActive: true,
+    },
+    include: {
+      items: {
+        orderBy: {
+          sortOrder: "asc",
+        },
         include: {
           supplyItem: true,
         },
       },
-      tasks: {
-        orderBy: {
-          scheduledDate: "desc",
-        },
-        take: 50,
-        select: {
-          id: true,
-          title: true,
-          completedAt: true,
-          supplyConsumptions: {
-            orderBy: {
-              createdAt: "desc",
-            },
-            include: {
-              supplyItem: {
-                select: {
-                  id: true,
-                  code: true,
-                  name: true,
-                  category: true,
-                  unit: true,
-                },
-              },
-            },
-          },
-        },
-      },
+    },
+    orderBy: {
+      updatedAt: "desc",
     },
   })
-}
-
-function buildCatalog(
-  property: NonNullable<Awaited<ReturnType<typeof getPropertySupplies>>>
-) {
-  const activeByCode = new Map<
-    string,
-    {
-      propertySupplyId: string
-      currentStock: number
-      targetStock: number | null
-      reorderThreshold: number | null
-      notes: string | null
-      updatedAt: Date
-    }
-  >()
-
-  for (const row of property.propertySupplies) {
-    if (!row.supplyItem?.code) continue
-
-    activeByCode.set(row.supplyItem.code, {
-      propertySupplyId: row.id,
-      currentStock: row.currentStock,
-      targetStock: row.targetStock ?? null,
-      reorderThreshold: row.reorderThreshold ?? null,
-      notes: row.notes ?? null,
-      updatedAt: row.updatedAt,
-    })
-  }
-
-  const builtIn = SUPPLY_PRESETS.map((preset) => {
-    const active = activeByCode.get(preset.code)
-
-    return {
-      presetKey: preset.key,
-      code: preset.code,
-      nameEl: preset.nameEl,
-      nameEn: preset.nameEn,
-      category: preset.category,
-      unit: preset.unit,
-      minimumStock: preset.minimumStock,
-      checklistLabelEl: preset.checklistLabelEl,
-      checklistLabelEn: preset.checklistLabelEn,
-      isActiveForProperty: Boolean(active),
-      propertySupplyId: active?.propertySupplyId ?? null,
-      currentStock: active?.currentStock ?? null,
-      targetStock: active?.targetStock ?? null,
-      reorderThreshold: active?.reorderThreshold ?? null,
-      notes: active?.notes ?? null,
-      updatedAt: active?.updatedAt ?? null,
-      isCustom: false,
-    }
-  })
-
-  const custom = property.propertySupplies
-    .filter((row) => {
-      const code = row.supplyItem?.code || ""
-      return !code.startsWith("SYS_")
-    })
-    .map((row) => ({
-      presetKey: null,
-      code: row.supplyItem?.code || "",
-      nameEl: row.supplyItem?.name || "",
-      nameEn: row.supplyItem?.name || "",
-      category: row.supplyItem?.category || "",
-      unit: row.supplyItem?.unit || "",
-      minimumStock: row.supplyItem?.minimumStock ?? 0,
-      checklistLabelEl: `Επάρκεια ${row.supplyItem?.name || "αναλωσίμου"}`,
-      checklistLabelEn: `${row.supplyItem?.name || "Supply"} level`,
-      isActiveForProperty: true,
-      propertySupplyId: row.id,
-      currentStock: row.currentStock,
-      targetStock: row.targetStock ?? null,
-      reorderThreshold: row.reorderThreshold ?? null,
-      notes: row.notes ?? null,
-      updatedAt: row.updatedAt,
-      isCustom: true,
-    }))
 
   return {
-    builtIn,
-    custom,
+    property: {
+      id: property.id,
+      organizationId: property.organizationId,
+      code: property.code,
+      name: property.name,
+      address: property.address,
+      city: property.city,
+      region: property.region,
+      postalCode: property.postalCode,
+      country: property.country,
+      status: property.status,
+    },
+    activeSupplies: property.propertySupplies,
+    supplyTemplate,
   }
 }
 
-function getActorType(auth: {
-  isSuperAdmin: boolean
-  organizationRole: "ORG_ADMIN" | "MANAGER" | "PARTNER" | null
-}) {
-  if (auth.isSuperAdmin) return "SUPER_ADMIN"
-  if (auth.organizationRole) return auth.organizationRole
-  return "USER"
-}
-
-function getActorName(auth: { email: string }) {
-  return auth.email || "Χρήστης"
-}
-
-export async function GET(_req: NextRequest, context: RouteContext) {
+export async function PATCH(request: NextRequest, context: RouteContext) {
   try {
     const access = await requireApiAppAccess()
 
-    if (!access.ok) {
-      return access.response
-    }
+    if (!access.ok) return access.response
 
     const auth = access.auth
-    const { id } = await context.params
+    const { id, propertySupplyId } = await context.params
+    const body = await request.json()
 
-    const propertyBase = await getPropertyBase(id)
-
-    if (!propertyBase) {
-      return NextResponse.json(
-        { error: "Το ακίνητο δεν βρέθηκε." },
-        { status: 404 }
-      )
-    }
-
-    if (!canAccessOrganization(auth, propertyBase.organizationId)) {
-      return NextResponse.json(
-        { error: "Δεν έχετε πρόσβαση σε αυτό το ακίνητο." },
-        { status: 403 }
-      )
-    }
-
-    const property = await getPropertySupplies(id)
+    const property = await getPropertyBase(id)
 
     if (!property) {
       return NextResponse.json(
@@ -241,213 +373,148 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       )
     }
 
-    return NextResponse.json({
-      property,
-      catalog: buildCatalog(property),
-    })
-  } catch (error) {
-    console.error("GET /api/properties/[id]/supplies error:", error)
+    if (!canAccessOrganization(auth, property.organizationId)) {
+      return NextResponse.json(
+        { error: "Δεν έχετε πρόσβαση σε αυτό το ακίνητο." },
+        { status: 403 }
+      )
+    }
 
+    const propertySupply = await prisma.propertySupply.findUnique({
+      where: {
+        id: propertySupplyId,
+      },
+      include: {
+        supplyItem: true,
+      },
+    })
+
+    if (!propertySupply || propertySupply.propertyId !== property.id) {
+      return NextResponse.json(
+        { error: "Το αναλώσιμο του ακινήτου δεν βρέθηκε." },
+        { status: 404 }
+      )
+    }
+
+    const currentStock = toNumberOrNull(body?.currentStock)
+    const targetStock = toNumberOrNull(body?.targetStock)
+    const reorderThreshold = toNumberOrNull(body?.reorderThreshold)
+    const notes = body?.notes !== undefined ? toNullableText(body?.notes) : undefined
+
+    if (
+      currentStock !== null &&
+      (Number.isNaN(currentStock) || currentStock < 0)
+    ) {
+      return NextResponse.json(
+        { error: "Το τρέχον απόθεμα πρέπει να είναι μη αρνητικός αριθμός." },
+        { status: 400 }
+      )
+    }
+
+    if (
+      targetStock !== null &&
+      (Number.isNaN(targetStock) || targetStock < 0)
+    ) {
+      return NextResponse.json(
+        { error: "Το απόθεμα στόχος πρέπει να είναι μη αρνητικός αριθμός." },
+        { status: 400 }
+      )
+    }
+
+    if (
+      reorderThreshold !== null &&
+      (Number.isNaN(reorderThreshold) || reorderThreshold < 0)
+    ) {
+      return NextResponse.json(
+        { error: "Το όριο αναπαραγγελίας πρέπει να είναι μη αρνητικός αριθμός." },
+        { status: 400 }
+      )
+    }
+
+    await prisma.propertySupply.update({
+      where: {
+        id: propertySupply.id,
+      },
+      data: {
+        ...(currentStock !== null ? { currentStock } : {}),
+        ...(targetStock !== null ? { targetStock } : {}),
+        ...(reorderThreshold !== null ? { reorderThreshold } : {}),
+        ...(notes !== undefined ? { notes } : {}),
+        lastUpdatedAt: new Date(),
+      },
+    })
+
+    await syncSupplyTemplate(property.id, property.organizationId)
+    const payload = await buildResponse(property.id)
+
+    return NextResponse.json(payload)
+  } catch (error) {
+    console.error(
+      "PATCH /api/properties/[id]/supplies/[propertySupplyId] error:",
+      error
+    )
     return NextResponse.json(
-      { error: "Αποτυχία φόρτωσης αναλωσίμων ακινήτου." },
+      { error: "Αποτυχία ενημέρωσης αναλωσίμου ακινήτου." },
       { status: 500 }
     )
   }
 }
 
-export async function POST(req: NextRequest, context: RouteContext) {
+export async function DELETE(_request: NextRequest, context: RouteContext) {
   try {
     const access = await requireApiAppAccess()
 
-    if (!access.ok) {
-      return access.response
-    }
+    if (!access.ok) return access.response
 
     const auth = access.auth
-    const { id } = await context.params
-    const body = await req.json()
+    const { id, propertySupplyId } = await context.params
 
-    const propertyBase = await getPropertyBase(id)
+    const property = await getPropertyBase(id)
 
-    if (!propertyBase) {
+    if (!property) {
       return NextResponse.json(
         { error: "Το ακίνητο δεν βρέθηκε." },
         { status: 404 }
       )
     }
 
-    if (!canAccessOrganization(auth, propertyBase.organizationId)) {
+    if (!canAccessOrganization(auth, property.organizationId)) {
       return NextResponse.json(
         { error: "Δεν έχετε πρόσβαση σε αυτό το ακίνητο." },
         { status: 403 }
       )
     }
 
-    const presetKey = toNullableString(body.presetKey)
-    const isCustom = Boolean(body.isCustom)
-
-    const currentStock = toNumberValue(body.currentStock, 0)
-    const targetStock = toNullableNumber(body.targetStock)
-    const reorderThreshold = toNullableNumber(body.reorderThreshold)
-    const notes = toNullableString(body.notes)
-
-    let supplyItemId: string | null = null
-
-    if (!isCustom) {
-      const preset = getSupplyPresetByKey(presetKey)
-
-      if (!preset) {
-        return NextResponse.json(
-          { error: "Το built-in αναλώσιμο δεν βρέθηκε." },
-          { status: 400 }
-        )
-      }
-
-      const existingSupplyItem = await prisma.supplyItem.findUnique({
-        where: {
-          code: preset.code,
-        },
-        select: {
-          id: true,
-        },
-      })
-
-      if (existingSupplyItem) {
-        supplyItemId = existingSupplyItem.id
-      } else {
-        const createdSupplyItem = await prisma.supplyItem.create({
-          data: {
-            code: preset.code,
-            name: preset.nameEl,
-            category: preset.category,
-            unit: preset.unit,
-            minimumStock: preset.minimumStock,
-            isActive: true,
-            notes: `SYSTEM_PRESET:${preset.key}`,
-          },
-          select: {
-            id: true,
-          },
-        })
-
-        supplyItemId = createdSupplyItem.id
-      }
-    } else {
-      const name = toStringValue(body.name)
-      const category = toStringValue(body.category)
-      const unit = toStringValue(body.unit)
-      const minimumStock = toNullableNumber(body.minimumStock)
-
-      if (!name || !category || !unit) {
-        return NextResponse.json(
-          {
-            error:
-              "Για custom αναλώσιμο απαιτούνται όνομα, κατηγορία και μονάδα.",
-          },
-          { status: 400 }
-        )
-      }
-
-      const code = buildCustomSupplyCode(name)
-
-      const createdSupplyItem = await prisma.supplyItem.create({
-        data: {
-          code,
-          name,
-          category,
-          unit,
-          minimumStock: minimumStock ?? 0,
-          isActive: true,
-          notes: "CUSTOM_STATUS_MAP_SUPPLY",
-        },
-        select: {
-          id: true,
-        },
-      })
-
-      supplyItemId = createdSupplyItem.id
-    }
-
-    if (!supplyItemId) {
-      return NextResponse.json(
-        { error: "Δεν μπόρεσε να δημιουργηθεί το αναλώσιμο." },
-        { status: 400 }
-      )
-    }
-
-    const exists = await prisma.propertySupply.findUnique({
+    const propertySupply = await prisma.propertySupply.findUnique({
       where: {
-        propertyId_supplyItemId: {
-          propertyId: id,
-          supplyItemId,
-        },
-      },
-      select: {
-        id: true,
+        id: propertySupplyId,
       },
     })
 
-    if (exists) {
+    if (!propertySupply || propertySupply.propertyId !== property.id) {
       return NextResponse.json(
-        { error: "Το αναλώσιμο είναι ήδη ενεργό στο ακίνητο." },
-        { status: 400 }
+        { error: "Το αναλώσιμο του ακινήτου δεν βρέθηκε." },
+        { status: 404 }
       )
     }
 
-    await prisma.propertySupply.create({
-      data: {
-        propertyId: id,
-        supplyItemId,
-        currentStock,
-        targetStock,
-        reorderThreshold,
-        notes,
-        lastUpdatedAt: new Date(),
+    await prisma.propertySupply.delete({
+      where: {
+        id: propertySupply.id,
       },
     })
 
-    const property = await getPropertySupplies(id)
+    await syncSupplyTemplate(property.id, property.organizationId)
+    const payload = await buildResponse(property.id)
 
-    if (!property) {
-      return NextResponse.json(
-        { error: "Αποτυχία φόρτωσης ενημερωμένων δεδομένων." },
-        { status: 500 }
-      )
-    }
-
-    await prisma.activityLog.create({
-      data: {
-        organizationId: propertyBase.organizationId,
-        propertyId: id,
-        entityType: "PROPERTY_SUPPLY",
-        entityId: id,
-        action: "PROPERTY_SUPPLY_ENABLED",
-        message: isCustom
-          ? "Ενεργοποιήθηκε νέο custom αναλώσιμο για το ακίνητο."
-          : "Ενεργοποιήθηκε built-in αναλώσιμο για το ακίνητο.",
-        actorType: getActorType(auth),
-        actorName: getActorName(auth),
-        metadata: {
-          propertyId: id,
-          presetKey,
-          isCustom,
-          currentStock,
-          targetStock,
-          reorderThreshold,
-        },
-      },
-    })
-
-    return NextResponse.json({
-      success: true,
-      property,
-      catalog: buildCatalog(property),
-    })
+    return NextResponse.json(payload)
   } catch (error) {
-    console.error("POST /api/properties/[id]/supplies error:", error)
-
+    console.error(
+      "DELETE /api/properties/[id]/supplies/[propertySupplyId] error:",
+      error
+    )
     return NextResponse.json(
-      { error: "Αποτυχία ενεργοποίησης αναλωσίμου." },
+      { error: "Αποτυχία αφαίρεσης αναλωσίμου από το ακίνητο." },
       { status: 500 }
     )
   }

@@ -38,6 +38,30 @@ type ChecklistItem = {
   opensIssueOnFail?: boolean
 }
 
+type SupplyItemPayload = {
+  id: string
+  fillLevel: string
+  isActive: boolean
+  lastUpdatedAt?: string | null
+  notes?: string | null
+  supplyItem?: {
+    id: string
+    code: string
+    name: string
+    category?: string | null
+    unit?: string | null
+    minimumStock?: number | null
+    isActive?: boolean
+  } | null
+}
+
+type SupplyAnswerPayload = {
+  id: string
+  fillLevel: string
+  notes?: string | null
+  propertySupply: SupplyItemPayload
+}
+
 type PagePayload = {
   assignment: {
     id: string
@@ -77,6 +101,8 @@ type PagePayload = {
     requiresPhotos?: boolean
     requiresChecklist?: boolean
     requiresApproval?: boolean
+    sendCleaningChecklist?: boolean
+    sendSuppliesChecklist?: boolean
     notes?: string | null
     resultNotes?: string | null
     property: {
@@ -90,6 +116,7 @@ type PagePayload = {
       country: string
       type: string
       status: string
+      supplies?: SupplyItemPayload[]
     }
     booking?: {
       id: string
@@ -112,6 +139,13 @@ type PagePayload = {
         items?: ChecklistItem[]
       } | null
       answers?: ChecklistAnswer[]
+    } | null
+    supplyRun?: {
+      id: string
+      status: string
+      startedAt?: string | null
+      completedAt?: string | null
+      answers?: SupplyAnswerPayload[]
     } | null
     issues?: Array<{
       id: string
@@ -141,6 +175,11 @@ type ChecklistFormValue = {
   photoUrls: string[]
 }
 
+type SupplyFormValue = {
+  fillLevel: string
+  notes: string
+}
+
 function normalizePhotoUrls(value: unknown): string[] {
   if (!Array.isArray(value)) return []
 
@@ -157,6 +196,13 @@ function getEmptyChecklistFormValue(): ChecklistFormValue {
     valueSelect: "",
     notes: "",
     photoUrls: [],
+  }
+}
+
+function getEmptySupplyFormValue(): SupplyFormValue {
+  return {
+    fillLevel: "",
+    notes: "",
   }
 }
 
@@ -207,6 +253,39 @@ function badgeClasses(status?: string | null) {
   }
 }
 
+function fillLevelBadgeClasses(level?: string | null) {
+  switch ((level || "").toLowerCase()) {
+    case "low":
+    case "empty":
+      return "bg-red-50 text-red-700 ring-1 ring-red-200"
+    case "medium":
+      return "bg-amber-50 text-amber-700 ring-1 ring-amber-200"
+    case "full":
+      return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
+    default:
+      return "bg-slate-100 text-slate-700 ring-1 ring-slate-200"
+  }
+}
+
+function getFillLevelLabel(
+  language: PortalLanguage,
+  level?: string | null
+): string {
+  const normalized = String(level || "").trim().toLowerCase()
+
+  if (language === "en") {
+    if (normalized === "low" || normalized === "empty") return "Low"
+    if (normalized === "medium") return "Medium"
+    if (normalized === "full") return "Full"
+    return "—"
+  }
+
+  if (normalized === "low" || normalized === "empty") return "Έλλειψη"
+  if (normalized === "medium") return "Μέτρια"
+  if (normalized === "full") return "Πλήρης"
+  return "—"
+}
+
 function getTaskPageTexts(language: PortalLanguage) {
   const common = getPortalTexts(language)
 
@@ -236,7 +315,7 @@ function getTaskPageTexts(language: PortalLanguage) {
       rejectionPlaceholder: "Fill this only if you want to reject the task",
       rejectionReasonRequired: "Rejection reason is required.",
       acceptSuccess:
-        "The task was accepted. The checklist is now available below.",
+        "The task was accepted. The task sections are now available below.",
       rejectSuccess: "The task was rejected.",
       propertySection: "Property",
       propertyName: "Name",
@@ -255,7 +334,7 @@ function getTaskPageTexts(language: PortalLanguage) {
       bookingPlatform: "Platform",
       bookingCheckIn: "Check-in",
       bookingCheckOut: "Check-out",
-      checklistSection: "Task checklist",
+      checklistSection: "Cleaning checklist",
       checklistFallbackTitle: "Checklist",
       checklistNoDescription: "There is no checklist description.",
       checklistNoItems: "There are no checklist items for this task yet.",
@@ -296,6 +375,24 @@ function getTaskPageTexts(language: PortalLanguage) {
       photoUploadSuccess: "Photo uploaded successfully.",
       photoUploadError: "Photo upload failed.",
       photoRequiredError: "A required photo is missing.",
+      suppliesSection: "Supplies",
+      suppliesStatus: "Status",
+      suppliesNoItems: "There are no active supplies for this property.",
+      suppliesReadonly: "Supplies are read-only in the current status.",
+      openSupplies: "Open supplies",
+      closeSupplies: "Close supplies",
+      saveSupplies: "Save supplies",
+      submitSupplies: "Submit supplies",
+      savingSupplies: "Saving...",
+      submittingSupplies: "Submitting...",
+      supplyLevel: "Level",
+      lastUpdated: "Last updated",
+      lowOption: "Low",
+      mediumOption: "Medium",
+      fullOption: "Full",
+      suppliesSaveSuccess: "Supplies progress was saved.",
+      suppliesSubmitSuccess: "Supplies were submitted successfully.",
+      supplyNotes: "Supply notes",
     }
   }
 
@@ -324,7 +421,7 @@ function getTaskPageTexts(language: PortalLanguage) {
     rejectionPlaceholder: "Συμπλήρωσε μόνο αν θες να απορρίψεις την εργασία",
     rejectionReasonRequired: "Η αιτία απόρριψης είναι υποχρεωτική.",
     acceptSuccess:
-      "Η εργασία έγινε αποδεκτή. Η λίστα είναι πλέον διαθέσιμη πιο κάτω.",
+      "Η εργασία έγινε αποδεκτή. Οι ενότητες εργασίας είναι πλέον διαθέσιμες πιο κάτω.",
     rejectSuccess: "Η εργασία απορρίφθηκε.",
     propertySection: "Ακίνητο",
     propertyName: "Όνομα",
@@ -343,7 +440,7 @@ function getTaskPageTexts(language: PortalLanguage) {
     bookingPlatform: "Πλατφόρμα",
     bookingCheckIn: "Check-in",
     bookingCheckOut: "Check-out",
-    checklistSection: "Λίστα εργασίας",
+    checklistSection: "Λίστα καθαριότητας",
     checklistFallbackTitle: "Checklist",
     checklistNoDescription: "Δεν υπάρχει περιγραφή checklist.",
     checklistNoItems: "Δεν υπάρχουν ακόμα στοιχεία λίστας για αυτή την εργασία.",
@@ -384,6 +481,24 @@ function getTaskPageTexts(language: PortalLanguage) {
     photoUploadSuccess: "Η φωτογραφία ανέβηκε επιτυχώς.",
     photoUploadError: "Αποτυχία ανεβάσματος φωτογραφίας.",
     photoRequiredError: "Λείπει υποχρεωτική φωτογραφία.",
+    suppliesSection: "Αναλώσιμα",
+    suppliesStatus: "Κατάσταση",
+    suppliesNoItems: "Δεν υπάρχουν ενεργά αναλώσιμα για αυτό το ακίνητο.",
+    suppliesReadonly: "Τα αναλώσιμα είναι μόνο για προβολή στην τρέχουσα κατάσταση.",
+    openSupplies: "Άνοιγμα αναλωσίμων",
+    closeSupplies: "Κλείσιμο αναλωσίμων",
+    saveSupplies: "Αποθήκευση αναλωσίμων",
+    submitSupplies: "Υποβολή αναλωσίμων",
+    savingSupplies: "Αποθήκευση...",
+    submittingSupplies: "Υποβολή...",
+    supplyLevel: "Επίπεδο",
+    lastUpdated: "Τελευταία ενημέρωση",
+    lowOption: "Έλλειψη",
+    mediumOption: "Μέτρια",
+    fullOption: "Πλήρης",
+    suppliesSaveSuccess: "Η πρόοδος των αναλωσίμων αποθηκεύτηκε.",
+    suppliesSubmitSuccess: "Τα αναλώσιμα υποβλήθηκαν επιτυχώς.",
+    supplyNotes: "Σημειώσεις αναλωσίμου",
   }
 }
 
@@ -499,11 +614,18 @@ export default function PartnerPortalTaskPage() {
   const [checklistSubmitting, setChecklistSubmitting] = useState<
     "save" | "submit" | null
   >(null)
+  const [suppliesSubmitting, setSuppliesSubmitting] = useState<
+    "save" | "submit" | null
+  >(null)
   const [rejectionReason, setRejectionReason] = useState("")
   const [checklistValues, setChecklistValues] = useState<
     Record<string, ChecklistFormValue>
   >({})
+  const [supplyValues, setSupplyValues] = useState<Record<string, SupplyFormValue>>(
+    {}
+  )
   const [checklistOpen, setChecklistOpen] = useState(false)
+  const [suppliesOpen, setSuppliesOpen] = useState(false)
   const [uploadingItemId, setUploadingItemId] = useState<string | null>(null)
 
   const cameraInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
@@ -576,11 +698,36 @@ export default function PartnerPortalTaskPage() {
     setChecklistValues(nextValues)
   }, [data])
 
+  useEffect(() => {
+    const supplies = data?.task?.property?.supplies || []
+    const answers = data?.task?.supplyRun?.answers || []
+
+    if (!supplies.length) {
+      setSupplyValues({})
+      return
+    }
+
+    const nextValues: Record<string, SupplyFormValue> = {}
+
+    for (const supply of supplies) {
+      const existing = answers.find(
+        (answer) => answer.propertySupply?.id === supply.id
+      )
+
+      nextValues[supply.id] = {
+        fillLevel: existing?.fillLevel || supply.fillLevel || "",
+        notes: existing?.notes || supply.notes || "",
+      }
+    }
+
+    setSupplyValues(nextValues)
+  }, [data])
+
   const canRespond = useMemo(() => {
     return data?.assignment?.status === "assigned"
   }, [data])
 
-  const canShowChecklist = useMemo(() => {
+  const canShowTaskSections = useMemo(() => {
     return (
       data?.assignment?.status === "accepted" ||
       data?.assignment?.status === "in_progress" ||
@@ -588,7 +735,7 @@ export default function PartnerPortalTaskPage() {
     )
   }, [data])
 
-  const canEditChecklist = useMemo(() => {
+  const canEditTaskSections = useMemo(() => {
     return (
       data?.assignment?.status === "accepted" ||
       data?.assignment?.status === "in_progress"
@@ -625,6 +772,23 @@ export default function PartnerPortalTaskPage() {
       return {
         ...prev,
         [itemId]: {
+          ...current,
+          ...patch,
+        },
+      }
+    })
+  }
+
+  function updateSupplyValue(
+    propertySupplyId: string,
+    patch: Partial<SupplyFormValue>
+  ) {
+    setSupplyValues((prev) => {
+      const current = prev[propertySupplyId] ?? getEmptySupplyFormValue()
+
+      return {
+        ...prev,
+        [propertySupplyId]: {
           ...current,
           ...patch,
         },
@@ -807,6 +971,61 @@ export default function PartnerPortalTaskPage() {
     }
   }
 
+  async function submitSupplies(mode: "save" | "submit") {
+    if (!token || !taskId || !data?.task?.property?.supplies?.length) {
+      return
+    }
+
+    try {
+      setSuppliesSubmitting(mode)
+      setError("")
+      setSuccess("")
+
+      const answers = (data.task.property.supplies || []).map((supply) => {
+        const value = supplyValues[supply.id] || getEmptySupplyFormValue()
+
+        return {
+          propertySupplyId: supply.id,
+          fillLevel: value.fillLevel || null,
+          notes: value.notes || null,
+        }
+      })
+
+      const res = await fetch(
+        `/api/partner/${token}/tasks/${taskId}/supplies`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            mode,
+            answers,
+          }),
+        }
+      )
+
+      const json = await res.json().catch(() => null)
+
+      if (!res.ok) {
+        throw new Error(
+          json?.error ||
+            (mode === "submit"
+              ? "Αποτυχία υποβολής αναλωσίμων."
+              : "Αποτυχία αποθήκευσης αναλωσίμων.")
+        )
+      }
+
+      setSuccess(mode === "submit" ? t.suppliesSubmitSuccess : t.suppliesSaveSuccess)
+      await loadData()
+    } catch (err) {
+      console.error("Supplies submit error:", err)
+      setError(err instanceof Error ? err.message : "Παρουσιάστηκε σφάλμα.")
+    } finally {
+      setSuppliesSubmitting(null)
+    }
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-100 px-4 py-8">
@@ -924,9 +1143,15 @@ export default function PartnerPortalTaskPage() {
               </div>
 
               <div className="mt-5 flex flex-wrap gap-2">
-                {data.task.requiresChecklist ? (
+                {data.task.sendCleaningChecklist ? (
                   <span className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
-                    {t.requiresChecklist}
+                    {t.checklistSection}
+                  </span>
+                ) : null}
+
+                {data.task.sendSuppliesChecklist ? (
+                  <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+                    {t.suppliesSection}
                   </span>
                 ) : null}
 
@@ -989,7 +1214,7 @@ export default function PartnerPortalTaskPage() {
               )}
             </section>
 
-            {canShowChecklist && data.task.checklistRun ? (
+            {canShowTaskSections && data.task.checklistRun ? (
               <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                   <div>
@@ -1075,7 +1300,7 @@ export default function PartnerPortalTaskPage() {
                                   <div className="flex flex-wrap gap-3">
                                     <button
                                       type="button"
-                                      disabled={!canEditChecklist}
+                                      disabled={!canEditTaskSections}
                                       onClick={() =>
                                         updateChecklistValue(item.id, {
                                           valueBoolean: true,
@@ -1092,7 +1317,7 @@ export default function PartnerPortalTaskPage() {
 
                                     <button
                                       type="button"
-                                      disabled={!canEditChecklist}
+                                      disabled={!canEditTaskSections}
                                       onClick={() =>
                                         updateChecklistValue(item.id, {
                                           valueBoolean: false,
@@ -1117,7 +1342,7 @@ export default function PartnerPortalTaskPage() {
                                   </label>
                                   <textarea
                                     rows={3}
-                                    disabled={!canEditChecklist}
+                                    disabled={!canEditTaskSections}
                                     value={value.valueText}
                                     onChange={(e) =>
                                       updateChecklistValue(item.id, {
@@ -1136,7 +1361,7 @@ export default function PartnerPortalTaskPage() {
                                   </label>
                                   <input
                                     type="number"
-                                    disabled={!canEditChecklist}
+                                    disabled={!canEditTaskSections}
                                     value={value.valueNumber}
                                     onChange={(e) =>
                                       updateChecklistValue(item.id, {
@@ -1154,7 +1379,7 @@ export default function PartnerPortalTaskPage() {
                                     {t.selectAnswer}
                                   </label>
                                   <select
-                                    disabled={!canEditChecklist}
+                                    disabled={!canEditTaskSections}
                                     value={value.valueSelect}
                                     onChange={(e) =>
                                       updateChecklistValue(item.id, {
@@ -1182,7 +1407,7 @@ export default function PartnerPortalTaskPage() {
                                 </label>
                                 <textarea
                                   rows={2}
-                                  disabled={!canEditChecklist}
+                                  disabled={!canEditTaskSections}
                                   value={value.notes}
                                   onChange={(e) =>
                                     updateChecklistValue(item.id, {
@@ -1202,7 +1427,7 @@ export default function PartnerPortalTaskPage() {
                                   <div className="mt-3 flex flex-wrap gap-3">
                                     <button
                                       type="button"
-                                      disabled={!canEditChecklist || uploadingItemId === item.id}
+                                      disabled={!canEditTaskSections || uploadingItemId === item.id}
                                       onClick={() =>
                                         cameraInputRefs.current[item.id]?.click()
                                       }
@@ -1215,7 +1440,7 @@ export default function PartnerPortalTaskPage() {
 
                                     <button
                                       type="button"
-                                      disabled={!canEditChecklist || uploadingItemId === item.id}
+                                      disabled={!canEditTaskSections || uploadingItemId === item.id}
                                       onClick={() =>
                                         fileInputRefs.current[item.id]?.click()
                                       }
@@ -1260,7 +1485,7 @@ export default function PartnerPortalTaskPage() {
                                             alt={item.label}
                                             className="h-32 w-full rounded-xl object-cover"
                                           />
-                                          {canEditChecklist ? (
+                                          {canEditTaskSections ? (
                                             <button
                                               type="button"
                                               onClick={() =>
@@ -1283,7 +1508,7 @@ export default function PartnerPortalTaskPage() {
                       })}
 
                       <div className="flex flex-wrap justify-end gap-3 border-t border-slate-200 pt-4">
-                        {canEditChecklist ? (
+                        {canEditTaskSections ? (
                           <>
                             <button
                               type="button"
@@ -1317,6 +1542,170 @@ export default function PartnerPortalTaskPage() {
                   ) : (
                     <div className="mt-4 rounded-2xl border border-dashed border-slate-300 p-5 text-sm text-slate-500">
                       {t.checklistNoItems}
+                    </div>
+                  )
+                ) : null}
+              </section>
+            ) : null}
+
+            {canShowTaskSections && data.task.sendSuppliesChecklist ? (
+              <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <h2 className="text-2xl font-bold text-slate-950">
+                      {t.suppliesSection}
+                    </h2>
+                  </div>
+
+                  <div className="flex flex-wrap gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setSuppliesOpen((prev) => !prev)}
+                      className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      {suppliesOpen ? t.closeSupplies : t.openSupplies}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-4 rounded-2xl border border-slate-200 p-4">
+                  <p className="text-lg font-semibold text-slate-950">
+                    {t.suppliesSection}
+                  </p>
+                  <p className="mt-3 text-sm text-slate-700">
+                    {t.suppliesStatus}:{" "}
+                    {getPortalStatusLabel(
+                      language,
+                      data.task.supplyRun?.status || "pending"
+                    )}
+                  </p>
+                </div>
+
+                {suppliesOpen ? (
+                  data.task.property.supplies?.length ? (
+                    <div className="mt-4 space-y-4">
+                      {data.task.property.supplies.map((supply, index) => {
+                        const value = supplyValues[supply.id] || getEmptySupplyFormValue()
+
+                        return (
+                          <div
+                            key={supply.id}
+                            className="rounded-2xl border border-slate-200 p-4"
+                          >
+                            <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                              <div className="min-w-0">
+                                <p className="text-sm font-semibold text-slate-950">
+                                  {index + 1}. {supply.supplyItem?.name || "—"}
+                                </p>
+                                <p className="mt-1 text-xs text-slate-500">
+                                  {supply.supplyItem?.code || "—"}
+                                  {supply.supplyItem?.category
+                                    ? ` • ${supply.supplyItem.category}`
+                                    : ""}
+                                </p>
+                              </div>
+
+                              <div className="flex flex-wrap gap-2">
+                                <span
+                                  className={`rounded-full px-3 py-1 text-xs font-semibold ${fillLevelBadgeClasses(
+                                    value.fillLevel || supply.fillLevel
+                                  )}`}
+                                >
+                                  {getFillLevelLabel(
+                                    language,
+                                    value.fillLevel || supply.fillLevel
+                                  )}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="mt-4 grid gap-4 md:grid-cols-2">
+                              <div>
+                                <label className="mb-2 block text-sm font-medium text-slate-700">
+                                  {t.supplyLevel}
+                                </label>
+                                <select
+                                  disabled={!canEditTaskSections}
+                                  value={value.fillLevel}
+                                  onChange={(e) =>
+                                    updateSupplyValue(supply.id, {
+                                      fillLevel: e.target.value,
+                                    })
+                                  }
+                                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-slate-400 disabled:bg-slate-50"
+                                >
+                                  <option value="">{t.chooseOption}</option>
+                                  <option value="low">{t.lowOption}</option>
+                                  <option value="medium">{t.mediumOption}</option>
+                                  <option value="full">{t.fullOption}</option>
+                                </select>
+                              </div>
+
+                              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                                <p className="text-sm text-slate-500">
+                                  {t.lastUpdated}
+                                </p>
+                                <p className="mt-1 text-sm font-semibold text-slate-900">
+                                  {formatDateTime(supply.lastUpdatedAt, language)}
+                                </p>
+                              </div>
+
+                              <div className="md:col-span-2">
+                                <label className="mb-2 block text-sm font-medium text-slate-700">
+                                  {t.supplyNotes}
+                                </label>
+                                <textarea
+                                  rows={2}
+                                  disabled={!canEditTaskSections}
+                                  value={value.notes}
+                                  onChange={(e) =>
+                                    updateSupplyValue(supply.id, {
+                                      notes: e.target.value,
+                                    })
+                                  }
+                                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-slate-400 disabled:bg-slate-50"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })}
+
+                      <div className="flex flex-wrap justify-end gap-3 border-t border-slate-200 pt-4">
+                        {canEditTaskSections ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => submitSupplies("save")}
+                              disabled={suppliesSubmitting !== null}
+                              className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                            >
+                              {suppliesSubmitting === "save"
+                                ? t.savingSupplies
+                                : t.saveSupplies}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => submitSupplies("submit")}
+                              disabled={suppliesSubmitting !== null}
+                              className="rounded-2xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+                            >
+                              {suppliesSubmitting === "submit"
+                                ? t.submittingSupplies
+                                : t.submitSupplies}
+                            </button>
+                          </>
+                        ) : (
+                          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+                            {t.suppliesReadonly}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-4 rounded-2xl border border-dashed border-slate-300 p-5 text-sm text-slate-500">
+                      {t.suppliesNoItems}
                     </div>
                   )
                 ) : null}

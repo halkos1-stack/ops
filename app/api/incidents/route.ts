@@ -1,20 +1,49 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import { requireApiAppAccess, buildTenantWhere } from "@/lib/route-access"
+
+function toNullableString(value: unknown) {
+  if (value === undefined || value === null) return null
+  const text = String(value).trim()
+  return text === "" ? null : text
+}
+
+function mapIssueToIncidentLike(issue: any) {
+  return {
+    id: issue.id,
+    code: `ISS-${String(issue.id).slice(-8).toUpperCase()}`,
+    propertyId: issue.propertyId,
+    linkedTaskId: issue.taskId,
+    type: issue.issueType,
+    title: issue.title,
+    description: issue.description,
+    severity: issue.severity,
+    status: issue.status,
+    createdAt: issue.createdAt,
+    updatedAt: issue.updatedAt,
+    property: issue.property,
+    task: issue.task,
+  }
+}
 
 export async function GET(request: NextRequest) {
   try {
+    const access = await requireApiAppAccess()
+    if (!access.ok) return access.response
+
+    const { auth } = access
     const { searchParams } = new URL(request.url)
 
     const propertyId = searchParams.get("propertyId")
     const status = searchParams.get("status")
     const type = searchParams.get("type")
 
-    const incidents = await prisma.incident.findMany({
-      where: {
+    const issues = await prisma.issue.findMany({
+      where: buildTenantWhere(auth, {
         ...(propertyId ? { propertyId } : {}),
         ...(status ? { status } : {}),
-        ...(type ? { type } : {}),
-      },
+        ...(type ? { issueType: type } : {}),
+      }),
       include: {
         property: {
           select: {
@@ -36,10 +65,9 @@ export async function GET(request: NextRequest) {
       },
     })
 
-    return NextResponse.json(incidents)
+    return NextResponse.json(issues.map(mapIssueToIncidentLike))
   } catch (error) {
     console.error("GET /api/incidents error:", error)
-
     return NextResponse.json(
       { error: "Αποτυχία φόρτωσης συμβάντων." },
       { status: 500 }
@@ -49,18 +77,27 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const access = await requireApiAppAccess()
+    if (!access.ok) return access.response
+
+    const { auth } = access
     const body = await request.json()
 
+    const organizationId = auth.organizationId
     const propertyId = String(body.propertyId || "").trim()
-    const type = String(body.type || "").trim()
-    const title = String(body.title || "").trim()
-    const description = String(body.description || "").trim()
-    const severity = String(body.severity || "Μεσαία").trim()
-    const status = String(body.status || "Ανοιχτό").trim()
-    const linkedTaskId =
-      body.linkedTaskId && String(body.linkedTaskId).trim() !== ""
-        ? String(body.linkedTaskId).trim()
-        : null
+    const issueType = String(body.type || "general").trim().toLowerCase()
+    const title = toNullableString(body.title) || "Νέο συμβάν"
+    const description = toNullableString(body.description)
+    const severity = toNullableString(body.severity) || "medium"
+    const status = toNullableString(body.status) || "open"
+    const taskId = toNullableString(body.linkedTaskId)
+
+    if (!organizationId) {
+      return NextResponse.json(
+        { error: "Δεν βρέθηκε organizationId." },
+        { status: 400 }
+      )
+    }
 
     if (!propertyId) {
       return NextResponse.json(
@@ -69,57 +106,17 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    if (!type) {
-      return NextResponse.json(
-        { error: "Ο τύπος συμβάντος είναι υποχρεωτικός." },
-        { status: 400 }
-      )
-    }
-
-    const property = await prisma.property.findUnique({
-      where: { id: propertyId },
-      select: { id: true, code: true },
-    })
-
-    if (!property) {
-      return NextResponse.json(
-        { error: "Το ακίνητο δεν βρέθηκε." },
-        { status: 404 }
-      )
-    }
-
-    if (linkedTaskId) {
-      const task = await prisma.task.findUnique({
-        where: { id: linkedTaskId },
-        select: { id: true },
-      })
-
-      if (!task) {
-        return NextResponse.json(
-          { error: "Η συνδεδεμένη εργασία δεν βρέθηκε." },
-          { status: 404 }
-        )
-      }
-    }
-
-    const count = await prisma.incident.count({
-      where: {
-        propertyId,
-      },
-    })
-
-    const incidentCode = `INC-${property.code}-${String(count + 1).padStart(4, "0")}`
-
-    const incident = await prisma.incident.create({
+    const issue = await prisma.issue.create({
       data: {
-        code: incidentCode,
+        organizationId,
         propertyId,
-        type,
-        title: title || null,
-        description: description || null,
+        taskId,
+        issueType,
+        title,
+        description,
         severity,
         status,
-        linkedTaskId,
+        reportedBy: auth.email,
       },
       include: {
         property: {
@@ -139,10 +136,9 @@ export async function POST(request: NextRequest) {
       },
     })
 
-    return NextResponse.json(incident, { status: 201 })
+    return NextResponse.json(mapIssueToIncidentLike(issue), { status: 201 })
   } catch (error) {
     console.error("POST /api/incidents error:", error)
-
     return NextResponse.json(
       { error: "Αποτυχία δημιουργίας συμβάντος." },
       { status: 500 }

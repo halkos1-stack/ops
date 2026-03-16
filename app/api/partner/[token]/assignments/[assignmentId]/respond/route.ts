@@ -102,6 +102,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
           include: {
             property: true,
             checklistRun: true,
+            supplyRun: true,
           },
         },
       },
@@ -140,6 +141,28 @@ export async function POST(req: NextRequest, context: RouteContext) {
           },
         })
 
+        if (existingAssignment.task.checklistRun) {
+          await tx.taskChecklistRun.update({
+            where: { id: existingAssignment.task.checklistRun.id },
+            data: {
+              status: "pending",
+              startedAt: null,
+              completedAt: null,
+            },
+          })
+        }
+
+        if (existingAssignment.task.supplyRun) {
+          await tx.taskSupplyRun.update({
+            where: { id: existingAssignment.task.supplyRun.id },
+            data: {
+              status: "pending",
+              startedAt: null,
+              completedAt: null,
+            },
+          })
+        }
+
         await tx.activityLog.create({
           data: {
             organizationId: existingAssignment.task.organizationId,
@@ -165,7 +188,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
       let checklistTokenExpiresAt = existingAssignment.checklistTokenExpiresAt
 
       if (
-        existingAssignment.task.requiresChecklist &&
+        existingAssignment.task.sendCleaningChecklist &&
         existingAssignment.task.checklistRun &&
         !checklistToken
       ) {
@@ -201,6 +224,15 @@ export async function POST(req: NextRequest, context: RouteContext) {
         })
       }
 
+      if (existingAssignment.task.supplyRun) {
+        await tx.taskSupplyRun.update({
+          where: { id: existingAssignment.task.supplyRun.id },
+          data: {
+            status: "pending",
+          },
+        })
+      }
+
       await tx.activityLog.create({
         data: {
           organizationId: existingAssignment.task.organizationId,
@@ -213,6 +245,10 @@ export async function POST(req: NextRequest, context: RouteContext) {
           message: `Ο συνεργάτης ${existingAssignment.partner.name} αποδέχθηκε την εργασία "${existingAssignment.task.title}" από το portal.`,
           actorType: "partner",
           actorName: existingAssignment.partner.name,
+          metadata: {
+            sendCleaningChecklist: existingAssignment.task.sendCleaningChecklist,
+            sendSuppliesChecklist: existingAssignment.task.sendSuppliesChecklist,
+          },
         },
       })
 

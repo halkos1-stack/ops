@@ -60,13 +60,22 @@ async function findPrimaryChecklistTemplate(
   })
 }
 
+async function countActivePropertySupplies(propertyId: string) {
+  return prisma.propertySupply.count({
+    where: {
+      propertyId,
+      isActive: true,
+    },
+  })
+}
+
 async function syncTaskChecklistRun(params: {
   taskId: string
   organizationId: string
   propertyId: string
-  requiresChecklist: boolean
+  sendCleaningChecklist: boolean
 }) {
-  const { taskId, organizationId, propertyId, requiresChecklist } = params
+  const { taskId, organizationId, propertyId, sendCleaningChecklist } = params
 
   const existingRun = await prisma.taskChecklistRun.findUnique({
     where: {
@@ -79,8 +88,14 @@ async function syncTaskChecklistRun(params: {
     },
   })
 
-  if (!requiresChecklist) {
+  if (!sendCleaningChecklist) {
     if (existingRun) {
+      await prisma.taskChecklistAnswer.deleteMany({
+        where: {
+          checklistRunId: existingRun.id,
+        },
+      })
+
       await prisma.taskChecklistRun.delete({
         where: {
           taskId,
@@ -98,6 +113,12 @@ async function syncTaskChecklistRun(params: {
 
   if (!primaryTemplate) {
     if (existingRun) {
+      await prisma.taskChecklistAnswer.deleteMany({
+        where: {
+          checklistRunId: existingRun.id,
+        },
+      })
+
       await prisma.taskChecklistRun.delete({
         where: {
           taskId,
@@ -196,6 +217,61 @@ async function syncTaskChecklistRun(params: {
   })
 }
 
+async function syncTaskSupplyRun(params: {
+  taskId: string
+  sendSuppliesChecklist: boolean
+}) {
+  const { taskId, sendSuppliesChecklist } = params
+
+  const existingRun = await prisma.taskSupplyRun.findUnique({
+    where: {
+      taskId,
+    },
+    select: {
+      id: true,
+    },
+  })
+
+  if (!sendSuppliesChecklist) {
+    if (existingRun) {
+      await prisma.taskSupplyAnswer.deleteMany({
+        where: {
+          taskSupplyRunId: existingRun.id,
+        },
+      })
+
+      await prisma.taskSupplyRun.delete({
+        where: {
+          taskId,
+        },
+      })
+    }
+
+    return null
+  }
+
+  if (!existingRun) {
+    return prisma.taskSupplyRun.create({
+      data: {
+        taskId,
+        status: "pending",
+      },
+      include: {
+        answers: true,
+      },
+    })
+  }
+
+  return prisma.taskSupplyRun.findUnique({
+    where: {
+      taskId,
+    },
+    include: {
+      answers: true,
+    },
+  })
+}
+
 export async function GET(req: NextRequest) {
   try {
     const auth = getMockAuthFromRequest(req)
@@ -266,6 +342,27 @@ export async function GET(req: NextRequest) {
                 id: true,
                 issueCreated: true,
                 createdAt: true,
+              },
+            },
+          },
+        },
+        supplyRun: {
+          include: {
+            answers: {
+              include: {
+                propertySupply: {
+                  include: {
+                    supplyItem: {
+                      select: {
+                        id: true,
+                        code: true,
+                        name: true,
+                        category: true,
+                        unit: true,
+                      },
+                    },
+                  },
+                },
               },
             },
           },
@@ -371,8 +468,17 @@ export async function POST(req: NextRequest) {
     }
 
     const requiresPhotos = Boolean(body.requiresPhotos)
-    const requiresChecklist = Boolean(body.requiresChecklist)
     const requiresApproval = Boolean(body.requiresApproval)
+
+    const sendCleaningChecklist =
+      body.sendCleaningChecklist === undefined
+        ? true
+        : Boolean(body.sendCleaningChecklist)
+
+    const sendSuppliesChecklist = Boolean(body.sendSuppliesChecklist)
+    const usesCustomizedCleaningChecklist = Boolean(
+      body.usesCustomizedCleaningChecklist
+    )
 
     const property = await prisma.property.findFirst({
       where: {
@@ -390,6 +496,37 @@ export async function POST(req: NextRequest) {
         { error: "Το ακίνητο δεν βρέθηκε ή δεν ανήκει στον οργανισμό." },
         { status: 404 }
       )
+    }
+
+    if (sendCleaningChecklist) {
+      const primaryTemplate = await findPrimaryChecklistTemplate(
+        organizationId,
+        propertyId
+      )
+
+      if (!primaryTemplate) {
+        return NextResponse.json(
+          {
+            error:
+              "Το ακίνητο δεν έχει ενεργό κύριο πρότυπο λίστας καθαριότητας.",
+          },
+          { status: 400 }
+        )
+      }
+    }
+
+    if (sendSuppliesChecklist) {
+      const activeSuppliesCount = await countActivePropertySupplies(propertyId)
+
+      if (activeSuppliesCount === 0) {
+        return NextResponse.json(
+          {
+            error:
+              "Το ακίνητο δεν έχει ενεργά αναλώσιμα για αποστολή λίστας αναλωσίμων.",
+          },
+          { status: 400 }
+        )
+      }
     }
 
     const task = await prisma.task.create({
@@ -412,8 +549,11 @@ export async function POST(req: NextRequest) {
           : null,
         dueDate: body.dueDate ? new Date(body.dueDate) : null,
         requiresPhotos,
-        requiresChecklist,
+        requiresChecklist: sendCleaningChecklist,
         requiresApproval,
+        sendCleaningChecklist,
+        sendSuppliesChecklist,
+        usesCustomizedCleaningChecklist,
         notes: body.notes ? String(body.notes) : null,
       },
     })
@@ -422,7 +562,12 @@ export async function POST(req: NextRequest) {
       taskId: task.id,
       organizationId,
       propertyId,
-      requiresChecklist,
+      sendCleaningChecklist,
+    })
+
+    await syncTaskSupplyRun({
+      taskId: task.id,
+      sendSuppliesChecklist,
     })
 
     const fullTask = await prisma.task.findUnique({
@@ -451,6 +596,19 @@ export async function POST(req: NextRequest) {
                 id: true,
                 issueCreated: true,
                 createdAt: true,
+              },
+            },
+          },
+        },
+        supplyRun: {
+          include: {
+            answers: {
+              include: {
+                propertySupply: {
+                  include: {
+                    supplyItem: true,
+                  },
+                },
               },
             },
           },

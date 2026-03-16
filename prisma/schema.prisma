@@ -198,28 +198,31 @@ model PartnerPortalAccessToken {
 }
 
 model Task {
-  id                 String    @id @default(cuid())
-  organizationId     String
-  propertyId         String
-  bookingId          String?
-  title              String
-  description        String?
-  taskType           String
-  source             String    @default("manual")
-  priority           String    @default("normal")
-  status             String    @default("pending")
-  scheduledDate      DateTime
-  scheduledStartTime String?
-  scheduledEndTime   String?
-  dueDate            DateTime?
-  completedAt        DateTime?
-  requiresPhotos     Boolean   @default(false)
-  requiresChecklist  Boolean   @default(false)
-  requiresApproval   Boolean   @default(false)
-  notes              String?
-  resultNotes        String?
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  id                              String    @id @default(cuid())
+  organizationId                  String
+  propertyId                      String
+  bookingId                       String?
+  title                           String
+  description                     String?
+  taskType                        String
+  source                          String    @default("manual")
+  priority                        String    @default("normal")
+  status                          String    @default("pending")
+  scheduledDate                   DateTime
+  scheduledStartTime              String?
+  scheduledEndTime                String?
+  dueDate                         DateTime?
+  completedAt                     DateTime?
+  requiresPhotos                  Boolean   @default(false)
+  requiresChecklist               Boolean   @default(false)
+  requiresApproval                Boolean   @default(false)
+  sendCleaningChecklist           Boolean   @default(true)
+  sendSuppliesChecklist           Boolean   @default(false)
+  usesCustomizedCleaningChecklist Boolean   @default(false)
+  notes                           String?
+  resultNotes                     String?
+  createdAt                       DateTime  @default(now())
+  updatedAt                       DateTime  @updatedAt
 
   organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   property           Property            @relation(fields: [propertyId], references: [id], onDelete: Cascade)
@@ -230,6 +233,7 @@ model Task {
   supplyConsumptions SupplyConsumption[]
   activityLogs       ActivityLog[]
   checklistRun       TaskChecklistRun?
+  supplyRun          TaskSupplyRun?
   events             Event[]
 
   @@index([organizationId])
@@ -330,6 +334,8 @@ model PropertySupply {
   id               String   @id @default(cuid())
   propertyId       String
   supplyItemId     String
+  isActive         Boolean  @default(true)
+  fillLevel        String   @default("full")
   currentStock     Float    @default(0)
   targetStock      Float?
   reorderThreshold Float?
@@ -338,12 +344,15 @@ model PropertySupply {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  property   Property   @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  supplyItem SupplyItem @relation(fields: [supplyItemId], references: [id], onDelete: Cascade)
+  property         Property          @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  supplyItem       SupplyItem        @relation(fields: [supplyItemId], references: [id], onDelete: Cascade)
+  taskSupplyAnswers TaskSupplyAnswer[]
 
   @@unique([propertyId, supplyItemId])
   @@index([propertyId])
   @@index([supplyItemId])
+  @@index([isActive])
+  @@index([fillLevel])
 }
 
 model SupplyConsumption {
@@ -478,6 +487,39 @@ model TaskChecklistAnswer {
 
   @@index([checklistRunId])
   @@index([templateItemId])
+}
+
+model TaskSupplyRun {
+  id          String   @id @default(cuid())
+  taskId      String   @unique
+  status      String   @default("pending")
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  task    Task               @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  answers TaskSupplyAnswer[]
+
+  @@index([status])
+}
+
+model TaskSupplyAnswer {
+  id              String   @id @default(cuid())
+  taskSupplyRunId String
+  propertySupplyId String
+  fillLevel       String
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  taskSupplyRun TaskSupplyRun @relation(fields: [taskSupplyRunId], references: [id], onDelete: Cascade)
+  propertySupply PropertySupply @relation(fields: [propertySupplyId], references: [id], onDelete: Cascade)
+
+  @@unique([taskSupplyRunId, propertySupplyId])
+  @@index([taskSupplyRunId])
+  @@index([propertySupplyId])
+  @@index([fillLevel])
 }
 
 model Event {

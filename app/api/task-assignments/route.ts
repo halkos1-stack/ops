@@ -46,6 +46,160 @@ function formatDateForGreek(value?: Date | string | null) {
   }).format(date)
 }
 
+async function findPrimaryChecklistTemplate(
+  organizationId: string,
+  propertyId: string
+) {
+  return prisma.propertyChecklistTemplate.findFirst({
+    where: {
+      organizationId,
+      propertyId,
+      isPrimary: true,
+      isActive: true,
+    },
+    select: {
+      id: true,
+      title: true,
+      templateType: true,
+      isPrimary: true,
+      isActive: true,
+    },
+    orderBy: {
+      updatedAt: "desc",
+    },
+  })
+}
+
+async function ensureTaskChecklistRun(params: {
+  taskId: string
+  organizationId: string
+  propertyId: string
+  sendCleaningChecklist: boolean
+}) {
+  const { taskId, organizationId, propertyId, sendCleaningChecklist } = params
+
+  if (!sendCleaningChecklist) {
+    const existingRun = await prisma.taskChecklistRun.findUnique({
+      where: { taskId },
+      select: { id: true },
+    })
+
+    if (existingRun) {
+      await prisma.taskChecklistAnswer.deleteMany({
+        where: { checklistRunId: existingRun.id },
+      })
+
+      await prisma.taskChecklistRun.delete({
+        where: { taskId },
+      })
+    }
+
+    return null
+  }
+
+  const primaryTemplate = await findPrimaryChecklistTemplate(
+    organizationId,
+    propertyId
+  )
+
+  if (!primaryTemplate) {
+    return null
+  }
+
+  const existingRun = await prisma.taskChecklistRun.findUnique({
+    where: { taskId },
+    select: {
+      id: true,
+      templateId: true,
+    },
+  })
+
+  if (!existingRun) {
+    return prisma.taskChecklistRun.create({
+      data: {
+        taskId,
+        templateId: primaryTemplate.id,
+        status: "pending",
+      },
+    })
+  }
+
+  if (existingRun.templateId !== primaryTemplate.id) {
+    await prisma.taskChecklistAnswer.deleteMany({
+      where: {
+        checklistRunId: existingRun.id,
+      },
+    })
+
+    return prisma.taskChecklistRun.update({
+      where: { taskId },
+      data: {
+        templateId: primaryTemplate.id,
+        status: "pending",
+        startedAt: null,
+        completedAt: null,
+      },
+    })
+  }
+
+  return prisma.taskChecklistRun.update({
+    where: { taskId },
+    data: {
+      status: "pending",
+      startedAt: null,
+      completedAt: null,
+    },
+  })
+}
+
+async function ensureTaskSupplyRun(params: {
+  taskId: string
+  sendSuppliesChecklist: boolean
+}) {
+  const { taskId, sendSuppliesChecklist } = params
+
+  const existingRun = await prisma.taskSupplyRun.findUnique({
+    where: { taskId },
+    select: { id: true },
+  })
+
+  if (!sendSuppliesChecklist) {
+    if (existingRun) {
+      await prisma.taskSupplyAnswer.deleteMany({
+        where: {
+          taskSupplyRunId: existingRun.id,
+        },
+      })
+
+      await prisma.taskSupplyRun.delete({
+        where: {
+          taskId,
+        },
+      })
+    }
+
+    return null
+  }
+
+  if (!existingRun) {
+    return prisma.taskSupplyRun.create({
+      data: {
+        taskId,
+        status: "pending",
+      },
+    })
+  }
+
+  return prisma.taskSupplyRun.update({
+    where: { taskId },
+    data: {
+      status: "pending",
+      startedAt: null,
+      completedAt: null,
+    },
+  })
+}
+
 export async function GET(request: NextRequest) {
   try {
     const access = await requireApiAppAccess()
@@ -96,6 +250,8 @@ export async function GET(request: NextRequest) {
             requiresChecklist: true,
             requiresPhotos: true,
             requiresApproval: true,
+            sendCleaningChecklist: true,
+            sendSuppliesChecklist: true,
             property: {
               select: {
                 id: true,
@@ -163,6 +319,7 @@ export async function POST(request: NextRequest) {
     const taskId = String(body.taskId || "").trim()
     const partnerId = String(body.partnerId || "").trim()
     const notes = toNullableString(body.notes)
+    const saveAsDefaultPartner = Boolean(body.saveAsDefaultPartner)
 
     if (!taskId) {
       return NextResponse.json(
@@ -188,6 +345,8 @@ export async function POST(request: NextRequest) {
         propertyId: true,
         scheduledDate: true,
         requiresChecklist: true,
+        sendCleaningChecklist: true,
+        sendSuppliesChecklist: true,
         property: {
           select: {
             id: true,
@@ -250,6 +409,23 @@ export async function POST(request: NextRequest) {
         { error: "Ο συνεργάτης δεν είναι ενεργός." },
         { status: 400 }
       )
+    }
+
+    if (task.sendCleaningChecklist) {
+      const primaryTemplate = await findPrimaryChecklistTemplate(
+        task.organizationId,
+        task.propertyId
+      )
+
+      if (!primaryTemplate) {
+        return NextResponse.json(
+          {
+            error:
+              "Δεν μπορεί να σταλεί λίστα καθαριότητας γιατί το ακίνητο δεν έχει ενεργό κύριο πρότυπο.",
+          },
+          { status: 400 }
+        )
+      }
     }
 
     const existingAssignments = await prisma.taskAssignment.findMany({
@@ -375,6 +551,22 @@ export async function POST(request: NextRequest) {
         })
       }
 
+      if (task.sendCleaningChecklist) {
+        await ensureTaskChecklistRun({
+          taskId: task.id,
+          organizationId: task.organizationId,
+          propertyId: task.propertyId,
+          sendCleaningChecklist: true,
+        })
+      }
+
+      if (task.sendSuppliesChecklist) {
+        await ensureTaskSupplyRun({
+          taskId: task.id,
+          sendSuppliesChecklist: true,
+        })
+      }
+
       const assignment = await tx.taskAssignment.create({
         data: {
           taskId,
@@ -397,6 +589,8 @@ export async function POST(request: NextRequest) {
               requiresChecklist: true,
               requiresPhotos: true,
               requiresApproval: true,
+              sendCleaningChecklist: true,
+              sendSuppliesChecklist: true,
               property: {
                 select: {
                   id: true,
@@ -438,6 +632,17 @@ export async function POST(request: NextRequest) {
         },
       })
 
+      if (saveAsDefaultPartner) {
+        await tx.property.update({
+          where: {
+            id: task.propertyId,
+          },
+          data: {
+            defaultPartnerId: partner.id,
+          },
+        })
+      }
+
       await tx.activityLog.create({
         data: {
           organizationId: task.organizationId,
@@ -457,6 +662,9 @@ export async function POST(request: NextRequest) {
             responseToken,
             portalToken,
             portalLink,
+            sendCleaningChecklist: task.sendCleaningChecklist,
+            sendSuppliesChecklist: task.sendSuppliesChecklist,
+            saveAsDefaultPartner,
           },
         },
       })
@@ -485,7 +693,7 @@ export async function POST(request: NextRequest) {
           <p><strong>Τίτλος εργασίας:</strong> ${task.title}</p>
           <p><strong>Ακίνητο:</strong> ${task.property.name}</p>
           <p><strong>Ημερομηνία:</strong> ${formatDateForGreek(task.scheduledDate)}</p>
-          <p>Για να δεις την ανάθεση, να απαντήσεις και να εκτελέσεις τη λίστα εργασίας, άνοιξε το portal σου:</p>
+          <p>Για να δεις την ανάθεση, να απαντήσεις και να εκτελέσεις τις ενότητες εργασίας, άνοιξε το portal σου:</p>
           <p>
             <a href="${portalLink}" target="_blank" rel="noreferrer">
               Άνοιγμα portal συνεργάτη

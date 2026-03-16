@@ -5,234 +5,465 @@ import { useEffect, useMemo, useState } from "react"
 import { useParams } from "next/navigation"
 import { useAppLanguage } from "@/components/i18n/LanguageProvider"
 
-type Γλώσσα = "el" | "en"
-type ΚατάστασηΑναλωσίμου = "missing" | "medium" | "full"
+type Language = "el" | "en"
+type SupplyFilter = "all" | "missing" | "medium" | "full"
+type SupplyState = "missing" | "medium" | "full"
 
-type SupplyItemView = {
+type SupplyItem = {
   id: string
   code: string
   name: string
   category: string
   unit: string
-  minimumStock: number | null
+  minimumStock?: number | null
   isActive: boolean
 }
 
-type PropertySupplyView = {
+type PropertySupply = {
   id: string
   propertyId: string
   supplyItemId: string
   currentStock: number
-  targetStock: number | null
-  reorderThreshold: number | null
-  lastUpdatedAt: string
-  notes: string | null
-  createdAt: string
-  updatedAt: string
-  supplyItem: SupplyItemView
+  targetStock?: number | null
+  reorderThreshold?: number | null
+  notes?: string | null
+  updatedAt?: string | null
+  lastUpdatedAt?: string | null
+  supplyItem?: SupplyItem | null
 }
 
-type BuiltInCatalogItem = {
+type BuiltInCatalogRow = {
+  presetKey: string
+  code: string
+  nameEl: string
+  nameEn: string
+  category: string
+  unit: string
+  minimumStock: number
+  checklistLabelEl: string
+  checklistLabelEn: string
+  isActiveForProperty: boolean
+  propertySupplyId?: string | null
+}
+
+type CustomCatalogRow = {
+  id: string
   code: string
   name: string
   category: string
   unit: string
-  isActive: boolean
+  minimumStock?: number | null
+  isActiveForProperty: boolean
+  propertySupplyId?: string | null
 }
 
-type SuppliesResponse = {
+type SuppliesPayload = {
   property: {
     id: string
     code: string
     name: string
-    organizationId: string
+    address?: string | null
+    city?: string | null
+    region?: string | null
+    postalCode?: string | null
+    country?: string | null
+    status?: string | null
   }
-  activeSupplies: PropertySupplyView[]
-  builtInCatalog: BuiltInCatalogItem[]
+  activeSupplies: PropertySupply[]
+  builtInCatalog: BuiltInCatalogRow[]
+  customCatalog: CustomCatalogRow[]
 }
 
-const ΚΕΙΜΕΝΑ = {
-  el: {
-    επιστροφή: "Επιστροφή στο ακίνητο",
-    τίτλος: "Αναλώσιμα ακινήτου",
-    υπότιτλος:
-      "Εδώ εμφανίζονται μόνο τα ενεργά αναλώσιμα του ακινήτου. Ό,τι ενεργοποιείται από τη λίστα εμφανίζεται αυτόματα εδώ και ακολουθεί τη λογική Έλλειψη / Μέτρια / Πλήρης.",
-    επιλογήΑναλωσίμων: "Επιλογή αναλωσίμων",
-    φόρτωση: "Φόρτωση...",
-    χωρίςΑναλώσιμα:
-      "Δεν υπάρχουν ενεργά αναλώσιμα ακόμη. Πάτησε «Επιλογή αναλωσίμων» για να ενεργοποιήσεις από τη βασική λίστα ή να προσθέσεις custom.",
-    όλα: "Όλα",
-    έλλειψη: "Έλλειψη",
-    μέτρια: "Μέτρια",
-    πλήρης: "Πλήρης",
-    ενεργάΑναλώσιμα: "Ενεργά αναλώσιμα",
-    κατηγορία: "Κατηγορία",
-    μονάδα: "Μονάδα",
-    κατάσταση: "Κατάσταση",
-    βασικήΛίστα: "Βασικά αναλώσιμα",
-    παράθυροΤίτλος: "Επιλογή αναλωσίμων για το ακίνητο",
-    παράθυροΥπότιτλος:
-      "Ενεργοποίησε όσα αναλώσιμα χρειάζεται αυτό το ακίνητο. Ό,τι ενεργοποιήσεις θα εμφανιστεί αυτόματα στη βασική λίστα.",
-    όνομα: "Όνομα",
-    ενέργεια: "Ενέργεια",
-    ενεργό: "Ενεργό",
-    ανενεργό: "Ανενεργό",
-    ενεργοποίηση: "Ενεργοποίηση",
-    απενεργοποίηση: "Απενεργοποίηση",
-    κλείσιμο: "Κλείσιμο",
-    customΤίτλος: "Προσθήκη custom αναλωσίμου",
-    customΥπότιτλος:
-      "Η custom προσθήκη δέχεται μόνο όνομα. Και αυτό θα ακολουθεί την ίδια λογική Έλλειψη / Μέτρια / Πλήρης.",
-    customPlaceholder: "π.χ. χαρτομάντιλα",
-    προσθήκηCustom: "Προσθήκη custom",
-    ενημέρωση: "Ενημέρωση...",
-    σφάλμαΦόρτωσης: "Αποτυχία φόρτωσης αναλωσίμων.",
-    σφάλμαΑποθήκευσης: "Αποτυχία ενημέρωσης αναλωσίμων.",
-    δώσεΌνομα: "Δώσε όνομα για το custom αναλώσιμο.",
-    builtIn: "Built-in",
-    custom: "Custom",
-  },
-  en: {
-    επιστροφή: "Back to property",
-    τίτλος: "Property supplies",
-    υπότιτλος:
-      "Only active supplies for this property are shown here. Anything activated from the list appears automatically here and follows the Missing / Medium / Full logic.",
-    επιλογήΑναλωσίμων: "Choose supplies",
-    φόρτωση: "Loading...",
-    χωρίςΑναλώσιμα:
-      "No active supplies yet. Click “Choose supplies” to activate built-in items or add a custom item.",
-    όλα: "All",
-    έλλειψη: "Missing",
-    μέτρια: "Medium",
-    πλήρης: "Full",
-    ενεργάΑναλώσιμα: "Active supplies",
-    κατηγορία: "Category",
-    μονάδα: "Unit",
-    κατάσταση: "Status",
-    βασικήΛίστα: "Built-in supplies",
-    παράθυροΤίτλος: "Choose supplies for this property",
-    παράθυροΥπότιτλος:
-      "Activate the supplies needed for this property. Anything activated appears automatically in the main list.",
-    όνομα: "Name",
-    ενέργεια: "Action",
-    ενεργό: "Active",
-    ανενεργό: "Inactive",
-    ενεργοποίηση: "Activate",
-    απενεργοποίηση: "Deactivate",
-    κλείσιμο: "Close",
-    customΤίτλος: "Add custom supply",
-    customΥπότιτλος:
-      "Custom addition only needs a name. It will also follow the Missing / Medium / Full logic.",
-    customPlaceholder: "e.g. tissues",
-    προσθήκηCustom: "Add custom",
-    ενημέρωση: "Updating...",
-    σφάλμαΦόρτωσης: "Failed to load supplies.",
-    σφάλμαΑποθήκευσης: "Failed to update supplies.",
-    δώσεΌνομα: "Please enter a name for the custom supply.",
-    builtIn: "Built-in",
-    custom: "Custom",
-  },
-}
-
-const ΕΤΙΚΕΤΕΣ_ΚΑΤΗΓΟΡΙΑΣ: Record<string, { el: string; en: string }> = {
-  bathroom: { el: "Μπάνιο", en: "Bathroom" },
-  kitchen: { el: "Κουζίνα", en: "Kitchen" },
-  laundry: { el: "Πλυντήριο", en: "Laundry" },
-  custom: { el: "Custom", en: "Custom" },
-}
-
-const ΕΤΙΚΕΤΕΣ_ΜΟΝΑΔΑΣ: Record<string, { el: string; en: string }> = {
-  pcs: { el: "τεμ.", en: "pcs" },
-  pack: { el: "πακέτο", en: "pack" },
-}
-
-function ομαλοποίησηΓλώσσας(value: string | undefined): Γλώσσα {
+function normalizeLanguage(value: string | undefined): Language {
   return value === "en" ? "en" : "el"
 }
 
-function μετάφρασηΚατηγορίας(value: string, γλώσσα: Γλώσσα) {
-  return ΕΤΙΚΕΤΕΣ_ΚΑΤΗΓΟΡΙΑΣ[value]?.[γλώσσα] || value
+function normalizeDate(value?: string | null) {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  return date
 }
 
-function μετάφρασηΜονάδας(value: string, γλώσσα: Γλώσσα) {
-  return ΕΤΙΚΕΤΕΣ_ΜΟΝΑΔΑΣ[value]?.[γλώσσα] || value
+function formatDateTime(value: string | null | undefined, locale: string) {
+  const date = normalizeDate(value)
+  if (!date) return "—"
+
+  return new Intl.DateTimeFormat(locale, {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date)
 }
 
-function υπολογισμόςΚατάστασης(item: PropertySupplyView): ΚατάστασηΑναλωσίμου {
-  const currentStock = Number(item.currentStock ?? 0)
-  const targetStock = Number(item.targetStock ?? 0)
-  const reorderThreshold = Number(item.reorderThreshold ?? 0)
-
-  if (currentStock <= 0) return "missing"
-  if (targetStock > 0 && currentStock >= targetStock) return "full"
-  if (reorderThreshold > 0 && currentStock <= reorderThreshold) return "medium"
-  if (targetStock <= 0) return currentStock > 0 ? "full" : "missing"
-
-  return "medium"
-}
-
-function κλάσειςΣήματος(status: ΚατάστασηΑναλωσίμου) {
-  if (status === "missing") {
-    return "border border-red-200 bg-red-50 text-red-700"
+function getTexts(language: Language) {
+  if (language === "en") {
+    return {
+      locale: "en-GB",
+      backToProperty: "Back to property",
+      pageTitle: "Supplies management",
+      pageSubtitle:
+        "Only the active supplies of this property are shown here. Activation of built-in and custom supplies is handled through the popup.",
+      emptyInline:
+        "No active supplies have been selected for this property yet. Use the popup to activate the supplies you want.",
+      loading: "Loading supplies...",
+      loadError: "Failed to load supplies.",
+      updateError: "Failed to update supplies.",
+      activeSupplies: "Active supplies",
+      chooseSupplies: "Choose supplies",
+      popupTitle: "Choose supplies for this property",
+      popupSubtitle:
+        "Activate or deactivate built-in and custom supplies for this property.",
+      builtInTitle: "Built-in supplies",
+      customListTitle: "Custom supplies",
+      customEmpty:
+        "No custom supplies have been created yet. Add a new one below.",
+      customTitle: "Add custom supply",
+      customPlaceholder: "Custom supply name",
+      addCustom: "Add custom supply",
+      close: "Close",
+      activate: "Activate",
+      deactivate: "Deactivate",
+      active: "Active",
+      inactive: "Inactive",
+      all: "All",
+      missing: "Missing",
+      medium: "Medium",
+      full: "Full",
+      status: "Status",
+      updatedAt: "Last updated",
+      changeStatus: "Update status",
+      save: "Save",
+      cancel: "Cancel",
+      deleteRow: "Remove from property",
+      deleting: "Removing...",
+      saving: "Saving...",
+      popupEmpty: "No available built-in supplies.",
+    }
   }
 
-  if (status === "medium") {
-    return "border border-amber-200 bg-amber-50 text-amber-700"
+  return {
+    locale: "el-GR",
+    backToProperty: "Επιστροφή στο ακίνητο",
+    pageTitle: "Διαχείριση αναλωσίμων",
+    pageSubtitle:
+      "Στη σελίδα εμφανίζονται μόνο τα αναλώσιμα που έχουν ενεργοποιηθεί για το συγκεκριμένο ακίνητο. Η ενεργοποίηση built-in και custom γίνεται μόνο από το popup.",
+    emptyInline:
+      "Δεν έχουν ενεργοποιηθεί ακόμη αναλώσιμα για το συγκεκριμένο ακίνητο. Πάτησε «Επιλογή αναλωσίμων» για να τα ορίσεις.",
+    loading: "Φόρτωση αναλωσίμων...",
+    loadError: "Αποτυχία φόρτωσης αναλωσίμων.",
+    updateError: "Αποτυχία ενημέρωσης αναλωσίμων.",
+    activeSupplies: "Ενεργά αναλώσιμα",
+    chooseSupplies: "Επιλογή αναλωσίμων",
+    popupTitle: "Επιλογή αναλωσίμων για το ακίνητο",
+    popupSubtitle:
+      "Από εδώ ενεργοποιείς ή απενεργοποιείς built-in και custom αναλώσιμα για το συγκεκριμένο ακίνητο.",
+    builtInTitle: "Built-in αναλώσιμα",
+    customListTitle: "Custom αναλώσιμα",
+    customEmpty:
+      "Δεν υπάρχουν ακόμη custom αναλώσιμα. Πρόσθεσε νέο από την ενότητα παρακάτω.",
+    customTitle: "Προσθήκη custom αναλωσίμου",
+    customPlaceholder: "Όνομα custom αναλωσίμου",
+    addCustom: "Προσθήκη custom αναλωσίμου",
+    close: "Κλείσιμο",
+    activate: "Ενεργοποίηση",
+    deactivate: "Απενεργοποίηση",
+    active: "Ενεργό",
+    inactive: "Ανενεργό",
+    all: "Όλα",
+    missing: "Έλλειψη",
+    medium: "Μέτρια",
+    full: "Πλήρης",
+    status: "Κατάσταση",
+    updatedAt: "Τελευταία ενημέρωση",
+    changeStatus: "Ενημέρωση κατάστασης",
+    save: "Αποθήκευση",
+    cancel: "Ακύρωση",
+    deleteRow: "Αφαίρεση από το ακίνητο",
+    deleting: "Αφαίρεση...",
+    saving: "Αποθήκευση...",
+    popupEmpty: "Δεν υπάρχουν διαθέσιμα built-in αναλώσιμα.",
   }
-
-  return "border border-emerald-200 bg-emerald-50 text-emerald-700"
 }
 
-export default function SuppliesPage() {
-  const params = useParams<{ id: string }>()
-  const propertyId = String(params?.id || "")
+function getSupplyState(row: PropertySupply): SupplyState {
+  const current = Number(row.currentStock || 0)
+  const target =
+    typeof row.targetStock === "number" && Number.isFinite(row.targetStock)
+      ? row.targetStock
+      : null
+  const threshold =
+    typeof row.reorderThreshold === "number" &&
+    Number.isFinite(row.reorderThreshold)
+      ? row.reorderThreshold
+      : row.supplyItem?.minimumStock ?? null
+
+  if (current <= 0) return "missing"
+
+  if (target !== null && target > 0 && current >= target) {
+    return "full"
+  }
+
+  if (threshold !== null && current <= threshold) {
+    return "medium"
+  }
+
+  if (target !== null && target > 0 && current < target) {
+    return "medium"
+  }
+
+  return "full"
+}
+
+function getSupplyStateLabel(language: Language, state: SupplyState) {
+  if (language === "en") {
+    if (state === "missing") return "Missing"
+    if (state === "medium") return "Medium"
+    return "Full"
+  }
+
+  if (state === "missing") return "Έλλειψη"
+  if (state === "medium") return "Μέτρια"
+  return "Πλήρης"
+}
+
+function supplyStateBadgeClass(state: SupplyState) {
+  if (state === "missing") {
+    return "bg-red-50 text-red-700 ring-1 ring-red-200"
+  }
+
+  if (state === "medium") {
+    return "bg-amber-50 text-amber-700 ring-1 ring-amber-200"
+  }
+
+  return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
+}
+
+function computeStockForState(row: PropertySupply, state: SupplyState) {
+  const current =
+    typeof row.currentStock === "number" && Number.isFinite(row.currentStock)
+      ? row.currentStock
+      : 0
+
+  const target =
+    typeof row.targetStock === "number" && Number.isFinite(row.targetStock)
+      ? row.targetStock
+      : null
+
+  const threshold =
+    typeof row.reorderThreshold === "number" &&
+    Number.isFinite(row.reorderThreshold)
+      ? row.reorderThreshold
+      : row.supplyItem?.minimumStock ?? null
+
+  const minimum =
+    typeof row.supplyItem?.minimumStock === "number" &&
+    Number.isFinite(row.supplyItem.minimumStock)
+      ? row.supplyItem.minimumStock
+      : 0
+
+  if (state === "missing") return 0
+
+  if (state === "medium") {
+    if (threshold !== null && threshold > 0) return threshold
+    if (target !== null && target > 1) return Math.max(1, Math.ceil(target / 2))
+    if (minimum > 0) return minimum
+    return Math.max(1, current || 1)
+  }
+
+  if (target !== null && target > 0) return target
+  if (threshold !== null && threshold > 0) return Math.max(threshold + 1, 2)
+  if (minimum > 0) return Math.max(minimum + 1, 2)
+  return Math.max(current, 3)
+}
+
+function CounterButton({
+  label,
+  value,
+  active,
+  onClick,
+  tone = "slate",
+}: {
+  label: string
+  value: number
+  active: boolean
+  onClick: () => void
+  tone?: "slate" | "red" | "amber" | "emerald"
+}) {
+  const className =
+    tone === "red"
+      ? active
+        ? "border-red-600 bg-red-600 text-white"
+        : "border-red-200 bg-white text-red-700 hover:bg-red-50"
+      : tone === "amber"
+      ? active
+        ? "border-amber-500 bg-amber-500 text-white"
+        : "border-amber-200 bg-white text-amber-700 hover:bg-amber-50"
+      : tone === "emerald"
+      ? active
+        ? "border-emerald-600 bg-emerald-600 text-white"
+        : "border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50"
+      : active
+      ? "border-slate-900 bg-slate-900 text-white"
+      : "border-slate-200 bg-white text-slate-800 hover:bg-slate-50"
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-2xl border p-4 text-left shadow-sm transition ${className}`}
+    >
+      <div className="text-xs font-semibold uppercase tracking-wide opacity-80">
+        {label}
+      </div>
+      <div className="mt-2 text-3xl font-bold">{value}</div>
+    </button>
+  )
+}
+
+function Modal({
+  title,
+  subtitle,
+  onClose,
+  children,
+  closeLabel,
+}: {
+  title: string
+  subtitle?: string
+  onClose: () => void
+  children: React.ReactNode
+  closeLabel: string
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-950/50 p-0 sm:items-center sm:p-4">
+      <div className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:rounded-3xl">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-4 py-4 sm:px-6">
+          <div className="min-w-0">
+            <h2 className="text-lg font-semibold text-slate-900 sm:text-xl">{title}</h2>
+            {subtitle ? <p className="mt-1 text-sm text-slate-500">{subtitle}</p> : null}
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex shrink-0 items-center rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            {closeLabel}
+          </button>
+        </div>
+
+        <div className="overflow-y-auto px-4 py-4 sm:px-6 sm:py-6">{children}</div>
+      </div>
+    </div>
+  )
+}
+
+export default function PropertySuppliesPage() {
+  const params = useParams()
+  const propertyId = Array.isArray(params?.id) ? params.id[0] : params?.id
   const { language } = useAppLanguage()
-  const γλώσσα = ομαλοποίησηΓλώσσας(language)
-  const κείμενα = ΚΕΙΜΕΝΑ[γλώσσα]
+  const lang = normalizeLanguage(language)
+  const t = getTexts(lang)
 
+  const [data, setData] = useState<SuppliesPayload | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
-  const [data, setData] = useState<SuppliesResponse | null>(null)
-  const [isModalOpen, setIsModalOpen] = useState(false)
+  const [popupOpen, setPopupOpen] = useState(false)
+  const [filter, setFilter] = useState<SupplyFilter>("all")
   const [customName, setCustomName] = useState("")
-  const [filter, setFilter] = useState<"all" | ΚατάστασηΑναλωσίμου>("all")
+  const [editingRow, setEditingRow] = useState<PropertySupply | null>(null)
+  const [selectedState, setSelectedState] = useState<SupplyState>("full")
 
   async function loadData() {
     if (!propertyId) return
 
-    setLoading(true)
-    setError("")
-
     try {
+      setLoading(true)
+      setError("")
+
       const res = await fetch(`/api/properties/${propertyId}/supplies`, {
-        method: "GET",
         cache: "no-store",
       })
 
-      const json = await res.json()
+      const json = await res.json().catch(() => null)
 
       if (!res.ok) {
-        throw new Error(json?.error || κείμενα.σφάλμαΦόρτωσης)
+        throw new Error(json?.error || t.loadError)
       }
 
       setData(json)
     } catch (err) {
-      setError(err instanceof Error ? err.message : κείμενα.σφάλμαΦόρτωσης)
+      console.error("Load property supplies error:", err)
+      setError(err instanceof Error ? err.message : t.loadError)
+      setData(null)
     } finally {
       setLoading(false)
     }
   }
 
-  useEffect(() => {
-    void loadData()
-  }, [propertyId])
-
-  async function toggleBuiltIn(code: string, enabled: boolean) {
-    setSaving(true)
-    setError("")
+  async function silentSyncTemplate() {
+    if (!propertyId) return
 
     try {
+      await fetch(`/api/properties/${propertyId}/supplies`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "sync_template",
+        }),
+      })
+    } catch (syncError) {
+      console.error("Silent sync template error:", syncError)
+    }
+  }
+
+  async function refreshAfterMutation() {
+    await silentSyncTemplate()
+    await loadData()
+  }
+
+  useEffect(() => {
+    loadData()
+  }, [propertyId])
+
+  const activeSupplies = data?.activeSupplies || []
+
+  const supplyRows = useMemo(() => {
+    return activeSupplies.map((row) => ({
+      ...row,
+      derivedState: getSupplyState(row),
+      safeUpdatedAt: row.lastUpdatedAt || row.updatedAt || null,
+    }))
+  }, [activeSupplies])
+
+  const hasActiveSupplies = supplyRows.length > 0
+
+  const counts = useMemo(() => {
+    return {
+      all: supplyRows.length,
+      missing: supplyRows.filter((row) => row.derivedState === "missing").length,
+      medium: supplyRows.filter((row) => row.derivedState === "medium").length,
+      full: supplyRows.filter((row) => row.derivedState === "full").length,
+    }
+  }, [supplyRows])
+
+  const visibleRows = useMemo(() => {
+    if (filter === "all") return supplyRows
+    return supplyRows.filter((row) => row.derivedState === filter)
+  }, [supplyRows, filter])
+
+  async function toggleBuiltIn(code: string, enabled: boolean) {
+    if (!propertyId) return
+
+    try {
+      setSaving(true)
+      setError("")
+
       const res = await fetch(`/api/properties/${propertyId}/supplies`, {
         method: "POST",
         headers: {
@@ -245,32 +476,62 @@ export default function SuppliesPage() {
         }),
       })
 
-      const json = await res.json()
+      const json = await res.json().catch(() => null)
 
       if (!res.ok) {
-        throw new Error(json?.error || κείμενα.σφάλμαΑποθήκευσης)
+        throw new Error(json?.error || t.updateError)
       }
 
-      setData(json)
+      await refreshAfterMutation()
     } catch (err) {
-      setError(err instanceof Error ? err.message : κείμενα.σφάλμαΑποθήκευσης)
+      console.error("Toggle built-in supply error:", err)
+      setError(err instanceof Error ? err.message : t.updateError)
     } finally {
       setSaving(false)
     }
   }
 
-  async function addCustom() {
-    const trimmedName = customName.trim()
-
-    if (!trimmedName) {
-      setError(κείμενα.δώσεΌνομα)
-      return
-    }
-
-    setSaving(true)
-    setError("")
+  async function toggleCustom(supplyItemId: string, enabled: boolean) {
+    if (!propertyId) return
 
     try {
+      setSaving(true)
+      setError("")
+
+      const res = await fetch(`/api/properties/${propertyId}/supplies`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "toggle_custom",
+          supplyItemId,
+          enabled,
+        }),
+      })
+
+      const json = await res.json().catch(() => null)
+
+      if (!res.ok) {
+        throw new Error(json?.error || t.updateError)
+      }
+
+      await refreshAfterMutation()
+    } catch (err) {
+      console.error("Toggle custom supply error:", err)
+      setError(err instanceof Error ? err.message : t.updateError)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function addCustomSupply() {
+    if (!propertyId || !customName.trim()) return
+
+    try {
+      setSaving(true)
+      setError("")
+
       const res = await fetch(`/api/properties/${propertyId}/supplies`, {
         method: "POST",
         headers: {
@@ -278,336 +539,454 @@ export default function SuppliesPage() {
         },
         body: JSON.stringify({
           action: "add_custom",
-          name: trimmedName,
+          name: customName.trim(),
         }),
       })
 
-      const json = await res.json()
+      const json = await res.json().catch(() => null)
 
       if (!res.ok) {
-        throw new Error(json?.error || κείμενα.σφάλμαΑποθήκευσης)
+        throw new Error(json?.error || t.updateError)
       }
 
-      setData(json)
       setCustomName("")
+      await refreshAfterMutation()
     } catch (err) {
-      setError(err instanceof Error ? err.message : κείμενα.σφάλμαΑποθήκευσης)
+      console.error("Add custom supply error:", err)
+      setError(err instanceof Error ? err.message : t.updateError)
     } finally {
       setSaving(false)
     }
   }
 
-  const activeSupplies = data?.activeSupplies || []
-  const builtInCatalog = data?.builtInCatalog || []
+  async function updateSupplyState() {
+    if (!propertyId || !editingRow) return
 
-  const filteredSupplies = useMemo(() => {
-    if (filter === "all") return activeSupplies
-    return activeSupplies.filter((item) => υπολογισμόςΚατάστασης(item) === filter)
-  }, [activeSupplies, filter])
+    try {
+      setSaving(true)
+      setError("")
 
-  const counts = useMemo(() => {
-    const missing = activeSupplies.filter((item) => υπολογισμόςΚατάστασης(item) === "missing").length
-    const medium = activeSupplies.filter((item) => υπολογισμόςΚατάστασης(item) === "medium").length
-    const full = activeSupplies.filter((item) => υπολογισμόςΚατάστασης(item) === "full").length
+      const nextStock = computeStockForState(editingRow, selectedState)
 
-    return {
-      all: activeSupplies.length,
-      missing,
-      medium,
-      full,
+      const res = await fetch(
+        `/api/properties/${propertyId}/supplies/${editingRow.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            currentStock: nextStock,
+          }),
+        }
+      )
+
+      const json = await res.json().catch(() => null)
+
+      if (!res.ok) {
+        throw new Error(json?.error || t.updateError)
+      }
+
+      setEditingRow(null)
+      await refreshAfterMutation()
+    } catch (err) {
+      console.error("Update supply state error:", err)
+      setError(err instanceof Error ? err.message : t.updateError)
+    } finally {
+      setSaving(false)
     }
-  }, [activeSupplies])
+  }
+
+  async function removeSupplyFromProperty(rowId: string) {
+    if (!propertyId) return
+
+    try {
+      setSaving(true)
+      setError("")
+
+      const res = await fetch(
+        `/api/properties/${propertyId}/supplies/${rowId}`,
+        {
+          method: "DELETE",
+        }
+      )
+
+      const json = await res.json().catch(() => null)
+
+      if (!res.ok) {
+        throw new Error(json?.error || t.updateError)
+      }
+
+      await refreshAfterMutation()
+    } catch (err) {
+      console.error("Remove property supply error:", err)
+      setError(err instanceof Error ? err.message : t.updateError)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+        {t.loading}
+      </div>
+    )
+  }
+
+  if (!data) {
+    return (
+      <div className="rounded-3xl border border-red-200 bg-white p-6 text-red-700 shadow-sm">
+        {error || t.loadError}
+      </div>
+    )
+  }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div className="space-y-3">
-          <Link
-            href={`/properties/${propertyId}`}
-            className="inline-flex items-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-          >
-            {κείμενα.επιστροφή}
-          </Link>
+    <>
+      <div className="space-y-6">
+        <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+            <div className="min-w-0">
+              <Link
+                href={`/properties/${propertyId}`}
+                className="inline-flex items-center rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+              >
+                ← {t.backToProperty}
+              </Link>
 
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight text-slate-900">
-              {κείμενα.τίτλος}
-            </h1>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-              {κείμενα.υπότιτλος}
-            </p>
-            {data?.property ? (
+              <h1 className="mt-4 text-3xl font-bold text-slate-950">{t.pageTitle}</h1>
+              <p className="mt-2 max-w-3xl text-sm text-slate-600">{t.pageSubtitle}</p>
               <p className="mt-2 text-sm text-slate-500">
                 {data.property.code} · {data.property.name}
               </p>
-            ) : null}
-          </div>
-        </div>
 
-        <button
-          type="button"
-          onClick={() => setIsModalOpen(true)}
-          className="inline-flex items-center justify-center rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
-        >
-          {κείμενα.επιλογήΑναλωσίμων}
-        </button>
-      </div>
-
-      {error ? (
-        <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
-        </div>
-      ) : null}
-
-      <div className="grid gap-3 md:grid-cols-4">
-        <button
-          type="button"
-          onClick={() => setFilter("all")}
-          className={`rounded-2xl border px-4 py-4 text-left transition ${
-            filter === "all"
-              ? "border-slate-900 bg-slate-900 text-white"
-              : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-          }`}
-        >
-          <div className="text-xs uppercase tracking-wide opacity-80">{κείμενα.όλα}</div>
-          <div className="mt-2 text-2xl font-bold">{counts.all}</div>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setFilter("missing")}
-          className={`rounded-2xl border px-4 py-4 text-left transition ${
-            filter === "missing"
-              ? "border-red-600 bg-red-600 text-white"
-              : "border-red-200 bg-white text-red-700 hover:bg-red-50"
-          }`}
-        >
-          <div className="text-xs uppercase tracking-wide opacity-80">{κείμενα.έλλειψη}</div>
-          <div className="mt-2 text-2xl font-bold">{counts.missing}</div>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setFilter("medium")}
-          className={`rounded-2xl border px-4 py-4 text-left transition ${
-            filter === "medium"
-              ? "border-amber-500 bg-amber-500 text-white"
-              : "border-amber-200 bg-white text-amber-700 hover:bg-amber-50"
-          }`}
-        >
-          <div className="text-xs uppercase tracking-wide opacity-80">{κείμενα.μέτρια}</div>
-          <div className="mt-2 text-2xl font-bold">{counts.medium}</div>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setFilter("full")}
-          className={`rounded-2xl border px-4 py-4 text-left transition ${
-            filter === "full"
-              ? "border-emerald-600 bg-emerald-600 text-white"
-              : "border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50"
-          }`}
-        >
-          <div className="text-xs uppercase tracking-wide opacity-80">{κείμενα.πλήρης}</div>
-          <div className="mt-2 text-2xl font-bold">{counts.full}</div>
-        </button>
-      </div>
-
-      <section className="rounded-3xl border border-slate-200 bg-white shadow-sm">
-        <div className="border-b border-slate-200 px-6 py-4">
-          <h2 className="text-lg font-semibold text-slate-900">{κείμενα.ενεργάΑναλώσιμα}</h2>
-        </div>
-
-        <div className="p-6">
-          {loading ? (
-            <div className="text-sm text-slate-500">{κείμενα.φόρτωση}</div>
-          ) : filteredSupplies.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center text-sm text-slate-500">
-              {κείμενα.χωρίςΑναλώσιμα}
+              {!hasActiveSupplies ? (
+                <div className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+                  {t.emptyInline}
+                </div>
+              ) : null}
             </div>
-          ) : (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {filteredSupplies.map((item) => {
-                const κατάσταση = υπολογισμόςΚατάστασης(item)
-                const isCustom = item.supplyItem.code.startsWith("CUSTOM_")
 
-                return (
-                  <div
-                    key={item.id}
-                    className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
-                  >
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setPopupOpen(true)}
+                className="rounded-2xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+              >
+                {t.chooseSupplies}
+              </button>
+            </div>
+          </div>
+        </section>
+
+        {error ? (
+          <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {error}
+          </div>
+        ) : null}
+
+        {hasActiveSupplies ? (
+          <>
+            <section className="grid grid-cols-1 gap-4 md:grid-cols-4">
+              <CounterButton
+                label={t.all}
+                value={counts.all}
+                active={filter === "all"}
+                onClick={() => setFilter("all")}
+                tone="slate"
+              />
+              <CounterButton
+                label={t.missing}
+                value={counts.missing}
+                active={filter === "missing"}
+                onClick={() => setFilter("missing")}
+                tone="red"
+              />
+              <CounterButton
+                label={t.medium}
+                value={counts.medium}
+                active={filter === "medium"}
+                onClick={() => setFilter("medium")}
+                tone="amber"
+              />
+              <CounterButton
+                label={t.full}
+                value={counts.full}
+                active={filter === "full"}
+                onClick={() => setFilter("full")}
+                tone="emerald"
+              />
+            </section>
+
+            <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+              <h2 className="text-xl font-bold text-slate-950">{t.activeSupplies}</h2>
+
+              <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {visibleRows.map((row) => (
+                  <div key={row.id} className="rounded-2xl border border-slate-200 p-4">
                     <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <h3 className="text-base font-semibold text-slate-900">
-                          {item.supplyItem.name}
-                        </h3>
-                        <p className="mt-1 text-xs uppercase tracking-wide text-slate-400">
-                          {isCustom ? κείμενα.custom : κείμενα.builtIn}
-                        </p>
+                      <div className="min-w-0">
+                        <div className="font-semibold text-slate-900">
+                          {row.supplyItem?.name || "—"}
+                        </div>
+                        <div className="mt-1 text-sm text-slate-500">
+                          {row.supplyItem?.code || "—"}
+                        </div>
                       </div>
 
                       <span
-                        className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${κλάσειςΣήματος(
-                          κατάσταση
+                        className={`rounded-full px-2.5 py-1 text-xs font-semibold ${supplyStateBadgeClass(
+                          row.derivedState
                         )}`}
                       >
-                        {κατάσταση === "missing"
-                          ? κείμενα.έλλειψη
-                          : κατάσταση === "medium"
-                          ? κείμενα.μέτρια
-                          : κείμενα.πλήρης}
+                        {getSupplyStateLabel(lang, row.derivedState)}
                       </span>
                     </div>
 
-                    <div className="mt-4 space-y-2 text-sm text-slate-600">
-                      <div className="flex items-center justify-between gap-4">
-                        <span>{κείμενα.κατηγορία}</span>
-                        <span className="font-medium text-slate-900">
-                          {μετάφρασηΚατηγορίας(item.supplyItem.category, γλώσσα)}
-                        </span>
-                      </div>
+                    <div className="mt-4 text-sm text-slate-500">
+                      {t.updatedAt}: {formatDateTime(row.safeUpdatedAt, t.locale)}
+                    </div>
 
-                      <div className="flex items-center justify-between gap-4">
-                        <span>{κείμενα.μονάδα}</span>
-                        <span className="font-medium text-slate-900">
-                          {μετάφρασηΜονάδας(item.supplyItem.unit, γλώσσα)}
-                        </span>
-                      </div>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingRow(row)
+                          setSelectedState(row.derivedState)
+                        }}
+                        className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                      >
+                        {t.changeStatus}
+                      </button>
 
-                      <div className="flex items-center justify-between gap-4">
-                        <span>{κείμενα.κατάσταση}</span>
-                        <span className="font-medium text-slate-900">
-                          {κατάσταση === "missing"
-                            ? κείμενα.έλλειψη
-                            : κατάσταση === "medium"
-                            ? κείμενα.μέτρια
-                            : κείμενα.πλήρης}
-                        </span>
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeSupplyFromProperty(row.id)}
+                        className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-100"
+                      >
+                        {saving ? t.deleting : t.deleteRow}
+                      </button>
                     </div>
                   </div>
-                )
-              })}
-            </div>
-          )}
-        </div>
-      </section>
-
-      {isModalOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
-          <div className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-3xl bg-white shadow-2xl">
-            <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
-              <div>
-                <h2 className="text-2xl font-bold text-slate-900">
-                  {κείμενα.παράθυροΤίτλος}
-                </h2>
-                <p className="mt-1 max-w-2xl text-sm text-slate-600">
-                  {κείμενα.παράθυροΥπότιτλος}
-                </p>
+                ))}
               </div>
+            </section>
+          </>
+        ) : null}
+      </div>
+
+      {popupOpen ? (
+        <Modal
+          title={t.popupTitle}
+          subtitle={t.popupSubtitle}
+          onClose={() => setPopupOpen(false)}
+          closeLabel={t.close}
+        >
+          <div className="space-y-8">
+            <div>
+              <h3 className="text-base font-semibold text-slate-900">{t.builtInTitle}</h3>
+
+              {data.builtInCatalog.length === 0 ? (
+                <div className="mt-3 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500">
+                  {t.popupEmpty}
+                </div>
+              ) : (
+                <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  {data.builtInCatalog.map((row) => (
+                    <div key={row.code} className="rounded-2xl border border-slate-200 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="font-semibold text-slate-900">
+                            {lang === "en" ? row.nameEn : row.nameEl}
+                          </div>
+                          <div className="mt-1 text-sm text-slate-500">{row.code}</div>
+                        </div>
+
+                        <span
+                          className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+                            row.isActiveForProperty
+                              ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
+                              : "bg-slate-100 text-slate-700 ring-1 ring-slate-200"
+                          }`}
+                        >
+                          {row.isActiveForProperty ? t.active : t.inactive}
+                        </span>
+                      </div>
+
+                      <div className="mt-4">
+                        <button
+                          type="button"
+                          disabled={saving}
+                          onClick={() =>
+                            toggleBuiltIn(row.code, !row.isActiveForProperty)
+                          }
+                          className={`rounded-xl px-3 py-2 text-sm font-semibold ${
+                            row.isActiveForProperty
+                              ? "border border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
+                              : "bg-slate-900 text-white hover:bg-slate-800"
+                          }`}
+                        >
+                          {row.isActiveForProperty ? t.deactivate : t.activate}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div>
+              <h3 className="text-base font-semibold text-slate-900">{t.customListTitle}</h3>
+
+              {data.customCatalog?.length ? (
+                <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  {data.customCatalog.map((row) => (
+                    <div key={row.id} className="rounded-2xl border border-slate-200 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="font-semibold text-slate-900">{row.name}</div>
+                          <div className="mt-1 text-sm text-slate-500">{row.code}</div>
+                        </div>
+
+                        <span
+                          className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+                            row.isActiveForProperty
+                              ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
+                              : "bg-slate-100 text-slate-700 ring-1 ring-slate-200"
+                          }`}
+                        >
+                          {row.isActiveForProperty ? t.active : t.inactive}
+                        </span>
+                      </div>
+
+                      <div className="mt-4">
+                        <button
+                          type="button"
+                          disabled={saving}
+                          onClick={() =>
+                            toggleCustom(row.id, !row.isActiveForProperty)
+                          }
+                          className={`rounded-xl px-3 py-2 text-sm font-semibold ${
+                            row.isActiveForProperty
+                              ? "border border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
+                              : "bg-slate-900 text-white hover:bg-slate-800"
+                          }`}
+                        >
+                          {row.isActiveForProperty ? t.deactivate : t.activate}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-3 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500">
+                  {t.customEmpty}
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4">
+              <h3 className="text-base font-semibold text-slate-900">{t.customTitle}</h3>
+
+              <div className="mt-3 flex flex-col gap-3 md:flex-row">
+                <input
+                  value={customName}
+                  onChange={(e) => setCustomName(e.target.value)}
+                  placeholder={t.customPlaceholder}
+                  className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
+                />
+                <button
+                  type="button"
+                  disabled={saving || !customName.trim()}
+                  onClick={addCustomSupply}
+                  className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+                >
+                  {t.addCustom}
+                </button>
+              </div>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
+
+      {editingRow ? (
+        <Modal
+          title={editingRow.supplyItem?.name || t.changeStatus}
+          subtitle={t.status}
+          onClose={() => setEditingRow(null)}
+          closeLabel={t.close}
+        >
+          <div className="space-y-5">
+            <div className="grid gap-3 md:grid-cols-3">
+              <button
+                type="button"
+                onClick={() => setSelectedState("missing")}
+                className={`rounded-2xl border p-4 text-left transition ${
+                  selectedState === "missing"
+                    ? "border-red-600 bg-red-600 text-white"
+                    : "border-red-200 bg-white text-red-700 hover:bg-red-50"
+                }`}
+              >
+                <div className="text-xs font-semibold uppercase tracking-wide opacity-80">
+                  {t.status}
+                </div>
+                <div className="mt-2 text-xl font-bold">{t.missing}</div>
+              </button>
 
               <button
                 type="button"
-                onClick={() => setIsModalOpen(false)}
-                className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                onClick={() => setSelectedState("medium")}
+                className={`rounded-2xl border p-4 text-left transition ${
+                  selectedState === "medium"
+                    ? "border-amber-500 bg-amber-500 text-white"
+                    : "border-amber-200 bg-white text-amber-700 hover:bg-amber-50"
+                }`}
               >
-                {κείμενα.κλείσιμο}
+                <div className="text-xs font-semibold uppercase tracking-wide opacity-80">
+                  {t.status}
+                </div>
+                <div className="mt-2 text-xl font-bold">{t.medium}</div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedState("full")}
+                className={`rounded-2xl border p-4 text-left transition ${
+                  selectedState === "full"
+                    ? "border-emerald-600 bg-emerald-600 text-white"
+                    : "border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50"
+                }`}
+              >
+                <div className="text-xs font-semibold uppercase tracking-wide opacity-80">
+                  {t.status}
+                </div>
+                <div className="mt-2 text-xl font-bold">{t.full}</div>
               </button>
             </div>
 
-            <div className="max-h-[calc(90vh-88px)] overflow-y-auto px-6 py-6">
-              <section className="space-y-4">
-                <h3 className="text-lg font-semibold text-slate-900">
-                  {κείμενα.βασικήΛίστα}
-                </h3>
+            <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setEditingRow(null)}
+                className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                disabled={saving}
+              >
+                {t.cancel}
+              </button>
 
-                <div className="overflow-hidden rounded-2xl border border-slate-200">
-                  <div className="hidden grid-cols-[1.4fr_1fr_0.8fr_0.9fr] gap-4 border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 md:grid">
-                    <div>{κείμενα.όνομα}</div>
-                    <div>{κείμενα.κατηγορία}</div>
-                    <div>{κείμενα.κατάσταση}</div>
-                    <div>{κείμενα.ενέργεια}</div>
-                  </div>
-
-                  <div className="divide-y divide-slate-200">
-                    {builtInCatalog.map((item) => (
-                      <div
-                        key={item.code}
-                        className="grid gap-3 px-4 py-4 md:grid-cols-[1.4fr_1fr_0.8fr_0.9fr] md:items-center"
-                      >
-                        <div>
-                          <div className="font-medium text-slate-900">{item.name}</div>
-                          <div className="mt-1 text-xs text-slate-400">{item.code}</div>
-                        </div>
-
-                        <div className="text-sm text-slate-600">
-                          {μετάφρασηΚατηγορίας(item.category, γλώσσα)}
-                        </div>
-
-                        <div>
-                          <span
-                            className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${
-                              item.isActive
-                                ? "border border-emerald-200 bg-emerald-50 text-emerald-700"
-                                : "border border-slate-200 bg-slate-100 text-slate-600"
-                            }`}
-                          >
-                            {item.isActive ? κείμενα.ενεργό : κείμενα.ανενεργό}
-                          </span>
-                        </div>
-
-                        <div>
-                          <button
-                            type="button"
-                            disabled={saving}
-                            onClick={() => toggleBuiltIn(item.code, !item.isActive)}
-                            className={`inline-flex min-w-[140px] items-center justify-center rounded-xl px-4 py-2 text-sm font-semibold transition ${
-                              item.isActive
-                                ? "border border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
-                                : "bg-slate-900 text-white hover:bg-slate-800"
-                            } disabled:cursor-not-allowed disabled:opacity-60`}
-                          >
-                            {saving
-                              ? κείμενα.ενημέρωση
-                              : item.isActive
-                              ? κείμενα.απενεργοποίηση
-                              : κείμενα.ενεργοποίηση}
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </section>
-
-              <section className="mt-8 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-5">
-                <h3 className="text-lg font-semibold text-slate-900">
-                  {κείμενα.customΤίτλος}
-                </h3>
-                <p className="mt-1 text-sm text-slate-600">{κείμενα.customΥπότιτλος}</p>
-
-                <div className="mt-4 flex flex-col gap-3 md:flex-row">
-                  <input
-                    value={customName}
-                    onChange={(e) => setCustomName(e.target.value)}
-                    placeholder={κείμενα.customPlaceholder}
-                    className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-500"
-                  />
-
-                  <button
-                    type="button"
-                    disabled={saving}
-                    onClick={addCustom}
-                    className="inline-flex min-w-[180px] items-center justify-center rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {saving ? κείμενα.ενημέρωση : κείμενα.προσθήκηCustom}
-                  </button>
-                </div>
-              </section>
+              <button
+                type="button"
+                onClick={updateSupplyState}
+                className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+                disabled={saving}
+              >
+                {saving ? t.saving : t.save}
+              </button>
             </div>
           </div>
-        </div>
+        </Modal>
       ) : null}
-    </div>
+    </>
   )
 }

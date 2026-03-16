@@ -37,8 +37,16 @@ type ChecklistTemplate = {
 }
 
 type ChecklistResponse = {
-  templates: ChecklistTemplate[]
-  primaryTemplate: ChecklistTemplate | null
+  templates?: ChecklistTemplate[]
+  primaryTemplate?: ChecklistTemplate | null
+}
+
+type PropertySuppliesResponse = {
+  activeSupplies?: Array<{
+    id: string
+    propertyId: string
+    supplyItemId: string
+  }>
 }
 
 function mapTypeToUi(type: string | null | undefined) {
@@ -66,11 +74,12 @@ export default function NewTaskPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
   const [successMessage, setSuccessMessage] = useState("")
-  const [assignmentLink, setAssignmentLink] = useState("")
+  const [portalLink, setPortalLink] = useState("")
 
   const [properties, setProperties] = useState<Property[]>([])
   const [partners, setPartners] = useState<Partner[]>([])
-  const [templates, setTemplates] = useState<ChecklistTemplate[]>([])
+  const [primaryTemplate, setPrimaryTemplate] = useState<ChecklistTemplate | null>(null)
+  const [activeSuppliesCount, setActiveSuppliesCount] = useState(0)
 
   const [propertyId, setPropertyId] = useState(propertyIdFromUrl)
   const [partnerId, setPartnerId] = useState("")
@@ -85,15 +94,18 @@ export default function NewTaskPage() {
   const [scheduledEndTime, setScheduledEndTime] = useState("")
   const [notes, setNotes] = useState("")
 
-  const [requiresChecklist, setRequiresChecklist] = useState(true)
+  const [sendCleaningChecklist, setSendCleaningChecklist] = useState(true)
+  const [sendSuppliesChecklist, setSendSuppliesChecklist] = useState(false)
   const [requiresPhotos, setRequiresPhotos] = useState(false)
   const [requiresApproval, setRequiresApproval] = useState(false)
-  const [templateId, setTemplateId] = useState("")
 
   const selectedProperty = useMemo(
     () => properties.find((property) => property.id === propertyId) || null,
     [properties, propertyId]
   )
+
+  const canSendCleaningChecklist = Boolean(primaryTemplate)
+  const canSendSuppliesChecklist = activeSuppliesCount > 0
 
   async function loadBaseData() {
     try {
@@ -132,15 +144,21 @@ export default function NewTaskPage() {
 
   async function loadPropertyDetails(currentPropertyId: string) {
     if (!currentPropertyId) {
-      setTemplates([])
-      setTemplateId("")
+      setPrimaryTemplate(null)
+      setActiveSuppliesCount(0)
+      setPartnerId("")
+      setSendCleaningChecklist(false)
+      setSendSuppliesChecklist(false)
       return
     }
 
     try {
-      const [propertyRes, checklistRes] = await Promise.all([
+      const [propertyRes, checklistRes, suppliesRes] = await Promise.all([
         fetch(`/api/properties/${currentPropertyId}`, { cache: "no-store" }),
         fetch(`/api/property-checklists/${currentPropertyId}`, {
+          cache: "no-store",
+        }),
+        fetch(`/api/properties/${currentPropertyId}/supplies`, {
           cache: "no-store",
         }),
       ])
@@ -149,45 +167,67 @@ export default function NewTaskPage() {
       const checklistData = (await checklistRes.json().catch(() => null)) as
         | ChecklistResponse
         | null
+      const suppliesData = (await suppliesRes.json().catch(() => null)) as
+        | PropertySuppliesResponse
+        | null
 
-      if (propertyRes.ok && propertyData?.defaultPartnerId) {
-        setPartnerId(propertyData.defaultPartnerId)
-      }
-
-      if (checklistRes.ok && checklistData) {
-        const availableTemplates = Array.isArray(checklistData.templates)
-          ? checklistData.templates.filter((t) => t.isActive)
-          : []
-
-        setTemplates(availableTemplates)
-
-        if (checklistData.primaryTemplate?.id) {
-          setTemplateId(checklistData.primaryTemplate.id)
-        } else if (availableTemplates[0]?.id) {
-          setTemplateId(availableTemplates[0].id)
+      if (propertyRes.ok) {
+        if (propertyData?.defaultPartnerId) {
+          setPartnerId(propertyData.defaultPartnerId)
         } else {
-          setTemplateId("")
+          setPartnerId("")
         }
-      } else {
-        setTemplates([])
-        setTemplateId("")
       }
-    } catch (error) {
-      console.error("Σφάλμα φόρτωσης στοιχείων ακινήτου:", error)
-      setTemplates([])
-      setTemplateId("")
+
+      const nextPrimaryTemplate =
+        checklistRes.ok && checklistData ? checklistData.primaryTemplate || null : null
+
+      const nextActiveSuppliesCount =
+        suppliesRes.ok && Array.isArray(suppliesData?.activeSupplies)
+          ? suppliesData!.activeSupplies!.length
+          : 0
+
+      setPrimaryTemplate(nextPrimaryTemplate)
+      setActiveSuppliesCount(nextActiveSuppliesCount)
+
+      setSendCleaningChecklist(Boolean(nextPrimaryTemplate))
+      setSendSuppliesChecklist(false)
+    } catch (loadError) {
+      console.error("Σφάλμα φόρτωσης στοιχείων ακινήτου:", loadError)
+      setPrimaryTemplate(null)
+      setActiveSuppliesCount(0)
+      setSendCleaningChecklist(false)
+      setSendSuppliesChecklist(false)
     }
   }
 
   useEffect(() => {
-    loadBaseData()
+    void loadBaseData()
   }, [])
 
   useEffect(() => {
     if (propertyId) {
-      loadPropertyDetails(propertyId)
+      void loadPropertyDetails(propertyId)
+    } else {
+      setPrimaryTemplate(null)
+      setActiveSuppliesCount(0)
+      setPartnerId("")
+      setSendCleaningChecklist(false)
+      setSendSuppliesChecklist(false)
     }
   }, [propertyId])
+
+  useEffect(() => {
+    if (!canSendCleaningChecklist && sendCleaningChecklist) {
+      setSendCleaningChecklist(false)
+    }
+  }, [canSendCleaningChecklist, sendCleaningChecklist])
+
+  useEffect(() => {
+    if (!canSendSuppliesChecklist && sendSuppliesChecklist) {
+      setSendSuppliesChecklist(false)
+    }
+  }, [canSendSuppliesChecklist, sendSuppliesChecklist])
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -196,17 +236,49 @@ export default function NewTaskPage() {
       setSaving(true)
       setError("")
       setSuccessMessage("")
-      setAssignmentLink("")
+      setPortalLink("")
 
-      const res = await fetch("/api/tasks", {
+      if (!propertyId) {
+        throw new Error("Πρέπει να επιλέξεις ακίνητο.")
+      }
+
+      if (!partnerId) {
+        throw new Error("Πρέπει να επιλέξεις συνεργάτη.")
+      }
+
+      if (!title.trim()) {
+        throw new Error("Πρέπει να συμπληρώσεις τίτλο εργασίας.")
+      }
+
+      if (!scheduledDate) {
+        throw new Error("Πρέπει να συμπληρώσεις ημερομηνία εργασίας.")
+      }
+
+      if (sendCleaningChecklist && !primaryTemplate) {
+        throw new Error(
+          "Το ακίνητο δεν έχει κύριο πρότυπο λίστας καθαριότητας."
+        )
+      }
+
+      if (sendSuppliesChecklist && activeSuppliesCount === 0) {
+        throw new Error(
+          "Το ακίνητο δεν έχει ενεργά αναλώσιμα για αποστολή λίστας."
+        )
+      }
+
+      if (!sendCleaningChecklist && !sendSuppliesChecklist) {
+        throw new Error(
+          "Πρέπει να επιλέξεις τουλάχιστον μία ενότητα εργασίας."
+        )
+      }
+
+      const createTaskRes = await fetch("/api/tasks", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
           propertyId,
-          partnerId,
-          saveAsDefaultPartner,
           title: title.trim(),
           description: description.trim() || null,
           taskType,
@@ -215,27 +287,53 @@ export default function NewTaskPage() {
           scheduledStartTime: scheduledStartTime || null,
           scheduledEndTime: scheduledEndTime || null,
           notes: notes.trim() || null,
-          requiresChecklist,
           requiresPhotos,
           requiresApproval,
-          templateId: requiresChecklist ? templateId : null,
+          sendCleaningChecklist,
+          sendSuppliesChecklist,
+          requiresChecklist: sendCleaningChecklist,
           source: "manual",
         }),
       })
 
-      const data = await res.json().catch(() => null)
+      const createTaskData = await createTaskRes.json().catch(() => null)
 
-      if (!res.ok) {
-        throw new Error(data?.error || "Αποτυχία δημιουργίας εργασίας.")
+      if (!createTaskRes.ok) {
+        throw new Error(createTaskData?.error || "Αποτυχία δημιουργίας εργασίας.")
+      }
+
+      const taskId = String(createTaskData?.task?.id || "").trim()
+
+      if (!taskId) {
+        throw new Error("Η εργασία δημιουργήθηκε αλλά δεν επέστρεψε αναγνωριστικό.")
+      }
+
+      const assignRes = await fetch("/api/task-assignments", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          taskId,
+          partnerId,
+          notes: null,
+          saveAsDefaultPartner,
+        }),
+      })
+
+      const assignData = await assignRes.json().catch(() => null)
+
+      if (!assignRes.ok) {
+        throw new Error(assignData?.error || "Αποτυχία ανάθεσης εργασίας.")
       }
 
       setSuccessMessage(
-        data?.emailSent
-          ? "Η εργασία δημιουργήθηκε και στάλθηκε email ανάθεσης."
-          : "Η εργασία δημιουργήθηκε. Το link ανάθεσης παράχθηκε επιτυχώς."
+        assignData?.assignmentEmailSent
+          ? "Η εργασία δημιουργήθηκε και ανατέθηκε επιτυχώς. Στάλθηκε email στον συνεργάτη."
+          : "Η εργασία δημιουργήθηκε και ανατέθηκε επιτυχώς."
       )
 
-      setAssignmentLink(data?.assignmentLink || "")
+      setPortalLink(assignData?.portalLink || "")
 
       setTitle("")
       setDescription("")
@@ -245,7 +343,8 @@ export default function NewTaskPage() {
       setScheduledStartTime("")
       setScheduledEndTime("")
       setNotes("")
-      setRequiresChecklist(true)
+      setSendCleaningChecklist(Boolean(primaryTemplate))
+      setSendSuppliesChecklist(false)
       setRequiresPhotos(false)
       setRequiresApproval(false)
       setSaveAsDefaultPartner(false)
@@ -277,8 +376,7 @@ export default function NewTaskPage() {
             <p className="text-sm text-slate-500">Δημιουργία και ανάθεση εργασίας</p>
             <h1 className="mt-2 text-3xl font-bold text-slate-950">Νέα εργασία</h1>
             <p className="mt-2 text-sm text-slate-500">
-              Ο διαχειριστής δημιουργεί εργασία, επιλέγει συνεργάτη, στέλνεται link
-              αποδοχής και μετά αποστέλλεται το checklist.
+              Η εργασία δημιουργείται πρώτα και μετά ανατίθεται στον συνεργάτη.
             </p>
           </div>
 
@@ -302,9 +400,9 @@ export default function NewTaskPage() {
       {successMessage ? (
         <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
           {successMessage}
-          {assignmentLink ? (
+          {portalLink ? (
             <div className="mt-2 break-all text-xs text-emerald-800">
-              Link ανάθεσης: {assignmentLink}
+              Link portal συνεργάτη: {portalLink}
             </div>
           ) : null}
         </div>
@@ -482,18 +580,43 @@ export default function NewTaskPage() {
         </div>
 
         <div className="mt-6 rounded-3xl border border-slate-200 bg-slate-50 p-5">
-          <h2 className="text-xl font-bold text-slate-950">Κανόνες εκτέλεσης</h2>
+          <h2 className="text-xl font-bold text-slate-950">Ενότητες εργασίας</h2>
 
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
-            <label className="flex items-center gap-3 text-sm font-medium text-slate-700">
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <label
+              className={`flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium ${
+                canSendCleaningChecklist
+                  ? "text-slate-700"
+                  : "cursor-not-allowed text-slate-400"
+              }`}
+            >
               <input
                 type="checkbox"
-                checked={requiresChecklist}
-                onChange={(e) => setRequiresChecklist(e.target.checked)}
+                checked={sendCleaningChecklist}
+                onChange={(e) => setSendCleaningChecklist(e.target.checked)}
+                disabled={!canSendCleaningChecklist}
               />
-              Απαιτεί checklist
+              Αποστολή λίστας καθαριότητας
             </label>
 
+            <label
+              className={`flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium ${
+                canSendSuppliesChecklist
+                  ? "text-slate-700"
+                  : "cursor-not-allowed text-slate-400"
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={sendSuppliesChecklist}
+                onChange={(e) => setSendSuppliesChecklist(e.target.checked)}
+                disabled={!canSendSuppliesChecklist}
+              />
+              Αποστολή λίστας αναλωσίμων
+            </label>
+          </div>
+
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
             <label className="flex items-center gap-3 text-sm font-medium text-slate-700">
               <input
                 type="checkbox"
@@ -513,26 +636,36 @@ export default function NewTaskPage() {
             </label>
           </div>
 
-          {requiresChecklist ? (
-            <div className="mt-4">
-              <label className="mb-2 block text-sm font-medium text-slate-700">
-                Πρότυπο checklist
-              </label>
-              <select
-                value={templateId}
-                onChange={(e) => setTemplateId(e.target.value)}
-                className="w-full rounded-2xl border border-slate-300 px-4 py-3 outline-none"
-                required={requiresChecklist}
-              >
-                <option value="">Επιλογή προτύπου checklist</option>
-                {templates.map((template) => (
-                  <option key={template.id} value={template.id}>
-                    {template.title} {template.isPrimary ? "• κύριο" : ""}
-                  </option>
-                ))}
-              </select>
+          <div className="mt-4 space-y-3 rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700">
+            <div>
+              <strong>Κύρια λίστα καθαριότητας:</strong>{" "}
+              {primaryTemplate ? primaryTemplate.title : "Δεν έχει οριστεί"}
             </div>
-          ) : null}
+
+            <div>
+              <strong>Ενεργά αναλώσιμα ακινήτου:</strong> {activeSuppliesCount}
+            </div>
+
+            <div className="text-xs text-slate-500">
+              Αν σταλεί λίστα καθαριότητας, χρησιμοποιείται το κύριο πρότυπο του
+              ακινήτου. Αν σταλεί λίστα αναλωσίμων, χρησιμοποιούνται μόνο τα ενεργά
+              αναλώσιμα του ακινήτου.
+            </div>
+
+            {!canSendCleaningChecklist ? (
+              <div className="text-xs text-red-600">
+                Για να σταλεί λίστα καθαριότητας, πρέπει πρώτα να υπάρχει κύριο
+                πρότυπο checklist στο ακίνητο.
+              </div>
+            ) : null}
+
+            {!canSendSuppliesChecklist ? (
+              <div className="text-xs text-amber-600">
+                Για να σταλεί λίστα αναλωσίμων, πρέπει πρώτα να υπάρχουν ενεργά
+                αναλώσιμα στο ακίνητο.
+              </div>
+            ) : null}
+          </div>
         </div>
 
         <div className="mt-6 flex justify-end">
