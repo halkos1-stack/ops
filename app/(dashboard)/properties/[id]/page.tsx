@@ -15,6 +15,23 @@ type PartnerOption = {
   status: string
 }
 
+type ChecklistRunLite = {
+  id: string
+  status: string
+  startedAt?: string | null
+  completedAt?: string | null
+  template?: {
+    id: string
+    title: string
+    templateType?: string | null
+    isPrimary?: boolean
+  } | null
+  answers?: Array<{
+    id: string
+    issueCreated?: boolean
+  }>
+}
+
 type PropertyDetail = {
   id: string
   code: string
@@ -59,12 +76,16 @@ type PropertyDetail = {
     dueDate?: string | null
     completedAt?: string | null
     requiresPhotos?: boolean
-    requiresChecklist?: boolean
     requiresApproval?: boolean
+
+    sendCleaningChecklist?: boolean
+    sendSuppliesChecklist?: boolean
+
     notes?: string | null
     resultNotes?: string | null
     createdAt?: string
     updatedAt?: string
+
     assignments?: Array<{
       id: string
       status: string
@@ -85,6 +106,7 @@ type PropertyDetail = {
         status: string
       } | null
     }>
+
     booking?: {
       id: string
       guestName?: string | null
@@ -92,22 +114,15 @@ type PropertyDetail = {
       checkOutDate: string
       status: string
     } | null
-    checklistRun?: {
-      id: string
-      status: string
-      startedAt?: string | null
-      completedAt?: string | null
-      template?: {
-        id: string
-        title: string
-        templateType: string
-        isPrimary: boolean
-      } | null
-      answers?: Array<{
-        id: string
-        issueCreated?: boolean
-      }>
-    } | null
+
+    cleaningChecklistRun?: ChecklistRunLite | null
+    suppliesChecklistRun?: ChecklistRunLite | null
+
+    /**
+     * Συμβατότητα με παλιότερη δομή.
+     * Όταν δεν έχουν ακόμη καθαριστεί όλα τα routes, μπορεί να έρχεται μόνο ένα checklistRun.
+     */
+    checklistRun?: ChecklistRunLite | null
   }>
 
   issues?: Array<{
@@ -172,7 +187,7 @@ type PropertyDetail = {
   }>
 }
 
-type ModalKey = null | "property" | "partner" | "template" | "supplies" | "issues"
+type ModalKey = null | "property" | "partner" | "cleaningChecklist" | "supplies" | "issues"
 
 type PropertyEditForm = {
   code: string
@@ -270,13 +285,23 @@ function getTexts(language: "el" | "en") {
       editPartner: "Edit partner",
       noDefaultPartner: "No default partner assigned.",
       choosePartner: "Choose partner",
+      noPartner: "No partner",
       savePartner: "Save partner",
-      primaryTemplateTitle: "Primary checklist template",
-      primaryTemplateSubtitle: "Main checklist template used by this property.",
-      noPrimaryTemplate: "No primary checklist template assigned.",
-      openTemplateManagement: "Open template management",
+
+      cleaningChecklistTitle: "Base cleaning checklist",
+      cleaningChecklistSubtitle:
+        "The property's main cleaning checklist used in the daily workflow.",
+      noCleaningChecklist: "No base cleaning checklist has been defined.",
+      openChecklistManagement: "Open checklist management",
+      editChecklist: "Edit checklist",
+      suppliesFlowTitle: "Supplies flow",
+      suppliesFlowSubtitle:
+        "The supplies list is generated automatically from the property's active supplies.",
+      suppliesFlowInfo:
+        "Supplies are not configured as a separate manual template in the main workflow.",
       openSuppliesPage: "Open supplies page",
       openIssuesPage: "Open issues page",
+
       code: "Code",
       name: "Name",
       address: "Address",
@@ -290,37 +315,47 @@ function getTexts(language: "el" | "en") {
       maxGuests: "Max guests",
       notes: "Notes",
       createdAt: "Created",
-      updatedAt: "Updated",
+      updatedAt: "Last update",
       lastUpdate: "Last update",
+
       statusActive: "Active",
       statusInactive: "Inactive",
       statusMaintenance: "Maintenance",
       statusArchived: "Archived",
+
       taskAllOpen: "All open tasks",
       taskPending: "New tasks",
       taskAssigned: "Assigned / waiting acceptance",
       taskAccepted: "Accepted / waiting checklist",
       taskInProgress: "In progress",
       completedHistory: "Completed history",
+
       supplyAll: "All supplies",
       supplyMissing: "Missing",
       supplyMedium: "Medium",
       supplyFull: "Full",
-      checklistName: "Active checklist",
-      checklistState: "Checklist state",
+
       schedule: "Execution",
       partner: "Partner",
       priority: "Priority",
       normal: "Normal",
       borderline: "Borderline",
+
+      cleaningSection: "Cleaning checklist",
+      suppliesSection: "Supplies checklist",
+      enabled: "Enabled",
+      notEnabled: "Not enabled",
       submitted: "Submitted",
       notSubmitted: "Not submitted",
       noChecklist: "No checklist",
+      autoFromPropertySupplies: "Automatic from active supplies",
+
       taskStatusHelpNew: "New task — click for assignment",
       taskStatusHelpAssigned: "Assigned — waiting acceptance",
       taskStatusHelpAccepted: "Accepted — waiting checklist",
       taskStatusHelpInProgress: "In progress",
-      taskStatusHelpCompleted: "Checklist submitted",
+      taskStatusHelpCompleted: "Task completed",
+
       saveError: "Failed to save changes.",
       partnerSaveError: "Failed to update default partner.",
       propertySaveSuccess: "Property updated successfully.",
@@ -368,13 +403,23 @@ function getTexts(language: "el" | "en") {
     editPartner: "Επεξεργασία συνεργάτη",
     noDefaultPartner: "Δεν έχει οριστεί προεπιλεγμένος συνεργάτης.",
     choosePartner: "Επιλογή συνεργάτη",
+    noPartner: "Χωρίς συνεργάτη",
     savePartner: "Αποθήκευση συνεργάτη",
-    primaryTemplateTitle: "Κύριο πρότυπο checklist",
-    primaryTemplateSubtitle: "Το βασικό πρότυπο checklist του ακινήτου.",
-    noPrimaryTemplate: "Δεν έχει οριστεί κύριο πρότυπο checklist.",
-    openTemplateManagement: "Άνοιγμα διαχείρισης προτύπων",
+
+    cleaningChecklistTitle: "Βασική λίστα καθαριότητας",
+    cleaningChecklistSubtitle:
+      "Η κύρια λίστα καθαριότητας του ακινήτου που χρησιμοποιείται στη βασική ροή.",
+    noCleaningChecklist: "Δεν έχει οριστεί βασική λίστα καθαριότητας.",
+    openChecklistManagement: "Άνοιγμα διαχείρισης λίστας",
+    editChecklist: "Επεξεργασία λίστας",
+    suppliesFlowTitle: "Ροή αναλωσίμων",
+    suppliesFlowSubtitle:
+      "Η λίστα αναλωσίμων χτίζεται αυτόματα από τα ενεργά αναλώσιμα του ακινήτου.",
+    suppliesFlowInfo:
+      "Τα αναλώσιμα δεν ορίζονται ως ξεχωριστό χειροκίνητο template στη βασική ροή.",
     openSuppliesPage: "Άνοιγμα σελίδας αναλωσίμων",
     openIssuesPage: "Άνοιγμα σελίδας θεμάτων",
+
     code: "Κωδικός",
     name: "Όνομα",
     address: "Διεύθυνση",
@@ -390,35 +435,45 @@ function getTexts(language: "el" | "en") {
     createdAt: "Δημιουργία",
     updatedAt: "Τελευταία ενημέρωση",
     lastUpdate: "Τελευταία ενημέρωση",
+
     statusActive: "Ενεργό",
     statusInactive: "Ανενεργό",
     statusMaintenance: "Σε συντήρηση",
     statusArchived: "Αρχειοθετημένο",
+
     taskAllOpen: "Όλες οι ανοιχτές εργασίες",
     taskPending: "Νέες εργασίες",
     taskAssigned: "Ανατεθειμένες / αναμονή αποδοχής",
     taskAccepted: "Αποδεκτές / αναμονή checklist",
     taskInProgress: "Σε εξέλιξη",
     completedHistory: "Ιστορικό ολοκληρωμένων",
+
     supplyAll: "Όλα τα αναλώσιμα",
     supplyMissing: "Έλλειψη",
     supplyMedium: "Μέτρια",
     supplyFull: "Πλήρης",
-    checklistName: "Ενεργή λίστα",
-    checklistState: "Κατάσταση checklist",
+
     schedule: "Εκτέλεση",
     partner: "Συνεργάτης",
     priority: "Προτεραιότητα",
     normal: "Κανονικό",
     borderline: "Οριακό",
+
+    cleaningSection: "Λίστα καθαριότητας",
+    suppliesSection: "Λίστα αναλωσίμων",
+    enabled: "Ενεργή",
+    notEnabled: "Δεν στάλθηκε",
     submitted: "Υποβλήθηκε",
     notSubmitted: "Δεν υποβλήθηκε",
-    noChecklist: "Χωρίς checklist",
+    noChecklist: "Χωρίς λίστα",
+    autoFromPropertySupplies: "Αυτόματα από τα ενεργά αναλώσιμα",
+
     taskStatusHelpNew: "Νέα εργασία — πατήστε για ανάθεση",
     taskStatusHelpAssigned: "Ανατεθειμένη — αναμονή αποδοχής",
     taskStatusHelpAccepted: "Αποδεκτή — αναμονή checklist",
     taskStatusHelpInProgress: "Σε εξέλιξη",
-    taskStatusHelpCompleted: "Η λίστα υποβλήθηκε",
+    taskStatusHelpCompleted: "Η εργασία ολοκληρώθηκε",
+
     saveError: "Αποτυχία αποθήκευσης αλλαγών.",
     partnerSaveError: "Αποτυχία ενημέρωσης προεπιλεγμένου συνεργάτη.",
     propertySaveSuccess: "Το ακίνητο ενημερώθηκε επιτυχώς.",
@@ -512,7 +567,7 @@ function getTaskStatusHelp(language: "el" | "en", status?: string | null) {
       case "in_progress":
         return "In progress"
       case "completed":
-        return "Checklist submitted"
+        return "Task completed"
       default:
         return "—"
     }
@@ -528,7 +583,7 @@ function getTaskStatusHelp(language: "el" | "en", status?: string | null) {
     case "in_progress":
       return "Σε εξέλιξη"
     case "completed":
-      return "Η λίστα υποβλήθηκε"
+      return "Η εργασία ολοκληρώθηκε"
     default:
       return "—"
   }
@@ -762,15 +817,6 @@ function buildPropertyEditForm(property: PropertyDetail): PropertyEditForm {
   }
 }
 
-function isChecklistSubmitted(task: NonNullable<PropertyDetail["tasks"]>[number]) {
-  if (!task.checklistRun) return false
-  if (task.checklistRun.completedAt) return true
-
-  return ["completed", "submitted"].includes(
-    String(task.checklistRun.status || "").toLowerCase()
-  )
-}
-
 function parseDateAndTime(dateValue?: string | null, timeValue?: string | null) {
   if (!dateValue) return null
 
@@ -805,6 +851,44 @@ function isTaskBorderline(task: NonNullable<PropertyDetail["tasks"]>[number]) {
   return diff <= threeHours
 }
 
+function getPrimaryCleaningChecklist(property: PropertyDetail | null) {
+  if (!property) return null
+
+  return (
+    safeArray(property.checklistTemplates).find((template) => {
+      const templateType = String(template.templateType || "").toLowerCase()
+      return template.isPrimary && template.isActive && templateType !== "supplies"
+    }) || null
+  )
+}
+
+function getCleaningRun(task: NonNullable<PropertyDetail["tasks"]>[number]) {
+  if (task.cleaningChecklistRun) return task.cleaningChecklistRun
+  if (task.sendCleaningChecklist && task.checklistRun) return task.checklistRun
+  return null
+}
+
+function getSuppliesRun(task: NonNullable<PropertyDetail["tasks"]>[number]) {
+  if (task.suppliesChecklistRun) return task.suppliesChecklistRun
+  return null
+}
+
+function isRunSubmitted(run?: ChecklistRunLite | null) {
+  if (!run) return false
+  if (run.completedAt) return true
+  return ["completed", "submitted"].includes(String(run.status || "").toLowerCase())
+}
+
+function getChecklistSectionStateLabel(
+  language: "el" | "en",
+  enabled: boolean,
+  submitted: boolean
+) {
+  if (!enabled) return language === "en" ? "Not enabled" : "Δεν στάλθηκε"
+  if (submitted) return language === "en" ? "Submitted" : "Υποβλήθηκε"
+  return language === "en" ? "Not submitted" : "Δεν υποβλήθηκε"
+}
+
 function getReadinessState(property: PropertyDetail | null, language: "el" | "en") {
   if (!property) {
     return {
@@ -828,9 +912,7 @@ function getReadinessState(property: PropertyDetail | null, language: "el" | "en
     )
   )
 
-  const hasPrimaryChecklist = safeArray(property.checklistTemplates).some(
-    (template) => template.isPrimary && template.isActive
-  )
+  const hasPrimaryCleaningChecklist = Boolean(getPrimaryCleaningChecklist(property))
 
   const notFullSupplies = safeArray(property.propertySupplies).filter((supply) => {
     const current = Number(supply.currentStock || 0)
@@ -853,7 +935,7 @@ function getReadinessState(property: PropertyDetail | null, language: "el" | "en
   if (
     openIssues.length > 0 ||
     openTasks.length > 0 ||
-    !hasPrimaryChecklist ||
+    !hasPrimaryCleaningChecklist ||
     notFullSupplies.length > 0
   ) {
     return {
@@ -1127,12 +1209,8 @@ export default function PropertyDetailPage() {
     return supplyRows.filter((item) => item.derivedState === supplyFilter)
   }, [supplyRows, supplyFilter])
 
-  const primaryTemplate = useMemo(() => {
-    return (
-      safeArray(property?.checklistTemplates).find(
-        (template) => template.isPrimary && template.isActive
-      ) || null
-    )
+  const primaryCleaningChecklist = useMemo(() => {
+    return getPrimaryCleaningChecklist(property)
   }, [property])
 
   const readiness = useMemo(() => getReadinessState(property, language), [property, language])
@@ -1432,9 +1510,14 @@ export default function PropertyDetailPage() {
               <div className="grid gap-4 xl:grid-cols-2">
                 {visibleOpenTasks.map((task) => {
                   const latestAssignment = getLatestAssignment(task)
-                  const checklistSubmitted = isChecklistSubmitted(task)
                   const borderline = isTaskBorderline(task)
-                  const checklistName = task.checklistRun?.template?.title || texts.noChecklist
+                  const cleaningEnabled = Boolean(task.sendCleaningChecklist)
+                  const suppliesEnabled = Boolean(task.sendSuppliesChecklist)
+                  const cleaningRun = getCleaningRun(task)
+                  const suppliesRun = getSuppliesRun(task)
+                  const cleaningSubmitted = isRunSubmitted(cleaningRun)
+                  const suppliesSubmitted = isRunSubmitted(suppliesRun)
+
                   const showNormalBadge =
                     !borderline &&
                     ["accepted", "in_progress"].includes(String(task.status || "").toLowerCase())
@@ -1506,7 +1589,7 @@ export default function PropertyDetailPage() {
                         </Link>
                       </div>
 
-                      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                      <div className="mt-4 grid gap-3 sm:grid-cols-2">
                         <InfoChip
                           label={texts.schedule}
                           value={`${formatDate(task.scheduledDate, texts.locale)}${
@@ -1514,10 +1597,33 @@ export default function PropertyDetailPage() {
                           }`}
                         />
                         <InfoChip label={texts.partner} value={partnerValue} />
-                        <InfoChip label={texts.checklistName} value={checklistName} />
+                      </div>
+
+                      <div className="mt-3 grid gap-3 sm:grid-cols-2">
                         <InfoChip
-                          label={texts.checklistState}
-                          value={checklistSubmitted ? texts.submitted : texts.notSubmitted}
+                          label={texts.cleaningSection}
+                          value={
+                            cleaningEnabled
+                              ? `${cleaningRun?.template?.title || texts.cleaningSection} · ${getChecklistSectionStateLabel(
+                                  language,
+                                  true,
+                                  cleaningSubmitted
+                                )}`
+                              : texts.notEnabled
+                          }
+                        />
+
+                        <InfoChip
+                          label={texts.suppliesSection}
+                          value={
+                            suppliesEnabled
+                              ? `${texts.autoFromPropertySupplies} · ${getChecklistSectionStateLabel(
+                                  language,
+                                  true,
+                                  suppliesSubmitted
+                                )}`
+                              : texts.notEnabled
+                          }
                         />
                       </div>
                     </div>
@@ -1661,13 +1767,13 @@ export default function PropertyDetailPage() {
             <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">
-                  <h3 className="text-base font-semibold text-slate-900">{texts.primaryTemplateTitle}</h3>
-                  <p className="mt-1 text-sm text-slate-500">{texts.primaryTemplateSubtitle}</p>
+                  <h3 className="text-base font-semibold text-slate-900">{texts.cleaningChecklistTitle}</h3>
+                  <p className="mt-1 text-sm text-slate-500">{texts.cleaningChecklistSubtitle}</p>
                 </div>
 
                 <button
                   type="button"
-                  onClick={() => setActiveModal("template")}
+                  onClick={() => setActiveModal("cleaningChecklist")}
                   className="inline-flex shrink-0 items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                 >
                   {texts.details}
@@ -1675,16 +1781,23 @@ export default function PropertyDetailPage() {
               </div>
 
               <div className="mt-3">
-                {primaryTemplate ? (
+                {primaryCleaningChecklist ? (
                   <div className="grid gap-2 md:grid-cols-2">
-                    <InfoChip label={texts.name} value={primaryTemplate.title} />
-                    <InfoChip label={texts.type} value={primaryTemplate.templateType || "—"} />
+                    <InfoChip label={texts.name} value={primaryCleaningChecklist.title} />
+                    <InfoChip
+                      label="Στοιχεία"
+                      value={String(safeArray(primaryCleaningChecklist.items).length)}
+                    />
                   </div>
                 ) : (
                   <div className="rounded-xl bg-slate-50 p-3 text-sm text-slate-500">
-                    {texts.noPrimaryTemplate}
+                    {texts.noCleaningChecklist}
                   </div>
                 )}
+              </div>
+
+              <div className="mt-4 rounded-xl bg-slate-50 p-3 text-sm text-slate-600">
+                {texts.suppliesFlowInfo}
               </div>
             </div>
           </div>
@@ -1923,7 +2036,7 @@ export default function PropertyDetailPage() {
               onChange={(e) => setSelectedPartnerId(e.target.value)}
               className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
             >
-              <option value="">Χωρίς συνεργάτη</option>
+              <option value="">{texts.noPartner}</option>
               {partners.map((partner) => (
                 <option key={partner.id} value={partner.id}>
                   {partner.name} ({partner.code})
@@ -1954,56 +2067,67 @@ export default function PropertyDetailPage() {
       </Modal>
 
       <Modal
-        open={activeModal === "template"}
-        title={texts.primaryTemplateTitle}
-        description={texts.primaryTemplateSubtitle}
+        open={activeModal === "cleaningChecklist"}
+        title={texts.cleaningChecklistTitle}
+        description={texts.cleaningChecklistSubtitle}
         onClose={() => setActiveModal(null)}
         closeLabel={texts.close}
       >
-        {primaryTemplate ? (
+        {primaryCleaningChecklist ? (
           <div className="space-y-4">
             <div className="grid gap-4 md:grid-cols-3">
-              <InfoChip label={texts.name} value={primaryTemplate.title} />
-              <InfoChip label={texts.type} value={primaryTemplate.templateType || "—"} />
+              <InfoChip label={texts.name} value={primaryCleaningChecklist.title} />
               <InfoChip
                 label="Στοιχεία"
-                value={String(safeArray(primaryTemplate.items).length)}
+                value={String(safeArray(primaryCleaningChecklist.items).length)}
+              />
+              <InfoChip
+                label={texts.updatedAt}
+                value={formatDateTime(primaryCleaningChecklist.updatedAt, texts.locale)}
               />
             </div>
 
-            {primaryTemplate.description ? (
+            {primaryCleaningChecklist.description ? (
               <div className="rounded-xl bg-slate-50 p-4 text-sm text-slate-700">
-                {primaryTemplate.description}
+                {primaryCleaningChecklist.description}
               </div>
             ) : null}
+
+            <div className="rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
+              {texts.suppliesFlowInfo}
+            </div>
 
             <div className="flex flex-wrap gap-3">
               <Link
                 href={`/property-checklists/${property.id}`}
                 className="inline-flex items-center rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
               >
-                {texts.openTemplateManagement}
+                {texts.openChecklistManagement}
               </Link>
 
               <Link
-                href={`/property-checklists/${property.id}/templates/${primaryTemplate.id}`}
+                href={`/property-checklists/${property.id}/templates/${primaryCleaningChecklist.id}`}
                 className="inline-flex items-center rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
               >
-                Επεξεργασία προτύπου
+                {texts.editChecklist}
               </Link>
             </div>
           </div>
         ) : (
           <div className="space-y-4">
             <div className="rounded-xl bg-slate-50 p-4 text-sm text-slate-500">
-              {texts.noPrimaryTemplate}
+              {texts.noCleaningChecklist}
+            </div>
+
+            <div className="rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
+              {texts.suppliesFlowInfo}
             </div>
 
             <Link
               href={`/property-checklists/${property.id}`}
               className="inline-flex items-center rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
             >
-              {texts.openTemplateManagement}
+              {texts.openChecklistManagement}
             </Link>
           </div>
         )}

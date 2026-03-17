@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import {
   PortalLanguage,
@@ -55,6 +55,8 @@ type HistoryResponse = {
   }>
 }
 
+type HistoryFilter = "all" | "completed" | "cancelled"
+
 function formatDate(value?: string | null, language: PortalLanguage = "el") {
   if (!value) return "—"
 
@@ -74,6 +76,8 @@ function statusClasses(status?: string | null) {
   switch ((status || "").toLowerCase()) {
     case "completed":
       return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
+    case "cancelled":
+      return "bg-red-50 text-red-700 ring-1 ring-red-200"
     default:
       return "bg-slate-100 text-slate-700 ring-1 ring-slate-200"
   }
@@ -86,30 +90,40 @@ function getTexts(language: PortalLanguage) {
     return {
       ...common,
       pageTitle: "Work history",
-      pageSubtitle: "Completed tasks",
+      pageSubtitle: "Completed and cancelled tasks",
       loading: "Loading history...",
       loadErrorTitle: "History could not be loaded",
       backHome: "Back to home",
-      empty: "There are no completed tasks yet.",
+      empty: "There are no history tasks yet.",
       openTask: "Open task",
       schedule: "Schedule",
       calendar: "Calendar",
       completedAt: "Completed",
+      updatedAt: "Last update",
+      all: "All history",
+      completed: "Completed",
+      cancelled: "Cancelled",
+      cancelledInfo: "This task was cancelled and remains visible only in history.",
     }
   }
 
   return {
     ...common,
     pageTitle: "Ιστορικό εργασιών",
-    pageSubtitle: "Ολοκληρωμένες εργασίες",
+    pageSubtitle: "Ολοκληρωμένες και ακυρωμένες εργασίες",
     loading: "Φόρτωση ιστορικού...",
     loadErrorTitle: "Δεν φορτώθηκε το ιστορικό",
     backHome: "Επιστροφή στην αρχική",
-    empty: "Δεν υπάρχουν ακόμα ολοκληρωμένες εργασίες.",
+    empty: "Δεν υπάρχουν ακόμα εργασίες ιστορικού.",
     openTask: "Άνοιγμα εργασίας",
     schedule: "Πρόγραμμα",
     calendar: "Ημερολόγιο",
     completedAt: "Ολοκλήρωση",
+    updatedAt: "Τελευταία ενημέρωση",
+    all: "Όλο το ιστορικό",
+    completed: "Ολοκληρωμένες",
+    cancelled: "Ακυρωμένες",
+    cancelledInfo: "Η εργασία ακυρώθηκε και παραμένει ορατή μόνο στο ιστορικό.",
   }
 }
 
@@ -172,6 +186,7 @@ export default function PartnerHistoryPage() {
   const [data, setData] = useState<HistoryResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
+  const [activeFilter, setActiveFilter] = useState<HistoryFilter>("all")
 
   const t = getTexts(language)
 
@@ -205,6 +220,30 @@ export default function PartnerHistoryPage() {
   useEffect(() => {
     loadData()
   }, [token])
+
+  const items = useMemo(() => {
+    const source = data?.items || []
+
+    if (activeFilter === "all") return source
+
+    return source.filter(
+      (item) => String(item.task.status || "").toLowerCase() === activeFilter
+    )
+  }, [data, activeFilter])
+
+  const counters = useMemo(() => {
+    const source = data?.items || []
+
+    return {
+      all: source.length,
+      completed: source.filter(
+        (item) => String(item.task.status || "").toLowerCase() === "completed"
+      ).length,
+      cancelled: source.filter(
+        (item) => String(item.task.status || "").toLowerCase() === "cancelled"
+      ).length,
+    }
+  }, [data])
 
   if (loading) {
     return (
@@ -264,7 +303,7 @@ export default function PartnerHistoryPage() {
                 </Link>
                 <Link
                   href={buildPartnerPortalUrl(token as string, "/calendar", language)}
-                  className="rounded-2xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+                  className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                 >
                   {t.calendar}
                 </Link>
@@ -273,7 +312,52 @@ export default function PartnerHistoryPage() {
           </div>
         </section>
 
-        {data.items.length === 0 ? (
+        <section className="grid gap-4 md:grid-cols-3">
+          <button
+            type="button"
+            onClick={() => setActiveFilter("all")}
+            className={`rounded-2xl border p-5 text-left shadow-sm transition ${
+              activeFilter === "all"
+                ? "border-slate-900 bg-slate-50"
+                : "border-slate-200 bg-white hover:bg-slate-50"
+            }`}
+          >
+            <div className="text-sm text-slate-500">{t.all}</div>
+            <div className="mt-2 text-3xl font-bold text-slate-900">{counters.all}</div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveFilter("completed")}
+            className={`rounded-2xl border p-5 text-left shadow-sm transition ${
+              activeFilter === "completed"
+                ? "border-emerald-300 bg-emerald-50"
+                : "border-slate-200 bg-white hover:bg-slate-50"
+            }`}
+          >
+            <div className="text-sm text-slate-500">{t.completed}</div>
+            <div className="mt-2 text-3xl font-bold text-emerald-700">
+              {counters.completed}
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveFilter("cancelled")}
+            className={`rounded-2xl border p-5 text-left shadow-sm transition ${
+              activeFilter === "cancelled"
+                ? "border-red-300 bg-red-50"
+                : "border-slate-200 bg-white hover:bg-slate-50"
+            }`}
+          >
+            <div className="text-sm text-slate-500">{t.cancelled}</div>
+            <div className="mt-2 text-3xl font-bold text-red-700">
+              {counters.cancelled}
+            </div>
+          </button>
+        </section>
+
+        {items.length === 0 ? (
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="rounded-2xl border border-dashed border-slate-300 p-6 text-sm text-slate-500">
               {t.empty}
@@ -282,51 +366,68 @@ export default function PartnerHistoryPage() {
         ) : (
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="space-y-4">
-              {data.items.map((item) => (
-                <div
-                  key={item.assignmentId}
-                  className="rounded-2xl border border-slate-200 p-5"
-                >
-                  <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="text-lg font-bold text-slate-950">
-                          {item.task.title}
-                        </h3>
+              {items.map((item) => {
+                const isCancelled =
+                  String(item.task.status || "").toLowerCase() === "cancelled"
 
-                        <span
-                          className={`rounded-full px-3 py-1 text-xs font-semibold ${statusClasses(
-                            item.assignmentStatus
-                          )}`}
-                        >
-                          {getPortalStatusLabel(language, item.assignmentStatus)}
-                        </span>
+                return (
+                  <div
+                    key={item.assignmentId}
+                    className="rounded-2xl border border-slate-200 p-5"
+                  >
+                    <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="text-lg font-bold text-slate-950">
+                            {item.task.title}
+                          </h3>
+
+                          <span
+                            className={`rounded-full px-3 py-1 text-xs font-semibold ${statusClasses(
+                              item.task.status
+                            )}`}
+                          >
+                            {getPortalStatusLabel(language, item.task.status || item.assignmentStatus)}
+                          </span>
+                        </div>
+
+                        <p className="mt-2 text-sm text-slate-500">
+                          {item.task.property.name} • {item.task.property.code}
+                        </p>
+
+                        <p className="mt-1 text-sm text-slate-500">
+                          {isCancelled ? t.updatedAt : t.completedAt}:{" "}
+                          {formatDate(
+                            item.completedAt ||
+                              item.task.checklistRun?.completedAt ||
+                              item.task.scheduledDate,
+                            language
+                          )}
+                        </p>
+
+                        {isCancelled ? (
+                          <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700">
+                            {t.cancelledInfo}
+                          </div>
+                        ) : null}
                       </div>
 
-                      <p className="mt-2 text-sm text-slate-500">
-                        {item.task.property.name} • {item.task.property.code}
-                      </p>
-
-                      <p className="mt-1 text-sm text-slate-500">
-                        {t.completedAt}: {formatDate(item.completedAt, language)}
-                      </p>
-                    </div>
-
-                    <div className="flex shrink-0 flex-wrap gap-2">
-                      <Link
-                        href={`${buildPartnerPortalUrl(
-                          token as string,
-                          `/tasks/${item.task.id}`,
-                          language
-                        )}&from=history`}
-                        className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                      >
-                        {t.openTask}
-                      </Link>
+                      <div className="flex shrink-0 flex-wrap gap-2">
+                        <Link
+                          href={`${buildPartnerPortalUrl(
+                            token as string,
+                            `/tasks/${item.task.id}`,
+                            language
+                          )}&from=history`}
+                          className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                        >
+                          {t.openTask}
+                        </Link>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </section>
         )}

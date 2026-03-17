@@ -1,534 +1,720 @@
 "use client"
 
+import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
 
-type Property = {
+type BookingTask = {
   id: string
-  code: string
-  name: string
-}
-
-type Booking = {
-  id: string
-  sourcePlatform: string
-  externalBookingId: string | null
-  guestName: string | null
-  guestPhone: string | null
-  guestEmail: string | null
-  checkInDate: string
-  checkOutDate: string
-  checkInTime: string | null
-  checkOutTime: string | null
-  adults: number | null
-  children: number | null
-  infants: number | null
+  title: string
+  taskType: string
   status: string
-  notes: string | null
-  property: Property
+  source: string
+  priority: string
+  scheduledDate: string
+  scheduledStartTime?: string | null
+  scheduledEndTime?: string | null
+  dueDate?: string | null
+  alertEnabled: boolean
+  alertAt?: string | null
   createdAt: string
 }
 
+type BookingRow = {
+  id: string
+  sourcePlatform: string
+  externalBookingId: string
+  externalListingId?: string | null
+  externalListingName?: string | null
+  guestName?: string | null
+  guestPhone?: string | null
+  guestEmail?: string | null
+  checkInDate: string
+  checkOutDate: string
+  checkInTime?: string | null
+  checkOutTime?: string | null
+  status: string
+  syncStatus: string
+  needsMapping: boolean
+  notes?: string | null
+  property?: {
+    id: string
+    code: string
+    name: string
+    address?: string | null
+    city?: string | null
+    region?: string | null
+    status?: string | null
+  } | null
+  tasks: BookingTask[]
+}
+
+type FilterKey =
+  | "all"
+  | "active"
+  | "withoutTasks"
+  | "withTasks"
+  | "needsMapping"
+  | "cancelled"
+  | "todayCheckout"
+  | "next3Days"
+
+type TaskCreateModalState = {
+  open: boolean
+  booking: BookingRow | null
+}
+
+function formatDate(value?: string | null) {
+  if (!value) return "-"
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return "-"
+  return date.toLocaleDateString("el-GR")
+}
+
+function formatDateTime(value?: string | null) {
+  if (!value) return "-"
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return "-"
+  return date.toLocaleString("el-GR")
+}
+
+function toDateInputValue(value?: string | null) {
+  if (!value) return ""
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ""
+  return date.toISOString().slice(0, 10)
+}
+
+function toDateTimeLocalValue(dateString?: string | null, timeString?: string | null) {
+  if (!dateString) return ""
+  const date = new Date(dateString)
+  if (Number.isNaN(date.getTime())) return ""
+  const base = date.toISOString().slice(0, 10)
+
+  if (!timeString) {
+    return `${base}T09:00`
+  }
+
+  return `${base}T${timeString}`
+}
+
+function getTodayDateOnly() {
+  const now = new Date()
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate())
+}
+
+function getDateOnly(value: string) {
+  const date = new Date(value)
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate())
+}
+
+function isActiveBooking(booking: BookingRow) {
+  return booking.status !== "cancelled"
+}
+
+function getSyncLabel(syncStatus: string, needsMapping: boolean) {
+  if (syncStatus === "CANCELLED") return "Ακυρωμένη"
+  if (needsMapping) return "Χρειάζεται αντιστοίχιση"
+  if (syncStatus === "READY_FOR_ACTION") return "Έτοιμη για ενέργεια"
+  if (syncStatus === "ERROR") return "Σφάλμα"
+  return syncStatus
+}
+
+function getTaskSummaryLabel(tasks: BookingTask[]) {
+  if (tasks.length === 0) return "Χωρίς εργασία"
+  if (tasks.length === 1) return "1 εργασία"
+  return `${tasks.length} εργασίες`
+}
+
 export default function BookingsPage() {
-  const [bookings, setBookings] = useState<Booking[]>([])
-  const [properties, setProperties] = useState<Property[]>([])
-
-  const [propertyId, setPropertyId] = useState("")
-  const [sourcePlatform, setSourcePlatform] = useState("manual")
-  const [externalBookingId, setExternalBookingId] = useState("")
-  const [guestName, setGuestName] = useState("")
-  const [guestPhone, setGuestPhone] = useState("")
-  const [guestEmail, setGuestEmail] = useState("")
-  const [checkInDate, setCheckInDate] = useState("")
-  const [checkOutDate, setCheckOutDate] = useState("")
-  const [checkInTime, setCheckInTime] = useState("")
-  const [checkOutTime, setCheckOutTime] = useState("")
-  const [adults, setAdults] = useState("1")
-  const [children, setChildren] = useState("0")
-  const [infants, setInfants] = useState("0")
-  const [status, setStatus] = useState("confirmed")
-  const [notes, setNotes] = useState("")
-  const [search, setSearch] = useState("")
-
-  const [loadingBookings, setLoadingBookings] = useState(true)
-  const [loadingProperties, setLoadingProperties] = useState(true)
-  const [submitting, setSubmitting] = useState(false)
+  const [bookings, setBookings] = useState<BookingRow[]>([])
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
-  const [success, setSuccess] = useState("")
+  const [search, setSearch] = useState("")
+  const [activeFilter, setActiveFilter] = useState<FilterKey>("active")
+  const [modal, setModal] = useState<TaskCreateModalState>({
+    open: false,
+    booking: null,
+  })
+  const [submittingTask, setSubmittingTask] = useState(false)
+
+  const [taskType, setTaskType] = useState("cleaning")
+  const [title, setTitle] = useState("")
+  const [description, setDescription] = useState("")
+  const [scheduledDate, setScheduledDate] = useState("")
+  const [scheduledStartTime, setScheduledStartTime] = useState("")
+  const [scheduledEndTime, setScheduledEndTime] = useState("")
+  const [dueDate, setDueDate] = useState("")
+  const [priority, setPriority] = useState("normal")
+  const [notes, setNotes] = useState("")
+  const [alertEnabled, setAlertEnabled] = useState(false)
+  const [alertAt, setAlertAt] = useState("")
+  const [sendCleaningChecklist, setSendCleaningChecklist] = useState(true)
+  const [sendSuppliesChecklist, setSendSuppliesChecklist] = useState(true)
 
   async function loadBookings() {
-    try {
-      setLoadingBookings(true)
-
-      const res = await fetch("/api/bookings", {
-        cache: "no-store",
-      })
-
-      if (!res.ok) {
-        throw new Error("Αποτυχία φόρτωσης κρατήσεων")
-      }
-
-      const data = await res.json()
-      setBookings(data)
-    } catch (err) {
-      console.error("Load bookings error:", err)
-      setError("Δεν ήταν δυνατή η φόρτωση των κρατήσεων.")
-    } finally {
-      setLoadingBookings(false)
-    }
-  }
-
-  async function loadProperties() {
-    try {
-      setLoadingProperties(true)
-
-      const res = await fetch("/api/properties", {
-        cache: "no-store",
-      })
-
-      if (!res.ok) {
-        throw new Error("Αποτυχία φόρτωσης ακινήτων")
-      }
-
-      const data = await res.json()
-      setProperties(data)
-    } catch (err) {
-      console.error("Load properties error:", err)
-      setError("Δεν ήταν δυνατή η φόρτωση των ακινήτων.")
-    } finally {
-      setLoadingProperties(false)
-    }
-  }
-
-  async function handleCreateBooking(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault()
-
+    setLoading(true)
     setError("")
-    setSuccess("")
-
-    if (!propertyId || !sourcePlatform || !checkInDate || !checkOutDate) {
-      setError("Συμπλήρωσε τα υποχρεωτικά πεδία κράτησης.")
-      return
-    }
 
     try {
-      setSubmitting(true)
-
-      const res = await fetch("/api/bookings", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          propertyId,
-          sourcePlatform,
-          externalBookingId: externalBookingId.trim(),
-          guestName: guestName.trim(),
-          guestPhone: guestPhone.trim(),
-          guestEmail: guestEmail.trim(),
-          checkInDate,
-          checkOutDate,
-          checkInTime,
-          checkOutTime,
-          adults,
-          children,
-          infants,
-          status,
-          notes: notes.trim(),
-        }),
+      const response = await fetch("/api/bookings", {
+        cache: "no-store",
       })
 
-      const data = await res.json()
+      const data = await response.json()
 
-      if (!res.ok) {
-        throw new Error(data?.error || "Αποτυχία δημιουργίας κράτησης")
+      if (!response.ok) {
+        throw new Error(data?.error || "Αποτυχία φόρτωσης κρατήσεων.")
       }
 
-      setPropertyId("")
-      setSourcePlatform("manual")
-      setExternalBookingId("")
-      setGuestName("")
-      setGuestPhone("")
-      setGuestEmail("")
-      setCheckInDate("")
-      setCheckOutDate("")
-      setCheckInTime("")
-      setCheckOutTime("")
-      setAdults("1")
-      setChildren("0")
-      setInfants("0")
-      setStatus("confirmed")
-      setNotes("")
-      setSuccess("Η κράτηση δημιουργήθηκε επιτυχώς.")
-
-      await loadBookings()
+      setBookings(Array.isArray(data) ? data : [])
     } catch (err) {
-      console.error("Create booking error:", err)
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Δεν ήταν δυνατή η δημιουργία της κράτησης."
-      )
+      setError(err instanceof Error ? err.message : "Αποτυχία φόρτωσης κρατήσεων.")
     } finally {
-      setSubmitting(false)
+      setLoading(false)
     }
   }
 
   useEffect(() => {
     loadBookings()
-    loadProperties()
   }, [])
 
-  const filteredBookings = useMemo(() => {
-    const query = search.trim().toLowerCase()
+  function openCreateTaskModal(booking: BookingRow) {
+    setTaskType("cleaning")
+    setTitle("")
+    setDescription("")
+    setScheduledDate(toDateInputValue(booking.checkOutDate))
+    setScheduledStartTime(booking.checkOutTime || "")
+    setScheduledEndTime("")
+    setDueDate(toDateInputValue(booking.checkOutDate))
+    setPriority("normal")
+    setNotes(booking.notes || "")
+    setAlertEnabled(false)
+    setAlertAt(toDateTimeLocalValue(booking.checkOutDate, booking.checkOutTime))
+    setSendCleaningChecklist(true)
+    setSendSuppliesChecklist(true)
 
-    if (!query) return bookings
-
-    return bookings.filter((booking) => {
-      return (
-        booking.property.name.toLowerCase().includes(query) ||
-        booking.property.code.toLowerCase().includes(query) ||
-        (booking.externalBookingId || "").toLowerCase().includes(query) ||
-        (booking.guestName || "").toLowerCase().includes(query) ||
-        booking.sourcePlatform.toLowerCase().includes(query)
-      )
+    setModal({
+      open: true,
+      booking,
     })
-  }, [bookings, search])
+  }
+
+  function closeCreateTaskModal() {
+    setModal({
+      open: false,
+      booking: null,
+    })
+  }
+
+  async function handleCreateTask() {
+    if (!modal.booking) return
+
+    setSubmittingTask(true)
+
+    try {
+      const response = await fetch(`/api/bookings/${modal.booking.id}/create-task`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          taskType,
+          title: title.trim() || undefined,
+          description: description.trim() || undefined,
+          scheduledDate,
+          scheduledStartTime: scheduledStartTime || null,
+          scheduledEndTime: scheduledEndTime || null,
+          dueDate,
+          priority,
+          notes: notes.trim() || null,
+          alertEnabled,
+          alertAt: alertEnabled ? alertAt : null,
+          sendCleaningChecklist,
+          sendSuppliesChecklist,
+        }),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data?.error || "Αποτυχία δημιουργίας εργασίας.")
+      }
+
+      closeCreateTaskModal()
+      await loadBookings()
+      alert("Η εργασία δημιουργήθηκε επιτυχώς.")
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Αποτυχία δημιουργίας εργασίας.")
+    } finally {
+      setSubmittingTask(false)
+    }
+  }
+
+  const counters = useMemo(() => {
+    const today = getTodayDateOnly()
+    const next3 = new Date(today)
+    next3.setDate(next3.getDate() + 3)
+
+    return {
+      all: bookings.length,
+      active: bookings.filter((booking) => isActiveBooking(booking)).length,
+      withoutTasks: bookings.filter((booking) => booking.tasks.length === 0 && isActiveBooking(booking)).length,
+      withTasks: bookings.filter((booking) => booking.tasks.length > 0 && isActiveBooking(booking)).length,
+      needsMapping: bookings.filter((booking) => booking.needsMapping).length,
+      cancelled: bookings.filter((booking) => booking.status === "cancelled").length,
+      todayCheckout: bookings.filter((booking) => {
+        const checkout = getDateOnly(booking.checkOutDate)
+        return checkout.getTime() === today.getTime()
+      }).length,
+      next3Days: bookings.filter((booking) => {
+        const checkout = getDateOnly(booking.checkOutDate)
+        return checkout >= today && checkout <= next3
+      }).length,
+    }
+  }, [bookings])
+
+  const filteredBookings = useMemo(() => {
+    const today = getTodayDateOnly()
+    const next3 = new Date(today)
+    next3.setDate(next3.getDate() + 3)
+
+    const normalizedSearch = search.trim().toLowerCase()
+
+    let result = [...bookings]
+
+    if (activeFilter === "active") {
+      result = result.filter((booking) => isActiveBooking(booking))
+    }
+
+    if (activeFilter === "withoutTasks") {
+      result = result.filter((booking) => booking.tasks.length === 0 && isActiveBooking(booking))
+    }
+
+    if (activeFilter === "withTasks") {
+      result = result.filter((booking) => booking.tasks.length > 0 && isActiveBooking(booking))
+    }
+
+    if (activeFilter === "needsMapping") {
+      result = result.filter((booking) => booking.needsMapping)
+    }
+
+    if (activeFilter === "cancelled") {
+      result = result.filter((booking) => booking.status === "cancelled")
+    }
+
+    if (activeFilter === "todayCheckout") {
+      result = result.filter((booking) => {
+        const checkout = getDateOnly(booking.checkOutDate)
+        return checkout.getTime() === today.getTime()
+      })
+    }
+
+    if (activeFilter === "next3Days") {
+      result = result.filter((booking) => {
+        const checkout = getDateOnly(booking.checkOutDate)
+        return checkout >= today && checkout <= next3
+      })
+    }
+
+    if (normalizedSearch) {
+      result = result.filter((booking) => {
+        const haystack = [
+          booking.externalBookingId,
+          booking.externalListingId,
+          booking.externalListingName,
+          booking.guestName,
+          booking.property?.name,
+          booking.property?.code,
+          booking.sourcePlatform,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+
+        return haystack.includes(normalizedSearch)
+      })
+    }
+
+    return result
+  }, [bookings, activeFilter, search])
+
+  const filterButtons: Array<{
+    key: FilterKey
+    label: string
+    count: number
+  }> = [
+    { key: "all", label: "Όλες", count: counters.all },
+    { key: "active", label: "Ενεργές", count: counters.active },
+    { key: "withoutTasks", label: "Χωρίς εργασία", count: counters.withoutTasks },
+    { key: "withTasks", label: "Με εργασία", count: counters.withTasks },
+    { key: "needsMapping", label: "Χρειάζονται αντιστοίχιση", count: counters.needsMapping },
+    { key: "cancelled", label: "Ακυρωμένες", count: counters.cancelled },
+    { key: "todayCheckout", label: "Σημερινά check-out", count: counters.todayCheckout },
+    { key: "next3Days", label: "Επόμενα 3 ημέρες", count: counters.next3Days },
+  ]
 
   return (
-    <div className="space-y-8">
-      <section>
-        <h1 className="text-3xl font-bold tracking-tight text-slate-900">
-          Κρατήσεις
-        </h1>
-        <p className="mt-2 text-sm text-slate-500">
-          Διαχείριση κρατήσεων από πλατφόρμες και χειροκίνητες καταχωρήσεις.
-        </p>
-      </section>
-
-      <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="mb-6">
-          <h2 className="text-lg font-semibold text-slate-900">
-            Δημιουργία κράτησης
-          </h2>
+    <div className="space-y-6 p-6">
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold">Κρατήσεις</h1>
+          <p className="mt-1 text-sm text-gray-500">
+            Εισερχόμενες κρατήσεις από πλατφόρμες, με πλήρη εικόνα και ελεγχόμενη δημιουργία εργασιών.
+          </p>
         </div>
 
-        <form
-          onSubmit={handleCreateBooking}
-          className="grid grid-cols-1 gap-4 lg:grid-cols-12"
-        >
-          <div className="lg:col-span-4">
-            <label className="mb-2 block text-sm font-medium text-slate-700">
-              Ακίνητο
-            </label>
-            <select
-              value={propertyId}
-              onChange={(e) => setPropertyId(e.target.value)}
-              disabled={loadingProperties}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-            >
-              <option value="">Επίλεξε ακίνητο</option>
-              {properties.map((property) => (
-                <option key={property.id} value={property.id}>
-                  {property.code} - {property.name}
-                </option>
-              ))}
-            </select>
-          </div>
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href="/bookings/history"
+            className="rounded-xl border px-4 py-2 text-sm"
+          >
+            Ιστορικό κρατήσεων
+          </Link>
+        </div>
+      </div>
 
-          <div className="lg:col-span-3">
-            <label className="mb-2 block text-sm font-medium text-slate-700">
-              Πλατφόρμα
-            </label>
-            <select
-              value={sourcePlatform}
-              onChange={(e) => setSourcePlatform(e.target.value)}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-            >
-              <option value="manual">Χειροκίνητη</option>
-              <option value="airbnb">Airbnb</option>
-              <option value="booking">Booking.com</option>
-              <option value="vrbo">VRBO</option>
-              <option value="direct">Άμεση κράτηση</option>
-            </select>
-          </div>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {filterButtons.map((item) => (
+          <button
+            key={item.key}
+            type="button"
+            onClick={() => setActiveFilter(item.key)}
+            className={`rounded-2xl border p-4 text-left transition ${
+              activeFilter === item.key
+                ? "border-black bg-black text-white"
+                : "bg-white hover:border-gray-400"
+            }`}
+          >
+            <div className="text-sm opacity-80">{item.label}</div>
+            <div className="mt-2 text-2xl font-semibold">{item.count}</div>
+          </button>
+        ))}
+      </div>
 
-          <div className="lg:col-span-5">
-            <label className="mb-2 block text-sm font-medium text-slate-700">
-              Εξωτερικός κωδικός κράτησης
-            </label>
-            <input
-              type="text"
-              value={externalBookingId}
-              onChange={(e) => setExternalBookingId(e.target.value)}
-              placeholder="π.χ. AIR-548722"
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-            />
-          </div>
-
-          <div className="lg:col-span-4">
-            <label className="mb-2 block text-sm font-medium text-slate-700">
-              Όνομα επισκέπτη
-            </label>
-            <input
-              type="text"
-              value={guestName}
-              onChange={(e) => setGuestName(e.target.value)}
-              placeholder="π.χ. John Smith"
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-            />
-          </div>
-
-          <div className="lg:col-span-4">
-            <label className="mb-2 block text-sm font-medium text-slate-700">
-              Τηλέφωνο
-            </label>
-            <input
-              type="text"
-              value={guestPhone}
-              onChange={(e) => setGuestPhone(e.target.value)}
-              placeholder="π.χ. +30..."
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-            />
-          </div>
-
-          <div className="lg:col-span-4">
-            <label className="mb-2 block text-sm font-medium text-slate-700">
-              Email
-            </label>
-            <input
-              type="email"
-              value={guestEmail}
-              onChange={(e) => setGuestEmail(e.target.value)}
-              placeholder="π.χ. guest@email.com"
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-            />
-          </div>
-
-          <div className="lg:col-span-3">
-            <label className="mb-2 block text-sm font-medium text-slate-700">
-              Check-in
-            </label>
-            <input
-              type="date"
-              value={checkInDate}
-              onChange={(e) => setCheckInDate(e.target.value)}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-            />
-          </div>
-
-          <div className="lg:col-span-3">
-            <label className="mb-2 block text-sm font-medium text-slate-700">
-              Check-out
-            </label>
-            <input
-              type="date"
-              value={checkOutDate}
-              onChange={(e) => setCheckOutDate(e.target.value)}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-            />
-          </div>
-
-          <div className="lg:col-span-2">
-            <label className="mb-2 block text-sm font-medium text-slate-700">
-              Ώρα άφιξης
-            </label>
-            <input
-              type="time"
-              value={checkInTime}
-              onChange={(e) => setCheckInTime(e.target.value)}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-            />
-          </div>
-
-          <div className="lg:col-span-2">
-            <label className="mb-2 block text-sm font-medium text-slate-700">
-              Ώρα αναχώρησης
-            </label>
-            <input
-              type="time"
-              value={checkOutTime}
-              onChange={(e) => setCheckOutTime(e.target.value)}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-            />
-          </div>
-
-          <div className="lg:col-span-1">
-            <label className="mb-2 block text-sm font-medium text-slate-700">
-              Ενήλικες
-            </label>
-            <input
-              type="number"
-              value={adults}
-              onChange={(e) => setAdults(e.target.value)}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-            />
-          </div>
-
-          <div className="lg:col-span-1">
-            <label className="mb-2 block text-sm font-medium text-slate-700">
-              Παιδιά
-            </label>
-            <input
-              type="number"
-              value={children}
-              onChange={(e) => setChildren(e.target.value)}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-            />
-          </div>
-
-          <div className="lg:col-span-1">
-            <label className="mb-2 block text-sm font-medium text-slate-700">
-              Βρέφη
-            </label>
-            <input
-              type="number"
-              value={infants}
-              onChange={(e) => setInfants(e.target.value)}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-            />
-          </div>
-
-          <div className="lg:col-span-2">
-            <label className="mb-2 block text-sm font-medium text-slate-700">
-              Κατάσταση
-            </label>
-            <select
-              value={status}
-              onChange={(e) => setStatus(e.target.value)}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-            >
-              <option value="confirmed">Επιβεβαιωμένη</option>
-              <option value="pending">Σε αναμονή</option>
-              <option value="cancelled">Ακυρωμένη</option>
-              <option value="completed">Ολοκληρωμένη</option>
-            </select>
-          </div>
-
-          <div className="lg:col-span-12">
-            <label className="mb-2 block text-sm font-medium text-slate-700">
-              Σημειώσεις
-            </label>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={3}
-              placeholder="Εσωτερικές σημειώσεις για την κράτηση"
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-            />
-          </div>
-
-          <div className="lg:col-span-12">
-            <button
-              type="submit"
-              disabled={submitting}
-              className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {submitting ? "Αποθήκευση..." : "Δημιουργία κράτησης"}
-            </button>
-          </div>
-        </form>
-
-        {error && (
-          <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            {error}
-          </div>
-        )}
-
-        {success && (
-          <div className="mt-4 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
-            {success}
-          </div>
-        )}
-      </section>
-
-      <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex flex-col gap-4 border-b border-slate-200 px-6 py-4 md:flex-row md:items-center md:justify-between">
+      <div className="rounded-2xl border bg-white">
+        <div className="flex flex-col gap-4 border-b p-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h2 className="text-lg font-semibold text-slate-900">
-              Λίστα κρατήσεων
-            </h2>
+            <h2 className="font-medium">Λίστα κρατήσεων</h2>
+            <p className="mt-1 text-sm text-gray-500">
+              Από εδώ δημιουργείται εργασία συνδεδεμένη με την κράτηση και το ακίνητο.
+            </p>
           </div>
 
-          <div className="w-full md:w-80">
+          <div className="w-full lg:w-[320px]">
             <input
-              type="text"
+              className="w-full rounded-xl border px-3 py-2 text-sm"
               placeholder="Αναζήτηση κρατήσεων..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
             />
           </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="min-w-full">
-            <thead>
-              <tr className="border-b border-slate-200 bg-slate-50">
-                <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
-                  Ακίνητο
-                </th>
-                <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
-                  Πλατφόρμα
-                </th>
-                <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
-                  Κωδικός
-                </th>
-                <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
-                  Επισκέπτης
-                </th>
-                <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
-                  Check-in
-                </th>
-                <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
-                  Check-out
-                </th>
-              </tr>
-            </thead>
+        {loading ? (
+          <div className="p-6 text-sm text-gray-500">Φόρτωση...</div>
+        ) : error ? (
+          <div className="p-6 text-sm text-red-600">{error}</div>
+        ) : filteredBookings.length === 0 ? (
+          <div className="p-6 text-sm text-gray-500">Δεν βρέθηκαν κρατήσεις.</div>
+        ) : (
+          <div className="divide-y">
+            {filteredBookings.map((booking) => (
+              <div key={booking.id} className="space-y-4 p-4">
+                <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="text-lg font-semibold">
+                        {booking.property?.name || booking.externalListingName || booking.externalListingId || "Χωρίς αντιστοίχιση"}
+                      </div>
 
-            <tbody>
-              {loadingBookings ? (
-                <tr>
-                  <td colSpan={6} className="px-6 py-10 text-sm text-slate-500">
-                    Φόρτωση κρατήσεων...
-                  </td>
-                </tr>
-              ) : filteredBookings.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="px-6 py-12 text-center text-sm text-slate-500">
-                    Δεν υπάρχουν ακόμη κρατήσεις.
-                  </td>
-                </tr>
-              ) : (
-                filteredBookings.map((booking) => (
-                  <tr
-                    key={booking.id}
-                    className="border-b border-slate-100 transition hover:bg-slate-50"
+                      <span className="rounded-full border px-2 py-1 text-xs">
+                        {booking.sourcePlatform}
+                      </span>
+
+                      <span className="rounded-full border px-2 py-1 text-xs">
+                        {getSyncLabel(booking.syncStatus, booking.needsMapping)}
+                      </span>
+
+                      <span className="rounded-full border px-2 py-1 text-xs">
+                        {getTaskSummaryLabel(booking.tasks)}
+                      </span>
+                    </div>
+
+                    <div className="text-sm text-gray-600">
+                      Κωδικός κράτησης: {booking.externalBookingId}
+                    </div>
+
+                    <div className="text-sm text-gray-600">
+                      Ακίνητο: {booking.property ? `${booking.property.code} · ${booking.property.name}` : "Δεν έχει αντιστοιχιστεί"}
+                    </div>
+
+                    <div className="text-sm text-gray-600">
+                      Επισκέπτης: {booking.guestName || "-"}
+                    </div>
+
+                    <div className="text-sm text-gray-600">
+                      Check-in: {formatDate(booking.checkInDate)}
+                      {booking.checkInTime ? ` · ${booking.checkInTime}` : ""}
+                      {" | "}
+                      Check-out: {formatDate(booking.checkOutDate)}
+                      {booking.checkOutTime ? ` · ${booking.checkOutTime}` : ""}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <Link
+                      href={`/bookings/${booking.id}`}
+                      className="rounded-xl border px-4 py-2 text-sm"
+                    >
+                      Προβολή
+                    </Link>
+
+                    <button
+                      type="button"
+                      onClick={() => openCreateTaskModal(booking)}
+                      disabled={booking.needsMapping || booking.status === "cancelled"}
+                      className="rounded-xl bg-black px-4 py-2 text-sm text-white disabled:opacity-50"
+                    >
+                      Δημιουργία εργασίας
+                    </button>
+                  </div>
+                </div>
+
+                {booking.tasks.length > 0 && (
+                  <div className="rounded-2xl bg-gray-50 p-3">
+                    <div className="mb-3 text-sm font-medium">Συνδεδεμένες εργασίες</div>
+
+                    <div className="space-y-2">
+                      {booking.tasks.map((task) => (
+                        <div
+                          key={task.id}
+                          className="flex flex-col gap-2 rounded-xl border bg-white p-3 lg:flex-row lg:items-center lg:justify-between"
+                        >
+                          <div className="text-sm">
+                            <div className="font-medium">{task.title}</div>
+                            <div className="text-gray-600">
+                              {task.taskType} · {task.status} · {formatDate(task.scheduledDate)}
+                              {task.scheduledStartTime ? ` · ${task.scheduledStartTime}` : ""}
+                              {task.alertEnabled && task.alertAt ? ` · Alert: ${formatDateTime(task.alertAt)}` : ""}
+                            </div>
+                          </div>
+
+                          <Link
+                            href={`/tasks/${task.id}`}
+                            className="text-sm underline"
+                          >
+                            Προβολή εργασίας
+                          </Link>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {modal.open && modal.booking && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b p-4">
+              <div>
+                <h3 className="text-lg font-semibold">Νέα εργασία από κράτηση</h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  {modal.booking.property?.name || modal.booking.externalListingName || modal.booking.externalBookingId}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={closeCreateTaskModal}
+                className="rounded-xl border px-3 py-2 text-sm"
+              >
+                Κλείσιμο
+              </button>
+            </div>
+
+            <div className="space-y-6 p-4">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-sm">Τύπος εργασίας</label>
+                  <select
+                    className="w-full rounded-xl border px-3 py-2 text-sm"
+                    value={taskType}
+                    onChange={(e) => setTaskType(e.target.value)}
                   >
-                    <td className="px-6 py-4 text-sm text-slate-900">
-                      {booking.property.code} - {booking.property.name}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-slate-700">
-                      {booking.sourcePlatform}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-slate-700">
-                      {booking.externalBookingId || "—"}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-slate-700">
-                      {booking.guestName || "—"}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-slate-700">
-                      {new Date(booking.checkInDate).toLocaleDateString("el-GR")}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-slate-700">
-                      {new Date(booking.checkOutDate).toLocaleDateString("el-GR")}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                    <option value="cleaning">Καθαρισμός</option>
+                    <option value="inspection">Επιθεώρηση</option>
+                    <option value="maintenance">Τεχνική εργασία</option>
+                    <option value="custom">Άλλη εργασία</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm">Προτεραιότητα</label>
+                  <select
+                    className="w-full rounded-xl border px-3 py-2 text-sm"
+                    value={priority}
+                    onChange={(e) => setPriority(e.target.value)}
+                  >
+                    <option value="low">Χαμηλή</option>
+                    <option value="normal">Κανονική</option>
+                    <option value="high">Υψηλή</option>
+                    <option value="urgent">Επείγουσα</option>
+                  </select>
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="mb-1 block text-sm">Τίτλος</label>
+                  <input
+                    className="w-full rounded-xl border px-3 py-2 text-sm"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    placeholder="Αν μείνει κενό, θα μπει προτεινόμενος τίτλος"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="mb-1 block text-sm">Περιγραφή</label>
+                  <textarea
+                    className="min-h-[110px] w-full rounded-xl border px-3 py-2 text-sm"
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    placeholder="Προαιρετική περιγραφή"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm">Ημερομηνία εργασίας</label>
+                  <input
+                    type="date"
+                    className="w-full rounded-xl border px-3 py-2 text-sm"
+                    value={scheduledDate}
+                    onChange={(e) => setScheduledDate(e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm">Προθεσμία</label>
+                  <input
+                    type="date"
+                    className="w-full rounded-xl border px-3 py-2 text-sm"
+                    value={dueDate}
+                    onChange={(e) => setDueDate(e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm">Ώρα έναρξης</label>
+                  <input
+                    type="time"
+                    className="w-full rounded-xl border px-3 py-2 text-sm"
+                    value={scheduledStartTime}
+                    onChange={(e) => setScheduledStartTime(e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-sm">Ώρα λήξης</label>
+                  <input
+                    type="time"
+                    className="w-full rounded-xl border px-3 py-2 text-sm"
+                    value={scheduledEndTime}
+                    onChange={(e) => setScheduledEndTime(e.target.value)}
+                  />
+                </div>
+
+                <div className="md:col-span-2 rounded-2xl border p-4">
+                  <div className="mb-3 flex items-center justify-between">
+                    <div>
+                      <div className="font-medium">Ειδοποίηση / alert</div>
+                      <div className="text-sm text-gray-500">
+                        Ο διαχειριστής μπορεί να ορίσει ακριβή ώρα ειδοποίησης για την εργασία.
+                      </div>
+                    </div>
+
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={alertEnabled}
+                        onChange={(e) => setAlertEnabled(e.target.checked)}
+                      />
+                      Ενεργό
+                    </label>
+                  </div>
+
+                  {alertEnabled && (
+                    <div>
+                      <label className="mb-1 block text-sm">Ώρα alert</label>
+                      <input
+                        type="datetime-local"
+                        className="w-full rounded-xl border px-3 py-2 text-sm"
+                        value={alertAt}
+                        onChange={(e) => setAlertAt(e.target.value)}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div className="md:col-span-2 rounded-2xl border p-4">
+                  <div className="mb-3 font-medium">Λίστες εργασίας</div>
+
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={sendCleaningChecklist}
+                        onChange={(e) => setSendCleaningChecklist(e.target.checked)}
+                      />
+                      Αποστολή λίστας καθαριότητας
+                    </label>
+
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={sendSuppliesChecklist}
+                        onChange={(e) => setSendSuppliesChecklist(e.target.checked)}
+                      />
+                      Αποστολή λίστας αναλωσίμων
+                    </label>
+                  </div>
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="mb-1 block text-sm">Σημειώσεις</label>
+                  <textarea
+                    className="min-h-[100px] w-full rounded-xl border px-3 py-2 text-sm"
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder="Εσωτερικές σημειώσεις για την εργασία"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t p-4">
+              <button
+                type="button"
+                onClick={closeCreateTaskModal}
+                className="rounded-xl border px-4 py-2 text-sm"
+              >
+                Ακύρωση
+              </button>
+
+              <button
+                type="button"
+                onClick={handleCreateTask}
+                disabled={submittingTask}
+                className="rounded-xl bg-black px-4 py-2 text-sm text-white disabled:opacity-50"
+              >
+                {submittingTask ? "Δημιουργία..." : "Δημιουργία εργασίας"}
+              </button>
+            </div>
+          </div>
         </div>
-      </section>
+      )}
     </div>
   )
 }

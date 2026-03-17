@@ -108,8 +108,9 @@ type PropertyTask = {
   dueDate?: string | null
   completedAt?: string | null
   requiresPhotos?: boolean
-  requiresChecklist?: boolean
   requiresApproval?: boolean
+  sendCleaningChecklist?: boolean
+  sendSuppliesChecklist?: boolean
   notes?: string | null
   resultNotes?: string | null
   createdAt?: string
@@ -124,6 +125,8 @@ type PropertyTask = {
     status: string
   } | null
   assignments?: TaskAssignment[]
+  cleaningChecklistRun?: TaskChecklistRun | null
+  suppliesChecklistRun?: TaskChecklistRun | null
   checklistRun?: TaskChecklistRun | null
   issues?: Array<{
     id: string
@@ -132,21 +135,6 @@ type PropertyTask = {
     severity: string
     status: string
     createdAt: string
-  }>
-  taskPhotos?: Array<{
-    id: string
-    category: string
-    fileUrl: string
-    fileName?: string | null
-    uploadedAt?: string
-  }>
-  activityLogs?: Array<{
-    id: string
-    action: string
-    message?: string | null
-    actorType?: string | null
-    actorName?: string | null
-    createdAt?: string
   }>
 }
 
@@ -157,6 +145,18 @@ type PropertyTasksResponse = {
   tasks: PropertyTask[]
 }
 
+type PropertyChecklistResponse = {
+  primaryTemplate?: ChecklistTemplateOption | null
+}
+
+type PropertySuppliesResponse = {
+  activeSupplies?: Array<{
+    id: string
+    propertyId?: string
+    supplyItemId?: string
+  }>
+}
+
 type TaskFilter =
   | "all_open"
   | "pending"
@@ -164,7 +164,8 @@ type TaskFilter =
   | "accepted"
   | "in_progress"
   | "without_assignment"
-  | "with_checklist"
+  | "with_cleaning"
+  | "with_supplies"
 
 type CreateTaskFormState = {
   title: string
@@ -178,9 +179,9 @@ type CreateTaskFormState = {
   scheduledEndTime: string
   dueDate: string
   bookingId: string
-  checklistTemplateId: string
+  sendCleaningChecklist: boolean
+  sendSuppliesChecklist: boolean
   requiresPhotos: boolean
-  requiresChecklist: boolean
   requiresApproval: boolean
   notes: string
   resultNotes: string
@@ -203,6 +204,12 @@ function getTexts(language: "el" | "en") {
       newTask: "New task",
       closeForm: "Close form",
       completedHistory: "Completed task history",
+      cancelTask: "Cancel task",
+      cancelling: "Cancelling...",
+      cancelTaskConfirm:
+        "Are you sure you want to cancel this task?",
+      cancelSuccess: "Task cancelled successfully.",
+      cancelError: "Task cancellation failed.",
 
       status: {
         active: "Active",
@@ -225,7 +232,8 @@ function getTexts(language: "el" | "en") {
         inProgress: "In progress",
         completed: "Completed",
         withoutAssignment: "Without assignment",
-        withChecklist: "With checklist",
+        withCleaning: "With cleaning list",
+        withSupplies: "With supplies list",
       },
 
       create: {
@@ -242,19 +250,27 @@ function getTexts(language: "el" | "en") {
         dueDate: "Deadline",
         booking: "Linked booking",
         description: "Description",
-        blockTitle: "Checklist and requirements",
-        requiresChecklist: "Requires checklist",
+        blockTitle: "Task sections and requirements",
+        sendCleaningChecklist: "Send cleaning checklist",
+        sendSuppliesChecklist: "Send supplies checklist",
         requiresPhotos: "Requires photos",
         requiresApproval: "Requires approval",
-        checklistTemplate: "Checklist template",
         managerNotes: "Manager notes",
         resultNotes: "Final result",
         submit: "Create task",
         submitting: "Creating...",
         cancel: "Cancel",
         noBooking: "No booking",
-        fallbackChecklist: "Use property primary checklist (if available)",
-        checklistDisabled: "Checklist is disabled",
+        primaryChecklistLabel: "Primary cleaning checklist",
+        activeSuppliesLabel: "Active property supplies",
+        noPrimaryChecklist:
+          "No primary cleaning checklist has been set for this property.",
+        noActiveSupplies:
+          "There are no active supplies for this property yet.",
+        helperText:
+          "The cleaning checklist uses the property's primary list. The supplies checklist uses the property's active supplies.",
+        atLeastOneSection:
+          "You must select at least one task section.",
       },
 
       list: {
@@ -262,12 +278,16 @@ function getTexts(language: "el" | "en") {
         subtitle: "Operational view of tasks that still need action.",
         noTasks: "No open tasks found.",
         viewTask: "View task",
-        activeChecklist: "Active checklist",
-        noChecklist: "No checklist",
         noBooking: "No booking",
         notAssigned: "Not assigned",
         notes: "Notes",
         result: "Result",
+        cleaningSection: "Cleaning checklist",
+        suppliesSection: "Supplies checklist",
+        notEnabled: "Not sent",
+        submitted: "Submitted",
+        notSubmitted: "Not submitted",
+        autoSupplies: "Automatic from active supplies",
       },
 
       fields: {
@@ -278,9 +298,9 @@ function getTexts(language: "el" | "en") {
         status: "Task status",
         nextStep: "Next step",
         actionGuide: "What is needed now",
-        checklistStatus: "Checklist status",
         requirements: "Requirements",
         createdAt: "Created",
+        assignment: "Assignment",
       },
 
       loading: "Loading property tasks...",
@@ -311,7 +331,8 @@ function getTexts(language: "el" | "en") {
       },
 
       requirements: {
-        checklist: "Checklist",
+        cleaning: "Cleaning list",
+        supplies: "Supplies list",
         photos: "Photos",
         approval: "Approval",
         none: "No special requirements",
@@ -330,6 +351,12 @@ function getTexts(language: "el" | "en") {
     newTask: "Νέα εργασία",
     closeForm: "Κλείσιμο φόρμας",
     completedHistory: "Ιστορικό ολοκληρωμένων εργασιών",
+    cancelTask: "Ακύρωση εργασίας",
+    cancelling: "Ακύρωση...",
+    cancelTaskConfirm:
+      "Είσαι σίγουρος ότι θέλεις να ακυρώσεις αυτή την εργασία;",
+    cancelSuccess: "Η εργασία ακυρώθηκε επιτυχώς.",
+    cancelError: "Αποτυχία ακύρωσης εργασίας.",
 
     status: {
       active: "Ενεργό",
@@ -337,11 +364,11 @@ function getTexts(language: "el" | "en") {
       maintenance: "Σε συντήρηση",
       archived: "Αρχειοθετημένο",
       pending: "Νέα",
-      assigned: "Ανατέθηκε",
-      accepted: "Αποδεκτή",
+      assigned: "Ανατεθειμένες",
+      accepted: "Αποδεκτές",
       in_progress: "Σε εξέλιξη",
-      completed: "Ολοκληρωμένη",
-      cancelled: "Ακυρωμένη",
+      completed: "Ολοκληρωμένες",
+      cancelled: "Ακυρωμένες",
     },
 
     metrics: {
@@ -352,7 +379,8 @@ function getTexts(language: "el" | "en") {
       inProgress: "Σε εξέλιξη",
       completed: "Ολοκληρωμένες",
       withoutAssignment: "Χωρίς ανάθεση",
-      withChecklist: "Με checklist",
+      withCleaning: "Με λίστα καθαριότητας",
+      withSupplies: "Με λίστα αναλωσίμων",
     },
 
     create: {
@@ -370,19 +398,27 @@ function getTexts(language: "el" | "en") {
       dueDate: "Προθεσμία",
       booking: "Συνδεδεμένη κράτηση",
       description: "Περιγραφή",
-      blockTitle: "Checklist και απαιτήσεις",
-      requiresChecklist: "Απαιτεί checklist",
+      blockTitle: "Ενότητες εργασίας και απαιτήσεις",
+      sendCleaningChecklist: "Αποστολή λίστας καθαριότητας",
+      sendSuppliesChecklist: "Αποστολή λίστας αναλωσίμων",
       requiresPhotos: "Απαιτεί φωτογραφίες",
       requiresApproval: "Απαιτεί έγκριση",
-      checklistTemplate: "Πρότυπο checklist",
       managerNotes: "Σημειώσεις διαχειριστή",
       resultNotes: "Τελικό αποτέλεσμα",
       submit: "Δημιουργία εργασίας",
       submitting: "Δημιουργία...",
       cancel: "Ακύρωση",
       noBooking: "Χωρίς κράτηση",
-      fallbackChecklist: "Χρήση κύριου checklist ακινήτου (αν υπάρχει)",
-      checklistDisabled: "Το checklist είναι απενεργοποιημένο",
+      primaryChecklistLabel: "Βασική λίστα καθαριότητας",
+      activeSuppliesLabel: "Ενεργά αναλώσιμα ακινήτου",
+      noPrimaryChecklist:
+        "Δεν έχει οριστεί βασική λίστα καθαριότητας για αυτό το ακίνητο.",
+      noActiveSupplies:
+        "Δεν υπάρχουν ακόμη ενεργά αναλώσιμα για αυτό το ακίνητο.",
+      helperText:
+        "Η λίστα καθαριότητας χρησιμοποιεί αυτόματα τη βασική λίστα του ακινήτου. Η λίστα αναλωσίμων χρησιμοποιεί τα ενεργά αναλώσιμα του ακινήτου.",
+      atLeastOneSection:
+        "Πρέπει να επιλέξεις τουλάχιστον μία ενότητα εργασίας.",
     },
 
     list: {
@@ -391,12 +427,16 @@ function getTexts(language: "el" | "en") {
         "Καθαρή εικόνα μόνο για εργασίες που χρειάζονται ακόμη ενέργεια.",
       noTasks: "Δεν υπάρχουν ανοιχτές εργασίες.",
       viewTask: "Προβολή εργασίας",
-      activeChecklist: "Ενεργή λίστα",
-      noChecklist: "Δεν υπάρχει λίστα",
       noBooking: "Χωρίς κράτηση",
       notAssigned: "Δεν έχει ανατεθεί",
       notes: "Σημειώσεις",
       result: "Αποτέλεσμα",
+      cleaningSection: "Λίστα καθαριότητας",
+      suppliesSection: "Λίστα αναλωσίμων",
+      notEnabled: "Δεν στάλθηκε",
+      submitted: "Υποβλήθηκε",
+      notSubmitted: "Δεν υποβλήθηκε",
+      autoSupplies: "Αυτόματα από τα ενεργά αναλώσιμα",
     },
 
     fields: {
@@ -407,9 +447,9 @@ function getTexts(language: "el" | "en") {
       status: "Κατάσταση εργασίας",
       nextStep: "Επόμενο βήμα",
       actionGuide: "Τι χρειάζεται τώρα",
-      checklistStatus: "Κατάσταση λίστας",
       requirements: "Απαιτήσεις",
       createdAt: "Δημιουργία",
+      assignment: "Ανάθεση",
     },
 
     loading: "Φόρτωση εργασιών ακινήτου...",
@@ -440,7 +480,8 @@ function getTexts(language: "el" | "en") {
     },
 
     requirements: {
-      checklist: "Checklist",
+      cleaning: "Λίστα καθαριότητας",
+      supplies: "Λίστα αναλωσίμων",
       photos: "Φωτογραφίες",
       approval: "Έγκριση",
       none: "Καμία ειδική απαίτηση",
@@ -480,7 +521,9 @@ function propertyStatusLabel(
   status?: string | null,
   texts?: ReturnType<typeof getTexts>
 ) {
-  const key = (status || "").toLowerCase() as keyof ReturnType<typeof getTexts>["status"]
+  const key = (status || "").toLowerCase() as keyof ReturnType<
+    typeof getTexts
+  >["status"]
   return texts?.status[key] || status || "—"
 }
 
@@ -488,15 +531,10 @@ function taskStatusLabel(
   status?: string | null,
   texts?: ReturnType<typeof getTexts>
 ) {
-  const key = (status || "").toLowerCase() as keyof ReturnType<typeof getTexts>["status"]
+  const key = (status || "").toLowerCase() as keyof ReturnType<
+    typeof getTexts
+  >["status"]
   return texts?.status[key] || status || "—"
-}
-
-function assignmentStatusLabel(
-  status?: string | null,
-  texts?: ReturnType<typeof getTexts>
-) {
-  return taskStatusLabel(status, texts)
 }
 
 function checklistStatusLabel(
@@ -509,12 +547,14 @@ function checklistStatusLabel(
     if (normalized === "pending") return "Pending"
     if (normalized === "in_progress") return "In progress"
     if (normalized === "completed") return "Submitted"
+    if (normalized === "submitted") return "Submitted"
     return status || "—"
   }
 
   if (normalized === "pending") return "Σε αναμονή"
   if (normalized === "in_progress") return "Σε εξέλιξη"
   if (normalized === "completed") return "Υποβλήθηκε"
+  if (normalized === "submitted") return "Υποβλήθηκε"
   return status || "—"
 }
 
@@ -530,7 +570,9 @@ function propertyTypeLabel(
   value?: string | null,
   texts?: ReturnType<typeof getTexts>
 ) {
-  const key = (value || "").toLowerCase() as keyof ReturnType<typeof getTexts>["types"]
+  const key = (value || "").toLowerCase() as keyof ReturnType<
+    typeof getTexts
+  >["types"]
   return texts?.types[key] || value || "—"
 }
 
@@ -582,7 +624,9 @@ function sourceLabel(
   value?: string | null,
   texts?: ReturnType<typeof getTexts>
 ) {
-  const key = (value || "").toLowerCase() as keyof ReturnType<typeof getTexts>["sources"]
+  const key = (value || "").toLowerCase() as keyof ReturnType<
+    typeof getTexts
+  >["sources"]
   return texts?.sources[key] || value || "—"
 }
 
@@ -590,13 +634,35 @@ function priorityLabel(
   value?: string | null,
   texts?: ReturnType<typeof getTexts>
 ) {
-  const key = (value || "").toLowerCase() as keyof ReturnType<typeof getTexts>["priorities"]
+  const key = (value || "").toLowerCase() as keyof ReturnType<
+    typeof getTexts
+  >["priorities"]
   return texts?.priorities[key] || value || "—"
 }
 
 function getLatestAssignment(task: PropertyTask) {
   const assignments = safeArray(task.assignments)
   return assignments[0] || null
+}
+
+function getCleaningRun(task: PropertyTask) {
+  if (task.cleaningChecklistRun) return task.cleaningChecklistRun
+  if (task.sendCleaningChecklist && task.checklistRun) return task.checklistRun
+  return null
+}
+
+function getSuppliesRun(task: PropertyTask) {
+  if (task.suppliesChecklistRun) return task.suppliesChecklistRun
+  return null
+}
+
+function isRunSubmitted(run?: TaskChecklistRun | null) {
+  if (!run) return false
+  if (run.completedAt) return true
+
+  return ["completed", "submitted"].includes(
+    String(run.status || "").toLowerCase()
+  )
 }
 
 function getInitialCreateForm(): CreateTaskFormState {
@@ -617,9 +683,9 @@ function getInitialCreateForm(): CreateTaskFormState {
     scheduledEndTime: "",
     dueDate: "",
     bookingId: "",
-    checklistTemplateId: "",
+    sendCleaningChecklist: true,
+    sendSuppliesChecklist: false,
     requiresPhotos: false,
-    requiresChecklist: true,
     requiresApproval: false,
     notes: "",
     resultNotes: "",
@@ -632,58 +698,110 @@ function isOpenTask(task: PropertyTask) {
   )
 }
 
+function canCancelTask(task: PropertyTask) {
+  const status = String(task.status || "").toLowerCase()
+  return ["pending", "assigned", "accepted", "in_progress"].includes(status)
+}
+
 function getTaskActionGuide(
   task: PropertyTask,
   texts: ReturnType<typeof getTexts>
 ) {
   const status = String(task.status || "").toLowerCase()
-  const checklistStatus = String(task.checklistRun?.status || "").toLowerCase()
+
+  const cleaningEnabled = Boolean(task.sendCleaningChecklist)
+  const suppliesEnabled = Boolean(task.sendSuppliesChecklist)
+
+  const cleaningRun = getCleaningRun(task)
+  const suppliesRun = getSuppliesRun(task)
+
+  const cleaningSubmitted = isRunSubmitted(cleaningRun)
+  const suppliesSubmitted = isRunSubmitted(suppliesRun)
 
   if (status === "pending") {
     return {
-      step: "Ανάθεση συνεργάτη",
-      guide: "Η εργασία είναι νέα και χρειάζεται ανάθεση.",
+      step: texts.locale === "en-GB" ? "Assign partner" : "Ανάθεση συνεργάτη",
+      guide:
+        texts.locale === "en-GB"
+          ? "The task is new and needs assignment."
+          : "Η εργασία είναι νέα και χρειάζεται ανάθεση.",
     }
   }
 
   if (status === "assigned") {
     return {
-      step: "Αναμονή αποδοχής",
-      guide: "Η εργασία έχει ανατεθεί και περιμένει αποδοχή.",
+      step: texts.locale === "en-GB" ? "Waiting acceptance" : "Αναμονή αποδοχής",
+      guide:
+        texts.locale === "en-GB"
+          ? "The task has been assigned and is waiting for acceptance."
+          : "Η εργασία έχει ανατεθεί και περιμένει αποδοχή.",
     }
   }
 
-  if (status === "accepted" && task.requiresChecklist && checklistStatus !== "completed") {
-    return {
-      step: "Αναμονή υποβολής λίστας",
-      guide: "Ο συνεργάτης αποδέχτηκε την εργασία.",
+  if (status === "accepted" || status === "in_progress") {
+    if (cleaningEnabled && !cleaningSubmitted) {
+      return {
+        step:
+          texts.locale === "en-GB"
+            ? "Waiting cleaning checklist"
+            : "Αναμονή λίστας καθαριότητας",
+        guide:
+          texts.locale === "en-GB"
+            ? "The cleaning checklist still needs to be submitted."
+            : "Η λίστα καθαριότητας δεν έχει ακόμη υποβληθεί.",
+      }
     }
-  }
 
-  if (status === "accepted" && !task.requiresChecklist) {
-    return {
-      step: "Έναρξη εκτέλεσης",
-      guide: "Ο συνεργάτης αποδέχτηκε την εργασία.",
+    if (suppliesEnabled && !suppliesSubmitted) {
+      return {
+        step:
+          texts.locale === "en-GB"
+            ? "Waiting supplies checklist"
+            : "Αναμονή λίστας αναλωσίμων",
+        guide:
+          texts.locale === "en-GB"
+            ? "The supplies checklist still needs to be submitted."
+            : "Η λίστα αναλωσίμων δεν έχει ακόμη υποβληθεί.",
+      }
     }
-  }
 
-  if (status === "in_progress" && task.requiresChecklist && checklistStatus !== "completed") {
-    return {
-      step: "Αναμονή υποβολής λίστας",
-      guide: "Η εργασία εκτελείται και αναμένεται η υποβολή της λίστας.",
+    if (
+      (!cleaningEnabled || cleaningSubmitted) &&
+      (!suppliesEnabled || suppliesSubmitted)
+    ) {
+      return {
+        step:
+          texts.locale === "en-GB"
+            ? "Review and complete"
+            : "Έλεγχος και ολοκλήρωση",
+        guide:
+          texts.locale === "en-GB"
+            ? "The required sections are submitted and the task can be reviewed."
+            : "Οι απαιτούμενες ενότητες έχουν υποβληθεί και η εργασία μπορεί να ελεγχθεί.",
+      }
     }
-  }
 
-  if (status === "in_progress" && checklistStatus === "completed") {
     return {
-      step: "Έλεγχος και ολοκλήρωση",
-      guide: "Η λίστα υποβλήθηκε και μένει ο τελικός έλεγχος.",
+      step:
+        texts.locale === "en-GB"
+          ? "Start execution"
+          : "Έναρξη εκτέλεσης",
+      guide:
+        texts.locale === "en-GB"
+          ? "The partner has accepted the task."
+          : "Ο συνεργάτης έχει αποδεχτεί την εργασία.",
     }
   }
 
   return {
-    step: "Έλεγχος εργασίας",
-    guide: "Άνοιξε την εργασία για πλήρη εικόνα.",
+    step:
+      texts.locale === "en-GB"
+        ? "Review task"
+        : "Έλεγχος εργασίας",
+    guide:
+      texts.locale === "en-GB"
+        ? "Open the task for full details."
+        : "Άνοιξε την εργασία για πλήρη εικόνα.",
   }
 }
 
@@ -693,13 +811,30 @@ function getRequirementsText(
 ) {
   const values: string[] = []
 
-  if (task.requiresChecklist) values.push(texts.requirements.checklist)
+  if (task.sendCleaningChecklist) {
+    values.push(texts.requirements.cleaning)
+  }
+
+  if (task.sendSuppliesChecklist) {
+    values.push(texts.requirements.supplies)
+  }
+
   if (task.requiresPhotos) values.push(texts.requirements.photos)
   if (task.requiresApproval) values.push(texts.requirements.approval)
 
   if (values.length === 0) return texts.requirements.none
 
   return values.join(" • ")
+}
+
+function getSectionStatusText(
+  enabled: boolean,
+  submitted: boolean,
+  texts: ReturnType<typeof getTexts>
+) {
+  if (!enabled) return texts.list.notEnabled
+  if (submitted) return texts.list.submitted
+  return texts.list.notSubmitted
 }
 
 export default function PropertyTasksPage({ params }: PageProps) {
@@ -711,10 +846,16 @@ export default function PropertyTasksPage({ params }: PageProps) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  const [primaryChecklist, setPrimaryChecklist] =
+    useState<ChecklistTemplateOption | null>(null)
+  const [activeSuppliesCount, setActiveSuppliesCount] = useState(0)
+
   const [activeFilter, setActiveFilter] = useState<TaskFilter>("all_open")
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const [cancelError, setCancelError] = useState<string | null>(null)
+  const [cancellingTaskId, setCancellingTaskId] = useState<string | null>(null)
 
   const [form, setForm] = useState<CreateTaskFormState>(getInitialCreateForm())
 
@@ -750,14 +891,63 @@ export default function PropertyTasksPage({ params }: PageProps) {
     }
   }
 
+  async function loadTaskCreationOptions() {
+    try {
+      const [checklistRes, suppliesRes] = await Promise.all([
+        fetch(`/api/property-checklists/${id}`, {
+          cache: "no-store",
+        }),
+        fetch(`/api/properties/${id}/supplies`, {
+          cache: "no-store",
+        }),
+      ])
+
+      const checklistJson = (await checklistRes.json().catch(() => null)) as
+        | PropertyChecklistResponse
+        | null
+      const suppliesJson = (await suppliesRes.json().catch(() => null)) as
+        | PropertySuppliesResponse
+        | null
+
+      const nextPrimaryChecklist =
+        checklistRes.ok && checklistJson?.primaryTemplate
+          ? checklistJson.primaryTemplate
+          : null
+
+      const nextActiveSuppliesCount =
+        suppliesRes.ok && Array.isArray(suppliesJson?.activeSupplies)
+          ? suppliesJson.activeSupplies.length
+          : 0
+
+      setPrimaryChecklist(nextPrimaryChecklist)
+      setActiveSuppliesCount(nextActiveSuppliesCount)
+
+      setForm((prev) => ({
+        ...prev,
+        sendCleaningChecklist: Boolean(nextPrimaryChecklist),
+        sendSuppliesChecklist: nextActiveSuppliesCount > 0,
+      }))
+    } catch (err) {
+      console.error("Load task creation options error:", err)
+      setPrimaryChecklist(null)
+      setActiveSuppliesCount(0)
+
+      setForm((prev) => ({
+        ...prev,
+        sendCleaningChecklist: false,
+        sendSuppliesChecklist: false,
+      }))
+    }
+  }
+
   useEffect(() => {
     loadPropertyTasks()
+    loadTaskCreationOptions()
   }, [id])
 
   const property = data?.property ?? null
   const tasks = safeArray(data?.tasks)
   const bookings = safeArray(data?.bookings)
-  const checklistTemplates = safeArray(data?.checklistTemplates)
 
   const openTasks = useMemo(() => {
     return tasks.filter(isOpenTask)
@@ -773,7 +963,8 @@ export default function PropertyTasksPage({ params }: PageProps) {
     const withoutAssignment = openTasks.filter(
       (task) => !getLatestAssignment(task)?.partner?.id
     ).length
-    const withChecklist = openTasks.filter((task) => !!task.checklistRun).length
+    const withCleaning = openTasks.filter((task) => Boolean(task.sendCleaningChecklist)).length
+    const withSupplies = openTasks.filter((task) => Boolean(task.sendSuppliesChecklist)).length
 
     return {
       allOpen,
@@ -783,7 +974,8 @@ export default function PropertyTasksPage({ params }: PageProps) {
       inProgress,
       completed,
       withoutAssignment,
-      withChecklist,
+      withCleaning,
+      withSupplies,
     }
   }, [openTasks, tasks])
 
@@ -810,8 +1002,12 @@ export default function PropertyTasksPage({ params }: PageProps) {
       result = result.filter((task) => !getLatestAssignment(task)?.partner?.id)
     }
 
-    if (activeFilter === "with_checklist") {
-      result = result.filter((task) => !!task.checklistRun)
+    if (activeFilter === "with_cleaning") {
+      result = result.filter((task) => Boolean(task.sendCleaningChecklist))
+    }
+
+    if (activeFilter === "with_supplies") {
+      result = result.filter((task) => Boolean(task.sendSuppliesChecklist))
     }
 
     return result.sort((a, b) => {
@@ -828,6 +1024,18 @@ export default function PropertyTasksPage({ params }: PageProps) {
       setSubmitting(true)
       setSubmitError(null)
 
+      if (!form.sendCleaningChecklist && !form.sendSuppliesChecklist) {
+        throw new Error(texts.create.atLeastOneSection)
+      }
+
+      if (form.sendCleaningChecklist && !primaryChecklist) {
+        throw new Error(texts.create.noPrimaryChecklist)
+      }
+
+      if (form.sendSuppliesChecklist && activeSuppliesCount === 0) {
+        throw new Error(texts.create.noActiveSupplies)
+      }
+
       const payload = {
         title: form.title,
         description: form.description || null,
@@ -840,9 +1048,9 @@ export default function PropertyTasksPage({ params }: PageProps) {
         scheduledEndTime: form.scheduledEndTime || null,
         dueDate: form.dueDate || null,
         bookingId: form.bookingId || null,
-        checklistTemplateId: form.checklistTemplateId || null,
+        sendCleaningChecklist: form.sendCleaningChecklist,
+        sendSuppliesChecklist: form.sendSuppliesChecklist,
         requiresPhotos: form.requiresPhotos,
-        requiresChecklist: form.requiresChecklist,
         requiresApproval: form.requiresApproval,
         notes: form.notes || null,
         resultNotes: form.resultNotes || null,
@@ -862,9 +1070,14 @@ export default function PropertyTasksPage({ params }: PageProps) {
         throw new Error(json?.error || "Αποτυχία δημιουργίας εργασίας.")
       }
 
-      setForm(getInitialCreateForm())
+      setForm({
+        ...getInitialCreateForm(),
+        sendCleaningChecklist: Boolean(primaryChecklist),
+        sendSuppliesChecklist: activeSuppliesCount > 0,
+      })
       setShowCreateForm(false)
       await loadPropertyTasks()
+      await loadTaskCreationOptions()
     } catch (err) {
       console.error("Create property task error:", err)
       setSubmitError(
@@ -874,6 +1087,59 @@ export default function PropertyTasksPage({ params }: PageProps) {
       )
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  async function handleCancelTask(task: PropertyTask) {
+    try {
+      setCancelError(null)
+
+      if (!canCancelTask(task)) {
+        throw new Error(texts.cancelError)
+      }
+
+      const confirmed = window.confirm(texts.cancelTaskConfirm)
+      if (!confirmed) return
+
+      setCancellingTaskId(task.id)
+
+      const res = await fetch(`/api/tasks/${task.id}/cancel`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          reason:
+            language === "en"
+              ? "Cancelled from property open tasks page"
+              : "Ακύρωση από τη σελίδα ανοιχτών εργασιών ακινήτου",
+        }),
+      })
+
+      const rawText = await res.text()
+      let json: Record<string, unknown> | null = null
+
+      try {
+        json = rawText ? JSON.parse(rawText) : null
+      } catch {
+        json = null
+      }
+
+      if (!res.ok) {
+        const backendError =
+          (typeof json?.error === "string" && json.error) ||
+          rawText ||
+          texts.cancelError
+
+        throw new Error(backendError)
+      }
+
+      await loadPropertyTasks()
+    } catch (err) {
+      console.error("Cancel task error:", err)
+      setCancelError(err instanceof Error ? err.message : texts.cancelError)
+    } finally {
+      setCancellingTaskId(null)
     }
   }
 
@@ -1071,18 +1337,33 @@ export default function PropertyTasksPage({ params }: PageProps) {
           <div className="mt-2 text-3xl font-bold text-red-700">{metrics.withoutAssignment}</div>
         </button>
 
-        <button
-          type="button"
-          onClick={() => setActiveFilter("with_checklist")}
-          className={`rounded-2xl border p-5 shadow-sm text-left transition ${
-            activeFilter === "with_checklist"
-              ? "border-slate-900 bg-slate-50"
-              : "border-slate-200 bg-white hover:bg-slate-50"
-          }`}
-        >
-          <div className="text-sm text-slate-500">{texts.metrics.withChecklist}</div>
-          <div className="mt-2 text-3xl font-bold text-slate-900">{metrics.withChecklist}</div>
-        </button>
+        <div className="grid gap-4">
+          <button
+            type="button"
+            onClick={() => setActiveFilter("with_cleaning")}
+            className={`rounded-2xl border p-5 shadow-sm text-left transition ${
+              activeFilter === "with_cleaning"
+                ? "border-slate-900 bg-slate-50"
+                : "border-slate-200 bg-white hover:bg-slate-50"
+            }`}
+          >
+            <div className="text-sm text-slate-500">{texts.metrics.withCleaning}</div>
+            <div className="mt-2 text-3xl font-bold text-slate-900">{metrics.withCleaning}</div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveFilter("with_supplies")}
+            className={`rounded-2xl border p-5 shadow-sm text-left transition ${
+              activeFilter === "with_supplies"
+                ? "border-slate-900 bg-slate-50"
+                : "border-slate-200 bg-white hover:bg-slate-50"
+            }`}
+          >
+            <div className="text-sm text-slate-500">{texts.metrics.withSupplies}</div>
+            <div className="mt-2 text-3xl font-bold text-slate-900">{metrics.withSupplies}</div>
+          </button>
+        </div>
       </div>
 
       {showCreateForm ? (
@@ -1266,7 +1547,10 @@ export default function PropertyTasksPage({ params }: PageProps) {
                   {bookings.map((booking) => (
                     <option key={booking.id} value={booking.id}>
                       {booking.guestName || texts.create.noBooking} · {booking.sourcePlatform} ·{" "}
-                      {formatDate(booking.checkInDate, texts.locale)} - {formatDate(booking.checkOutDate, texts.locale)}
+                      {formatDate(booking.checkInDate, texts.locale)} - {formatDate(
+                        booking.checkOutDate,
+                        texts.locale
+                      )}
                     </option>
                   ))}
                 </select>
@@ -1289,24 +1573,51 @@ export default function PropertyTasksPage({ params }: PageProps) {
             </div>
 
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <h3 className="text-sm font-semibold text-slate-900">{texts.create.blockTitle}</h3>
+              <h3 className="text-sm font-semibold text-slate-900">
+                {texts.create.blockTitle}
+              </h3>
 
-              <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+              <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-2">
+                <label
+                  className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-sm ${
+                    primaryChecklist
+                      ? "border-slate-200 bg-white text-slate-700"
+                      : "border-slate-200 bg-slate-100 text-slate-400"
+                  }`}
+                >
                   <input
                     type="checkbox"
-                    checked={form.requiresChecklist}
+                    checked={form.sendCleaningChecklist}
                     onChange={(e) =>
                       setForm((prev) => ({
                         ...prev,
-                        requiresChecklist: e.target.checked,
-                        checklistTemplateId: e.target.checked
-                          ? prev.checklistTemplateId
-                          : "",
+                        sendCleaningChecklist: e.target.checked,
                       }))
                     }
+                    disabled={!primaryChecklist}
                   />
-                  {texts.create.requiresChecklist}
+                  {texts.create.sendCleaningChecklist}
+                </label>
+
+                <label
+                  className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-sm ${
+                    activeSuppliesCount > 0
+                      ? "border-slate-200 bg-white text-slate-700"
+                      : "border-slate-200 bg-slate-100 text-slate-400"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={form.sendSuppliesChecklist}
+                    onChange={(e) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        sendSuppliesChecklist: e.target.checked,
+                      }))
+                    }
+                    disabled={activeSuppliesCount === 0}
+                  />
+                  {texts.create.sendSuppliesChecklist}
                 </label>
 
                 <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
@@ -1336,36 +1647,31 @@ export default function PropertyTasksPage({ params }: PageProps) {
                   />
                   {texts.create.requiresApproval}
                 </label>
+              </div>
 
-                <div className="md:col-span-2 xl:col-span-3">
-                  <label className="mb-2 block text-sm font-medium text-slate-700">
-                    {texts.create.checklistTemplate}
-                  </label>
-                  <select
-                    value={form.checklistTemplateId}
-                    onChange={(e) =>
-                      setForm((prev) => ({
-                        ...prev,
-                        checklistTemplateId: e.target.value,
-                      }))
-                    }
-                    disabled={!form.requiresChecklist}
-                    className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none disabled:bg-slate-100 focus:border-slate-500"
-                  >
-                    <option value="">
-                      {form.requiresChecklist
-                        ? texts.create.fallbackChecklist
-                        : texts.create.checklistDisabled}
-                    </option>
-                    {checklistTemplates.map((template) => (
-                      <option key={template.id} value={template.id}>
-                        {template.title}
-                        {template.isPrimary ? " · Κύριο" : ""}
-                        {template.templateType ? ` · ${typeLabel(template.templateType)}` : ""}
-                      </option>
-                    ))}
-                  </select>
+              <div className="mt-4 space-y-3 rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700">
+                <div>
+                  <strong>{texts.create.primaryChecklistLabel}:</strong>{" "}
+                  {primaryChecklist?.title || texts.create.noPrimaryChecklist}
                 </div>
+
+                <div>
+                  <strong>{texts.create.activeSuppliesLabel}:</strong> {activeSuppliesCount}
+                </div>
+
+                <div className="text-xs text-slate-500">{texts.create.helperText}</div>
+
+                {!primaryChecklist ? (
+                  <div className="text-xs text-red-600">
+                    {texts.create.noPrimaryChecklist}
+                  </div>
+                ) : null}
+
+                {activeSuppliesCount === 0 ? (
+                  <div className="text-xs text-amber-600">
+                    {texts.create.noActiveSupplies}
+                  </div>
+                ) : null}
               </div>
             </div>
 
@@ -1419,7 +1725,11 @@ export default function PropertyTasksPage({ params }: PageProps) {
               <button
                 type="button"
                 onClick={() => {
-                  setForm(getInitialCreateForm())
+                  setForm({
+                    ...getInitialCreateForm(),
+                    sendCleaningChecklist: Boolean(primaryChecklist),
+                    sendSuppliesChecklist: activeSuppliesCount > 0,
+                  })
                   setSubmitError(null)
                   setShowCreateForm(false)
                 }}
@@ -1429,6 +1739,12 @@ export default function PropertyTasksPage({ params }: PageProps) {
               </button>
             </div>
           </form>
+        </div>
+      ) : null}
+
+      {cancelError ? (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {cancelError}
         </div>
       ) : null}
 
@@ -1445,8 +1761,18 @@ export default function PropertyTasksPage({ params }: PageProps) {
             {filteredTasks.map((task) => {
               const latestAssignment = getLatestAssignment(task)
               const taskGuide = getTaskActionGuide(task, texts)
-              const activeChecklistName =
-                task.checklistRun?.template?.title || texts.list.noChecklist
+
+              const cleaningEnabled = Boolean(task.sendCleaningChecklist)
+              const suppliesEnabled = Boolean(task.sendSuppliesChecklist)
+
+              const cleaningRun = getCleaningRun(task)
+              const suppliesRun = getSuppliesRun(task)
+
+              const cleaningSubmitted = isRunSubmitted(cleaningRun)
+              const suppliesSubmitted = isRunSubmitted(suppliesRun)
+
+              const taskCanBeCancelled = canCancelTask(task)
+              const isCancelling = cancellingTaskId === task.id
 
               return (
                 <div key={task.id} className="p-5">
@@ -1493,6 +1819,17 @@ export default function PropertyTasksPage({ params }: PageProps) {
                         >
                           {texts.list.viewTask}
                         </Link>
+
+                        {taskCanBeCancelled ? (
+                          <button
+                            type="button"
+                            onClick={() => handleCancelTask(task)}
+                            disabled={isCancelling}
+                            className="inline-flex items-center rounded-xl border border-red-300 bg-white px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-60"
+                          >
+                            {isCancelling ? texts.cancelling : texts.cancelTask}
+                          </button>
+                        ) : null}
                       </div>
                     </div>
 
@@ -1523,16 +1860,10 @@ export default function PropertyTasksPage({ params }: PageProps) {
 
                       <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                         <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                          {texts.list.activeChecklist}
+                          {texts.fields.requirements}
                         </div>
-                        <div className="mt-2 text-sm font-semibold text-slate-900">
-                          {activeChecklistName}
-                        </div>
-                        <div className="mt-2 text-sm text-slate-600">
-                          {texts.fields.checklistStatus}:{" "}
-                          {task.checklistRun
-                            ? checklistStatusLabel(task.checklistRun.status, texts)
-                            : "—"}
+                        <div className="mt-2 text-sm text-slate-900">
+                          {getRequirementsText(task, texts)}
                         </div>
                       </div>
                     </div>
@@ -1571,13 +1902,40 @@ export default function PropertyTasksPage({ params }: PageProps) {
                     <div className="grid gap-4 md:grid-cols-2">
                       <div className="rounded-2xl border border-slate-200 bg-white p-4">
                         <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                          {texts.fields.requirements}
+                          {texts.list.cleaningSection}
                         </div>
-                        <div className="mt-2 text-sm text-slate-900">
-                          {getRequirementsText(task, texts)}
+                        <div className="mt-2 text-sm font-semibold text-slate-900">
+                          {cleaningEnabled
+                            ? cleaningRun?.template?.title || texts.list.cleaningSection
+                            : texts.list.notEnabled}
+                        </div>
+                        <div className="mt-2 text-sm text-slate-600">
+                          {getSectionStatusText(cleaningEnabled, cleaningSubmitted, texts)}
+                          {cleaningEnabled && cleaningRun
+                            ? ` · ${checklistStatusLabel(cleaningRun.status, texts)}`
+                            : ""}
                         </div>
                       </div>
 
+                      <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          {texts.list.suppliesSection}
+                        </div>
+                        <div className="mt-2 text-sm font-semibold text-slate-900">
+                          {suppliesEnabled
+                            ? texts.list.autoSupplies
+                            : texts.list.notEnabled}
+                        </div>
+                        <div className="mt-2 text-sm text-slate-600">
+                          {getSectionStatusText(suppliesEnabled, suppliesSubmitted, texts)}
+                          {suppliesEnabled && suppliesRun
+                            ? ` · ${checklistStatusLabel(suppliesRun.status, texts)}`
+                            : ""}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-4 md:grid-cols-2">
                       <div className="rounded-2xl border border-slate-200 bg-white p-4">
                         <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                           {texts.fields.createdAt}
@@ -1585,10 +1943,14 @@ export default function PropertyTasksPage({ params }: PageProps) {
                         <div className="mt-2 text-sm text-slate-900">
                           {formatDateTime(task.createdAt, texts.locale)}
                         </div>
-                        <div className="mt-2 text-sm text-slate-600">
-                          {latestAssignment
-                            ? assignmentStatusLabel(latestAssignment.status, texts)
-                            : texts.list.notAssigned}
+                      </div>
+
+                      <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          {texts.fields.assignment}
+                        </div>
+                        <div className="mt-2 text-sm text-slate-900">
+                          {latestAssignment?.status || texts.list.notAssigned}
                         </div>
                       </div>
                     </div>

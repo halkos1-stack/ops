@@ -16,6 +16,10 @@ function isExpired(date?: Date | string | null) {
   return parsed.getTime() < Date.now()
 }
 
+function normalizeStatus(value: unknown) {
+  return String(value ?? "").trim().toLowerCase()
+}
+
 export async function GET(_req: NextRequest, context: RouteContext) {
   try {
     const { token } = await context.params
@@ -72,14 +76,13 @@ export async function GET(_req: NextRequest, context: RouteContext) {
     const assignments = await prisma.taskAssignment.findMany({
       where: {
         partnerId: portalAccess.partnerId,
-        status: "completed",
       },
       orderBy: [
         {
-          completedAt: "desc",
+          assignedAt: "desc",
         },
         {
-          assignedAt: "desc",
+          createdAt: "desc",
         },
       ],
       include: {
@@ -115,28 +118,52 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       }
     }
 
-    const rows = Array.from(latestAssignmentsMap.values()).map((assignment) => ({
-      assignmentId: assignment.id,
-      assignmentStatus: assignment.status,
-      assignedAt: assignment.assignedAt,
-      acceptedAt: assignment.acceptedAt,
-      startedAt: assignment.startedAt,
-      completedAt: assignment.completedAt,
-      task: {
-        id: assignment.task.id,
-        title: assignment.task.title,
-        description: assignment.task.description,
-        taskType: assignment.task.taskType,
-        priority: assignment.task.priority,
-        status: assignment.task.status,
-        scheduledDate: assignment.task.scheduledDate,
-        scheduledStartTime: assignment.task.scheduledStartTime,
-        scheduledEndTime: assignment.task.scheduledEndTime,
-        requiresChecklist: assignment.task.requiresChecklist,
-        checklistRun: assignment.task.checklistRun,
-        property: assignment.task.property,
-      },
-    }))
+    const rows = Array.from(latestAssignmentsMap.values())
+      .filter((assignment) => {
+        const taskStatus = normalizeStatus(assignment.task.status)
+        return taskStatus === "completed" || taskStatus === "cancelled"
+      })
+      .sort((a, b) => {
+        const aTime = new Date(
+          a.completedAt ||
+            a.task.completedAt ||
+            a.task.scheduledDate ||
+            a.assignedAt ||
+            0
+        ).getTime()
+
+        const bTime = new Date(
+          b.completedAt ||
+            b.task.completedAt ||
+            b.task.scheduledDate ||
+            b.assignedAt ||
+            0
+        ).getTime()
+
+        return bTime - aTime
+      })
+      .map((assignment) => ({
+        assignmentId: assignment.id,
+        assignmentStatus: assignment.status,
+        assignedAt: assignment.assignedAt,
+        acceptedAt: assignment.acceptedAt,
+        startedAt: assignment.startedAt,
+        completedAt: assignment.completedAt,
+        task: {
+          id: assignment.task.id,
+          title: assignment.task.title,
+          description: assignment.task.description,
+          taskType: assignment.task.taskType,
+          priority: assignment.task.priority,
+          status: assignment.task.status,
+          scheduledDate: assignment.task.scheduledDate,
+          scheduledStartTime: assignment.task.scheduledStartTime,
+          scheduledEndTime: assignment.task.scheduledEndTime,
+          requiresChecklist: assignment.task.requiresChecklist,
+          checklistRun: assignment.task.checklistRun,
+          property: assignment.task.property,
+        },
+      }))
 
     return NextResponse.json({
       partner: portalAccess.partner,

@@ -242,6 +242,10 @@ type TaskAssignmentWithDetails = Prisma.TaskAssignmentGetPayload<
   typeof taskAssignmentWithDetailsArgs
 >
 
+function normalizeStatus(value: unknown) {
+  return String(value ?? "").trim().toLowerCase()
+}
+
 export async function GET(_req: NextRequest, context: RouteContext) {
   try {
     const { token, taskId } = await context.params
@@ -326,7 +330,14 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       (propertySupply) => propertySupply.supplyItem?.isActive
     )
 
+    const taskStatus = normalizeStatus(latestAssignment.task.status)
+    const isCancelled = taskStatus === "cancelled"
+
     const payload = {
+      isCancelled,
+      cancellationMessage: isCancelled
+        ? "Η εργασία έχει ακυρωθεί από τον διαχειριστή και δεν απαιτείται πλέον ενέργεια."
+        : null,
       assignment: {
         id: latestAssignment.id,
         status: latestAssignment.status,

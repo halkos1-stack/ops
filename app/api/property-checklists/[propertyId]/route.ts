@@ -51,15 +51,6 @@ function toNumberValue(value: unknown, fallback = 0) {
   return Number.isFinite(num) ? num : fallback
 }
 
-function normalizeTemplateType(value: unknown) {
-  const normalized = toStringValue(value, "main").toLowerCase()
-
-  if (normalized === "main" || normalized === "core") return "main"
-  if (normalized === "support" || normalized === "helper") return "support"
-
-  return "main"
-}
-
 function normalizeItemType(value: unknown) {
   const normalized = toStringValue(value, "boolean").toLowerCase()
 
@@ -95,11 +86,9 @@ function normalizeItems(items: unknown): Array<{
   requiresPhoto: boolean
   opensIssueOnFail: boolean
   optionsText: string | null
-
   issueTypeOnFail: string | null
   issueSeverityOnFail: string | null
   failureValuesText: string | null
-
   linkedSupplyItemId: string | null
   supplyUpdateMode: string
   supplyQuantity: number | null
@@ -136,19 +125,23 @@ function normalizeItems(items: unknown): Array<{
     .filter((item): item is NonNullable<typeof item> => item !== null)
 }
 
-function isLegacySupplyTemplate(template: {
+function isSupplyLikeTemplate(template: {
   title: string
   description: string | null
+  templateType?: string | null
   items: Array<{
     category: string | null
     linkedSupplyItemId: string | null
-    supplyUpdateMode: string
+    supplyUpdateMode: string | null
   }>
 }) {
   const title = String(template.title || "").toLowerCase()
   const description = String(template.description || "").toLowerCase()
+  const templateType = String(template.templateType || "").toLowerCase()
 
   if (
+    templateType === "supplies" ||
+    templateType === "supply" ||
     title.includes("αναλωσι") ||
     title.includes("suppl") ||
     description.includes("αναλωσι") ||
@@ -159,7 +152,7 @@ function isLegacySupplyTemplate(template: {
 
   if (!template.items.length) return false
 
-  const supplyLikeItems = template.items.filter((item) => {
+  return template.items.some((item) => {
     const category = String(item.category || "").toLowerCase()
     const mode = String(item.supplyUpdateMode || "").toLowerCase()
 
@@ -172,52 +165,74 @@ function isLegacySupplyTemplate(template: {
       category.includes("αναλω")
     )
   })
+}
 
-  return supplyLikeItems.length > 0
+async function getPropertyWithAccess(propertyId: string) {
+  const access = await requireApiAppAccess()
+
+  if (!access.ok) {
+    return {
+      ok: false as const,
+      response: access.response,
+    }
+  }
+
+  const { auth } = access
+
+  const property = await prisma.property.findUnique({
+    where: { id: propertyId },
+    select: {
+      id: true,
+      organizationId: true,
+      code: true,
+      name: true,
+      address: true,
+    },
+  })
+
+  if (!property) {
+    return {
+      ok: false as const,
+      response: NextResponse.json(
+        { error: "Το ακίνητο δεν βρέθηκε." },
+        { status: 404 }
+      ),
+    }
+  }
+
+  if (!canAccessOrganization(auth, property.organizationId)) {
+    return {
+      ok: false as const,
+      response: NextResponse.json(
+        { error: "Δεν έχετε πρόσβαση σε αυτό το ακίνητο." },
+        { status: 403 }
+      ),
+    }
+  }
+
+  return {
+    ok: true as const,
+    property,
+  }
 }
 
 export async function GET(_req: NextRequest, context: RouteContext) {
   try {
-    const access = await requireApiAppAccess()
-
-    if (!access.ok) {
-      return access.response
-    }
-
-    const { auth } = access
     const { propertyId } = await context.params
+    const accessResult = await getPropertyWithAccess(propertyId)
 
-    const property = await prisma.property.findUnique({
-      where: { id: propertyId },
-      select: {
-        id: true,
-        organizationId: true,
-        code: true,
-        name: true,
-        address: true,
-      },
-    })
-
-    if (!property) {
-      return NextResponse.json(
-        { error: "Το ακίνητο δεν βρέθηκε." },
-        { status: 404 }
-      )
+    if (!accessResult.ok) {
+      return accessResult.response
     }
 
-    if (!canAccessOrganization(auth, property.organizationId)) {
-      return NextResponse.json(
-        { error: "Δεν έχετε πρόσβαση σε αυτό το ακίνητο." },
-        { status: 403 }
-      )
-    }
+    const { property } = accessResult
 
     const rawTemplates = await prisma.propertyChecklistTemplate.findMany({
       where: {
         propertyId,
         organizationId: property.organizationId,
       },
-      orderBy: [{ isPrimary: "desc" }, { createdAt: "desc" }],
+      orderBy: [{ isPrimary: "desc" }, { updatedAt: "desc" }],
       include: {
         items: {
           orderBy: {
@@ -245,12 +260,14 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       },
     })
 
-    const templates = rawTemplates.filter(
-      (template) => !isLegacySupplyTemplate(template)
+    const cleaningTemplates = rawTemplates.filter(
+      (template) => !isSupplyLikeTemplate(template)
     )
 
     const primaryTemplate =
-      templates.find((template) => template.isPrimary) ?? null
+      cleaningTemplates.find((template) => template.isPrimary) ??
+      cleaningTemplates[0] ??
+      null
 
     return NextResponse.json({
       property: {
@@ -259,14 +276,14 @@ export async function GET(_req: NextRequest, context: RouteContext) {
         name: property.name,
         address: property.address,
       },
-      templates,
+      templates: primaryTemplate ? [primaryTemplate] : [],
       primaryTemplate,
     })
   } catch (error) {
-    console.error("Property checklist templates GET error:", error)
+    console.error("Property checklist GET error:", error)
 
     return NextResponse.json(
-      { error: "Αποτυχία φόρτωσης προτύπων checklist." },
+      { error: "Αποτυχία φόρτωσης λίστας καθαριότητας ακινήτου." },
       { status: 500 }
     )
   }
@@ -274,73 +291,47 @@ export async function GET(_req: NextRequest, context: RouteContext) {
 
 export async function POST(req: NextRequest, context: RouteContext) {
   try {
-    const access = await requireApiAppAccess()
-
-    if (!access.ok) {
-      return access.response
-    }
-
-    const { auth } = access
     const { propertyId } = await context.params
+    const accessResult = await getPropertyWithAccess(propertyId)
+
+    if (!accessResult.ok) {
+      return accessResult.response
+    }
+
+    const { property } = accessResult
     const body = await req.json()
-
-    const property = await prisma.property.findUnique({
-      where: { id: propertyId },
-      select: {
-        id: true,
-        organizationId: true,
-      },
-    })
-
-    if (!property) {
-      return NextResponse.json(
-        { error: "Το ακίνητο δεν βρέθηκε." },
-        { status: 404 }
-      )
-    }
-
-    if (!canAccessOrganization(auth, property.organizationId)) {
-      return NextResponse.json(
-        { error: "Δεν έχετε πρόσβαση σε αυτό το ακίνητο." },
-        { status: 403 }
-      )
-    }
 
     const title = toStringValue(body.title)
     const description = toNullableString(body.description)
-    const templateType = normalizeTemplateType(body.templateType)
-    const isPrimary = toBoolean(body.isPrimary, false)
-    const isActive = toBoolean(body.isActive, true)
     const items = normalizeItems(body.items)
     const organizationId = property.organizationId
 
     if (!title) {
       return NextResponse.json(
-        { error: "Ο τίτλος προτύπου είναι υποχρεωτικός." },
+        { error: "Ο τίτλος λίστας είναι υποχρεωτικός." },
         { status: 400 }
       )
     }
 
     if (items.length === 0) {
       return NextResponse.json(
-        { error: "Το πρότυπο πρέπει να περιέχει τουλάχιστον ένα στοιχείο." },
+        { error: "Η λίστα πρέπει να περιέχει τουλάχιστον ένα στοιχείο." },
         { status: 400 }
       )
     }
 
     const template = await prisma.$transaction(async (tx) => {
-      if (isPrimary) {
-        await tx.propertyChecklistTemplate.updateMany({
-          where: {
-            propertyId,
-            organizationId,
-            isPrimary: true,
-          },
-          data: {
-            isPrimary: false,
-          },
-        })
-      }
+      await tx.propertyChecklistTemplate.updateMany({
+        where: {
+          propertyId,
+          organizationId,
+          isPrimary: true,
+        },
+        data: {
+          isPrimary: false,
+          templateType: "main",
+        },
+      })
 
       return tx.propertyChecklistTemplate.create({
         data: {
@@ -348,9 +339,9 @@ export async function POST(req: NextRequest, context: RouteContext) {
           propertyId,
           title,
           description,
-          templateType,
-          isPrimary,
-          isActive,
+          templateType: "main",
+          isPrimary: true,
+          isActive: true,
           items: {
             create: items,
           },
@@ -359,6 +350,24 @@ export async function POST(req: NextRequest, context: RouteContext) {
           items: {
             orderBy: {
               sortOrder: "asc",
+            },
+            select: {
+              id: true,
+              label: true,
+              description: true,
+              itemType: true,
+              isRequired: true,
+              sortOrder: true,
+              category: true,
+              requiresPhoto: true,
+              opensIssueOnFail: true,
+              optionsText: true,
+              issueTypeOnFail: true,
+              issueSeverityOnFail: true,
+              failureValuesText: true,
+              linkedSupplyItemId: true,
+              supplyUpdateMode: true,
+              supplyQuantity: true,
             },
           },
           property: {
@@ -381,16 +390,13 @@ export async function POST(req: NextRequest, context: RouteContext) {
       { status: 201 }
     )
   } catch (error) {
-    console.error("Property checklist template POST error:", error)
+    console.error("Property checklist POST error:", error)
 
     const message =
       error instanceof Error
         ? error.message
-        : "Αποτυχία δημιουργίας προτύπου checklist."
+        : "Αποτυχία δημιουργίας λίστας καθαριότητας."
 
-    return NextResponse.json(
-      { error: message },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }

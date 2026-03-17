@@ -26,6 +26,7 @@ export default function DashboardSidebar() {
       ? [
           { label: "Dashboard", href: "/dashboard" },
           { label: "Properties", href: "/properties" },
+          { label: "Bookings", href: "/bookings" },
           { label: "Tasks", href: "/tasks" },
           { label: "Partners", href: "/partners" },
           { label: "Organization users", href: "/users" },
@@ -37,6 +38,7 @@ export default function DashboardSidebar() {
       : [
           { label: "Πίνακας ελέγχου", href: "/dashboard" },
           { label: "Ακίνητα", href: "/properties" },
+          { label: "Κρατήσεις", href: "/bookings" },
           { label: "Εργασίες", href: "/tasks" },
           { label: "Συνεργάτες", href: "/partners" },
           { label: "Χρήστες οργανισμού", href: "/users" },

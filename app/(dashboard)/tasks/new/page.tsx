@@ -44,8 +44,19 @@ type ChecklistResponse = {
 type PropertySuppliesResponse = {
   activeSupplies?: Array<{
     id: string
-    propertyId: string
-    supplyItemId: string
+    propertySupplyId?: string
+    propertyId?: string
+    supplyItemId?: string
+    name?: string
+    code?: string
+  }>
+  supplies?: Array<{
+    id: string
+    propertySupplyId?: string
+    propertyId?: string
+    supplyItemId?: string
+    name?: string
+    code?: string
   }>
 }
 
@@ -182,16 +193,22 @@ export default function NewTaskPage() {
       const nextPrimaryTemplate =
         checklistRes.ok && checklistData ? checklistData.primaryTemplate || null : null
 
-      const nextActiveSuppliesCount =
-        suppliesRes.ok && Array.isArray(suppliesData?.activeSupplies)
-          ? suppliesData!.activeSupplies!.length
-          : 0
+      const suppliesArray =
+        suppliesRes.ok && suppliesData
+          ? Array.isArray(suppliesData.activeSupplies)
+            ? suppliesData.activeSupplies
+            : Array.isArray(suppliesData.supplies)
+            ? suppliesData.supplies
+            : []
+          : []
+
+      const nextActiveSuppliesCount = suppliesArray.length
 
       setPrimaryTemplate(nextPrimaryTemplate)
       setActiveSuppliesCount(nextActiveSuppliesCount)
 
       setSendCleaningChecklist(Boolean(nextPrimaryTemplate))
-      setSendSuppliesChecklist(false)
+      setSendSuppliesChecklist(nextActiveSuppliesCount > 0)
     } catch (loadError) {
       console.error("Σφάλμα φόρτωσης στοιχείων ακινήτου:", loadError)
       setPrimaryTemplate(null)
@@ -256,7 +273,7 @@ export default function NewTaskPage() {
 
       if (sendCleaningChecklist && !primaryTemplate) {
         throw new Error(
-          "Το ακίνητο δεν έχει κύριο πρότυπο λίστας καθαριότητας."
+          "Το ακίνητο δεν έχει κύρια λίστα καθαριότητας."
         )
       }
 
@@ -344,7 +361,7 @@ export default function NewTaskPage() {
       setScheduledEndTime("")
       setNotes("")
       setSendCleaningChecklist(Boolean(primaryTemplate))
-      setSendSuppliesChecklist(false)
+      setSendSuppliesChecklist(activeSuppliesCount > 0)
       setRequiresPhotos(false)
       setRequiresApproval(false)
       setSaveAsDefaultPartner(false)
@@ -638,7 +655,7 @@ export default function NewTaskPage() {
 
           <div className="mt-4 space-y-3 rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700">
             <div>
-              <strong>Κύρια λίστα καθαριότητας:</strong>{" "}
+              <strong>Βασική λίστα καθαριότητας:</strong>{" "}
               {primaryTemplate ? primaryTemplate.title : "Δεν έχει οριστεί"}
             </div>
 
@@ -647,15 +664,15 @@ export default function NewTaskPage() {
             </div>
 
             <div className="text-xs text-slate-500">
-              Αν σταλεί λίστα καθαριότητας, χρησιμοποιείται το κύριο πρότυπο του
+              Αν σταλεί λίστα καθαριότητας, χρησιμοποιείται η βασική λίστα του
               ακινήτου. Αν σταλεί λίστα αναλωσίμων, χρησιμοποιούνται μόνο τα ενεργά
               αναλώσιμα του ακινήτου.
             </div>
 
             {!canSendCleaningChecklist ? (
               <div className="text-xs text-red-600">
-                Για να σταλεί λίστα καθαριότητας, πρέπει πρώτα να υπάρχει κύριο
-                πρότυπο checklist στο ακίνητο.
+                Για να σταλεί λίστα καθαριότητας, πρέπει πρώτα να υπάρχει βασική
+                λίστα καθαριότητας στο ακίνητο.
               </div>
             ) : null}
 

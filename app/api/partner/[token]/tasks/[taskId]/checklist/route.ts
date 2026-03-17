@@ -447,6 +447,14 @@ const taskAssignmentWithChecklistArgs =
               answers: true,
             },
           },
+          supplyRun: {
+            select: {
+              id: true,
+              status: true,
+              startedAt: true,
+              completedAt: true,
+            },
+          },
         },
       },
     },
@@ -656,14 +664,30 @@ export async function POST(req: NextRequest, context: RouteContext) {
     await prisma.$transaction(async (tx) => {
       const now = new Date()
 
+      const supplyRunStatus = String(
+        latestAssignment.task.supplyRun?.status || ""
+      ).toLowerCase()
+
+      const taskNeedsSupplies = Boolean(latestAssignment.task.sendSuppliesChecklist)
+      const suppliesAlreadyCompleted = supplyRunStatus === "completed"
+
+      const shouldCompleteWholeTask =
+        mode === "submit" &&
+        (!taskNeedsSupplies || suppliesAlreadyCompleted)
+
       await tx.taskAssignment.update({
         where: {
           id: latestAssignment.id,
         },
         data: {
           startedAt: latestAssignment.startedAt || now,
-          completedAt: mode === "submit" ? now : null,
-          status: mode === "submit" ? "completed" : "in_progress",
+          completedAt: shouldCompleteWholeTask ? now : null,
+          status:
+            mode === "submit"
+              ? shouldCompleteWholeTask
+                ? "completed"
+                : "in_progress"
+              : "in_progress",
         },
       })
 
@@ -672,8 +696,13 @@ export async function POST(req: NextRequest, context: RouteContext) {
           id: latestAssignment.task.id,
         },
         data: {
-          status: mode === "submit" ? "completed" : "in_progress",
-          completedAt: mode === "submit" ? now : null,
+          status:
+            mode === "submit"
+              ? shouldCompleteWholeTask
+                ? "completed"
+                : "in_progress"
+              : "in_progress",
+          completedAt: shouldCompleteWholeTask ? now : null,
         },
       })
 
@@ -1076,9 +1105,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
                   },
                 })
               } else {
-                const derivedThreshold =
-                  item.supplyItem?.minimumStock ?? 0
-
+                const derivedThreshold = item.supplyItem?.minimumStock ?? 0
                 const derivedTarget =
                   normalizedStatus === "full"
                     ? Math.max(derivedThreshold + 2, 3)
@@ -1146,6 +1173,9 @@ export async function POST(req: NextRequest, context: RouteContext) {
             checklistRunId: checklistRun.id,
             mode,
             answersCount: incomingAnswers.length,
+            sendSuppliesChecklist: latestAssignment.task.sendSuppliesChecklist,
+            supplyRunStatus: latestAssignment.task.supplyRun?.status || null,
+            taskCompleted: shouldCompleteWholeTask,
           },
         },
       })

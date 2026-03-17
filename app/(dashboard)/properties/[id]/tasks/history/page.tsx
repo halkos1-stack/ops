@@ -65,6 +65,8 @@ type PropertyTasksResponse = {
   tasks: PropertyTask[]
 }
 
+type HistoryFilter = "all" | "completed" | "cancelled"
+
 function safeArray<T>(value: T[] | undefined | null): T[] {
   return Array.isArray(value) ? value : []
 }
@@ -116,13 +118,33 @@ function taskStatusBadgeClasses(status?: string | null) {
   switch ((status || "").toLowerCase()) {
     case "completed":
       return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
+    case "cancelled":
+      return "bg-red-50 text-red-700 ring-1 ring-red-200"
     default:
       return "bg-slate-100 text-slate-700 ring-1 ring-slate-200"
   }
 }
 
+function getStatusLabel(status?: string | null, language: "el" | "en" = "el") {
+  const value = String(status || "").toLowerCase()
+
+  if (language === "en") {
+    if (value === "completed") return "Completed"
+    if (value === "cancelled") return "Cancelled"
+    return status || "—"
+  }
+
+  if (value === "completed") return "Ολοκληρωμένη"
+  if (value === "cancelled") return "Ακυρωμένη"
+  return status || "—"
+}
+
 function getLatestAssignment(task: PropertyTask) {
   return safeArray(task.assignments)[0] || null
+}
+
+function getHistoryBaseDate(task: PropertyTask) {
+  return task.completedAt || task.scheduledDate || task.createdAt || null
 }
 
 export default function PropertyCompletedTasksHistoryPage() {
@@ -136,6 +158,7 @@ export default function PropertyCompletedTasksHistoryPage() {
   const [data, setData] = useState<PropertyTasksResponse | null>(null)
   const [dateFrom, setDateFrom] = useState("")
   const [dateTo, setDateTo] = useState("")
+  const [activeFilter, setActiveFilter] = useState<HistoryFilter>("all")
 
   async function loadData() {
     try {
@@ -168,40 +191,67 @@ export default function PropertyCompletedTasksHistoryPage() {
     loadData()
   }, [propertyId])
 
-  const completedTasks = useMemo(() => {
-    const tasks = safeArray(data?.tasks).filter(
-      (task) => String(task.status || "").toLowerCase() === "completed"
-    )
-
-    return tasks.filter((task) => {
-      const baseDate = task.completedAt || task.scheduledDate || task.createdAt
-      if (!baseDate) return true
-
-      const taskDate = new Date(baseDate)
-      if (Number.isNaN(taskDate.getTime())) return true
-
-      if (dateFrom) {
-        const from = new Date(`${dateFrom}T00:00:00`)
-        if (taskDate < from) return false
-      }
-
-      if (dateTo) {
-        const to = new Date(`${dateTo}T23:59:59`)
-        if (taskDate > to) return false
-      }
-
-      return true
-    }).sort((a, b) => {
-      const aDate = new Date(a.completedAt || a.scheduledDate || a.createdAt || 0).getTime()
-      const bDate = new Date(b.completedAt || b.scheduledDate || b.createdAt || 0).getTime()
-      return bDate - aDate
+  const historyTasks = useMemo(() => {
+    const tasks = safeArray(data?.tasks).filter((task) => {
+      const status = String(task.status || "").toLowerCase()
+      return status === "completed" || status === "cancelled"
     })
-  }, [data, dateFrom, dateTo])
+
+    return tasks
+      .filter((task) => {
+        const status = String(task.status || "").toLowerCase()
+
+        if (activeFilter === "completed" && status !== "completed") return false
+        if (activeFilter === "cancelled" && status !== "cancelled") return false
+
+        const baseDate = getHistoryBaseDate(task)
+        if (!baseDate) return true
+
+        const taskDate = new Date(baseDate)
+        if (Number.isNaN(taskDate.getTime())) return true
+
+        if (dateFrom) {
+          const from = new Date(`${dateFrom}T00:00:00`)
+          if (taskDate < from) return false
+        }
+
+        if (dateTo) {
+          const to = new Date(`${dateTo}T23:59:59`)
+          if (taskDate > to) return false
+        }
+
+        return true
+      })
+      .sort((a, b) => {
+        const aDate = new Date(getHistoryBaseDate(a) || 0).getTime()
+        const bDate = new Date(getHistoryBaseDate(b) || 0).getTime()
+        return bDate - aDate
+      })
+  }, [data, dateFrom, dateTo, activeFilter])
+
+  const metrics = useMemo(() => {
+    const allHistoryTasks = safeArray(data?.tasks).filter((task) => {
+      const status = String(task.status || "").toLowerCase()
+      return status === "completed" || status === "cancelled"
+    })
+
+    return {
+      all: allHistoryTasks.length,
+      completed: allHistoryTasks.filter(
+        (task) => String(task.status || "").toLowerCase() === "completed"
+      ).length,
+      cancelled: allHistoryTasks.filter(
+        (task) => String(task.status || "").toLowerCase() === "cancelled"
+      ).length,
+    }
+  }, [data])
 
   if (loading) {
     return (
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="text-sm text-slate-500">Φόρτωση ιστορικού ολοκληρωμένων εργασιών...</div>
+        <div className="text-sm text-slate-500">
+          Φόρτωση ιστορικού εργασιών...
+        </div>
       </div>
     )
   }
@@ -251,11 +301,11 @@ export default function PropertyCompletedTasksHistoryPage() {
               Εργασίες ακινήτου
             </Link>
             <span className="text-slate-300">/</span>
-            <span className="text-slate-600">Ιστορικό ολοκληρωμένων</span>
+            <span className="text-slate-600">Ιστορικό</span>
           </div>
 
           <h1 className="mt-3 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
-            Ιστορικό ολοκληρωμένων εργασιών
+            Ιστορικό εργασιών
           </h1>
 
           <p className="mt-2 text-sm text-slate-600">
@@ -271,6 +321,51 @@ export default function PropertyCompletedTasksHistoryPage() {
             Επιστροφή στις εργασίες
           </Link>
         </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-3">
+        <button
+          type="button"
+          onClick={() => setActiveFilter("all")}
+          className={`rounded-2xl border p-5 text-left shadow-sm transition ${
+            activeFilter === "all"
+              ? "border-slate-900 bg-slate-50"
+              : "border-slate-200 bg-white hover:bg-slate-50"
+          }`}
+        >
+          <div className="text-sm text-slate-500">Όλο το ιστορικό</div>
+          <div className="mt-2 text-3xl font-bold text-slate-900">{metrics.all}</div>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveFilter("completed")}
+          className={`rounded-2xl border p-5 text-left shadow-sm transition ${
+            activeFilter === "completed"
+              ? "border-emerald-300 bg-emerald-50"
+              : "border-slate-200 bg-white hover:bg-slate-50"
+          }`}
+        >
+          <div className="text-sm text-slate-500">Ολοκληρωμένες</div>
+          <div className="mt-2 text-3xl font-bold text-emerald-700">
+            {metrics.completed}
+          </div>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveFilter("cancelled")}
+          className={`rounded-2xl border p-5 text-left shadow-sm transition ${
+            activeFilter === "cancelled"
+              ? "border-red-300 bg-red-50"
+              : "border-slate-200 bg-white hover:bg-slate-50"
+          }`}
+        >
+          <div className="text-sm text-slate-500">Ακυρωμένες</div>
+          <div className="mt-2 text-3xl font-bold text-red-700">
+            {metrics.cancelled}
+          </div>
+        </button>
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -305,6 +400,7 @@ export default function PropertyCompletedTasksHistoryPage() {
               onClick={() => {
                 setDateFrom("")
                 setDateTo("")
+                setActiveFilter("all")
               }}
               className="inline-flex items-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
             >
@@ -314,7 +410,7 @@ export default function PropertyCompletedTasksHistoryPage() {
 
           <div className="flex items-end">
             <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-700">
-              Σύνολο: <span className="font-semibold">{completedTasks.length}</span>
+              Σύνολο: <span className="font-semibold">{historyTasks.length}</span>
             </div>
           </div>
         </div>
@@ -322,20 +418,22 @@ export default function PropertyCompletedTasksHistoryPage() {
 
       <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         <div className="border-b border-slate-200 px-5 py-4">
-          <h2 className="text-lg font-semibold text-slate-900">Ολοκληρωμένες εργασίες</h2>
+          <h2 className="text-lg font-semibold text-slate-900">Ιστορικό εργασιών</h2>
           <p className="mt-1 text-sm text-slate-500">
-            Προβολή ολοκληρωμένων εργασιών με φίλτρο ημερομηνίας.
+            Προβολή ολοκληρωμένων και ακυρωμένων εργασιών με φίλτρα.
           </p>
         </div>
 
-        {completedTasks.length === 0 ? (
+        {historyTasks.length === 0 ? (
           <div className="p-5 text-sm text-slate-500">
-            Δεν υπάρχουν ολοκληρωμένες εργασίες για τα επιλεγμένα φίλτρα.
+            Δεν υπάρχουν εργασίες ιστορικού για τα επιλεγμένα φίλτρα.
           </div>
         ) : (
           <div className="divide-y divide-slate-100">
-            {completedTasks.map((task) => {
+            {historyTasks.map((task) => {
               const latestAssignment = getLatestAssignment(task)
+              const taskStatus = String(task.status || "").toLowerCase()
+              const isCancelled = taskStatus === "cancelled"
 
               return (
                 <div key={task.id} className="p-5">
@@ -350,7 +448,7 @@ export default function PropertyCompletedTasksHistoryPage() {
                               task.status
                             )}`}
                           >
-                            Ολοκληρωμένη
+                            {getStatusLabel(task.status, language)}
                           </span>
 
                           <span
@@ -379,7 +477,7 @@ export default function PropertyCompletedTasksHistoryPage() {
                           Προβολή εργασίας
                         </Link>
 
-                        {task.checklistRun ? (
+                        {task.checklistRun && !isCancelled ? (
                           <Link
                             href={`/tasks/${task.id}`}
                             className="inline-flex items-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
@@ -404,8 +502,8 @@ export default function PropertyCompletedTasksHistoryPage() {
                       />
 
                       <HistoryInfoBox
-                        label="Ολοκληρώθηκε"
-                        value={formatDateTime(task.completedAt, locale)}
+                        label={isCancelled ? "Ακυρώθηκε / τελευταία ενημέρωση" : "Ολοκληρώθηκε"}
+                        value={formatDateTime(task.completedAt || task.createdAt, locale)}
                       />
 
                       <HistoryInfoBox
@@ -417,7 +515,11 @@ export default function PropertyCompletedTasksHistoryPage() {
                     <div className="grid gap-4 md:grid-cols-2">
                       <HistoryInfoBox
                         label="Ενεργή λίστα"
-                        value={task.checklistRun?.template?.title || "Δεν υπάρχει λίστα"}
+                        value={
+                          isCancelled
+                            ? task.checklistRun?.template?.title || "Δεν χρησιμοποιήθηκε λίστα"
+                            : task.checklistRun?.template?.title || "Δεν υπάρχει λίστα"
+                        }
                       />
 
                       <HistoryInfoBox
@@ -427,10 +529,18 @@ export default function PropertyCompletedTasksHistoryPage() {
                             ? task.checklistRun.status === "completed"
                               ? "Υποβλήθηκε"
                               : task.checklistRun.status
+                            : isCancelled
+                            ? "Δεν υποβλήθηκε"
                             : "—"
                         }
                       />
                     </div>
+
+                    {isCancelled ? (
+                      <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                        Η εργασία έχει ακυρωθεί και παραμένει μόνο στο ιστορικό για λόγους καταγραφής.
+                      </div>
+                    ) : null}
 
                     {task.notes ? (
                       <div className="text-sm text-slate-600">
@@ -440,7 +550,7 @@ export default function PropertyCompletedTasksHistoryPage() {
 
                     {task.resultNotes ? (
                       <div className="text-sm text-slate-600">
-                        Αποτέλεσμα: {task.resultNotes}
+                        {isCancelled ? "Σημείωση ακύρωσης" : "Αποτέλεσμα"}: {task.resultNotes}
                       </div>
                     ) : null}
                   </div>

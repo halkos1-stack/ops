@@ -4,7 +4,6 @@ import Link from "next/link"
 import { use, useEffect, useMemo, useState } from "react"
 
 type Language = "el" | "en"
-type TemplateFilter = "all" | "primary" | "active" | "inactive"
 
 type PageParams = Promise<{
   propertyId: string
@@ -48,6 +47,18 @@ type PropertyChecklistResponse = {
   primaryTemplate?: unknown
 }
 
+type PropertySupply = {
+  id: string
+  name: string
+  code?: string | null
+  isActive: boolean
+  fillLevel?: string | null
+}
+
+type PropertySuppliesResponse = {
+  supplies?: unknown
+}
+
 type NewItemDraft = {
   label: string
   description: string
@@ -61,51 +72,72 @@ type NewItemDraft = {
 
 const texts = {
   el: {
-    pageEyebrow: "Πρότυπα λίστας καθαριότητας ακινήτου",
-    pageTitleFallback: "Λίστα καθαριότητας ακινήτου",
+    pageEyebrow: "Διαχείριση λιστών ακινήτου",
+    pageTitleFallback: "Λίστες ακινήτου",
     pageSubtitle:
-      "Εδώ διαχειρίζεσαι μόνο τη λογική των προτύπων καθαριότητας του ακινήτου. Τα αναλώσιμα διαχειρίζονται ξεχωριστά από τη σελίδα αναλωσίμων και όχι ως checklist templates.",
-    backToChecklists: "Επιστροφή στα checklists",
+      "Για κάθε ακίνητο υπάρχουν μόνο δύο λίστες: μία βασική λίστα εργασιών καθαριότητας και μία λίστα αναλωσίμων που χτίζεται αυτόματα από τα ενεργά αναλώσιμα του ακινήτου.",
+
     backToProperty: "Επιστροφή στο ακίνητο",
+    backToChecklists: "Επιστροφή στα checklists",
 
-    totalTemplates: "Σύνολο προτύπων",
-    primaryTemplates: "Κύρια πρότυπα",
-    activeTemplates: "Ενεργά πρότυπα",
-    inactiveTemplates: "Ανενεργά πρότυπα",
+    loading: "Φόρτωση...",
+    loadError: "Αποτυχία φόρτωσης λιστών ακινήτου.",
+    saveError: "Αποτυχία δημιουργίας λίστας καθαριότητας.",
+    createdSuccess: "Η βασική λίστα καθαριότητας δημιουργήθηκε επιτυχώς.",
 
-    filterAllSubtitle: "Όλα τα πρότυπα καθαριότητας του ακινήτου",
-    filterPrimarySubtitle: "Μόνο το κύριο πρότυπο",
-    filterActiveSubtitle: "Μόνο τα ενεργά πρότυπα",
-    filterInactiveSubtitle: "Μόνο τα ανενεργά πρότυπα",
+    propertyCode: "Κωδικός",
+    propertyAddress: "Διεύθυνση",
 
-    showNewTemplate: "Νέο πρότυπο",
-    hideNewTemplate: "Απόκρυψη φόρμας",
+    summaryTitle: "Σύνοψη",
+    cleaningSummary: "Λίστα καθαριότητας",
+    suppliesSummary: "Λίστα αναλωσίμων",
+    configured: "Ρυθμισμένη",
+    missing: "Δεν έχει οριστεί",
+    activeSupplies: "Ενεργά αναλώσιμα",
 
-    newTemplateTitle: "Νέο πρότυπο καθαριότητας",
-    newTemplateSubtitle:
-      "Δημιούργησε νέο πρότυπο για τη βασική ροή καθαριότητας ή για ειδικές βοηθητικές περιπτώσεις καθαριότητας / επιθεώρησης.",
+    cleaningSectionTitle: "Βασική λίστα εργασιών καθαριότητας",
+    cleaningSectionSubtitle:
+      "Αυτή είναι η μοναδική βασική λίστα καθαριότητας του ακινήτου και χρησιμοποιείται αυτόματα στις εργασίες όταν επιλέγεται αποστολή λίστας καθαριότητας.",
+    noCleaningTitle: "Δεν έχει οριστεί ακόμη βασική λίστα καθαριότητας",
+    noCleaningSubtitle:
+      "Δημιούργησε τώρα τη μοναδική βασική λίστα καθαριότητας του ακινήτου.",
+    createCleaningChecklist: "Δημιουργία βασικής λίστας",
+    hideCreateForm: "Απόκρυψη φόρμας",
+    editCleaningChecklist: "Προβολή / επεξεργασία λίστας",
+    cleaningItemsCount: "Στοιχεία λίστας",
+    cleaningStatus: "Κατάσταση",
+    activeBadge: "Ενεργή",
+    inactiveBadge: "Ανενεργή",
 
-    templateTitle: "Τίτλος προτύπου",
-    templateTitlePlaceholder: "π.χ. Βασική λίστα εργασιών ακινήτου",
+    suppliesSectionTitle: "Λίστα αναλωσίμων",
+    suppliesSectionSubtitle:
+      "Η λίστα αναλωσίμων δεν ορίζεται χειροκίνητα εδώ. Χτίζεται αυτόματα από τα ενεργά αναλώσιμα της σελίδας αναλωσίμων του ακινήτου και ανεβαίνει στην εργασία όταν επιλέγεται αποστολή λίστας αναλωσίμων.",
+    manageSupplies: "Διαχείριση αναλωσίμων",
+    suppliesReadyTitle: "Η λίστα αναλωσίμων είναι έτοιμη",
+    suppliesReadySubtitle:
+      "Η εργασία θα χρησιμοποιεί αυτόματα τα ενεργά αναλώσιμα του ακινήτου.",
+    noSuppliesTitle: "Δεν υπάρχουν ενεργά αναλώσιμα",
+    noSuppliesSubtitle:
+      "Πήγαινε στη σελίδα αναλωσίμων και ενεργοποίησε όσα θέλεις να συμμετέχουν στη λίστα αναλωσίμων των εργασιών.",
+    activeSuppliesCount: "Ενεργά αναλώσιμα",
+    sampleItems: "Ενδεικτικά ενεργά στοιχεία",
 
-    templateDescription: "Περιγραφή",
-    templateDescriptionPlaceholder:
-      "Σύντομη περιγραφή της χρήσης του προτύπου.",
-
-    templateType: "Τύπος προτύπου",
-    activeStatus: "Κατάσταση",
-    setAsPrimary: "Ορισμός ως κύριο πρότυπο του ακινήτου",
-
+    formTitle: "Νέα βασική λίστα καθαριότητας",
+    formSubtitle:
+      "Ορίζεις μία μοναδική βασική λίστα για το ακίνητο. Δεν δημιουργούμε βοηθητικά πρότυπα σε αυτή τη ροή.",
+    checklistTitle: "Τίτλος λίστας",
+    checklistTitlePlaceholder: "π.χ. Βασική λίστα καθαριότητας ακινήτου",
+    checklistDescription: "Περιγραφή",
+    checklistDescriptionPlaceholder:
+      "Σύντομη περιγραφή της βασικής λίστας καθαριότητας.",
     checklistItems: "Στοιχεία λίστας",
     checklistItemsSubtitle:
-      "Όρισε τα βήματα που θα εκτελούνται σε κάθε εκτέλεση της λίστας καθαριότητας.",
+      "Όρισε τα βήματα που θα εμφανίζονται στον συνεργάτη στην ενότητα καθαριότητας.",
 
     itemLabel: "Τίτλος στοιχείου",
     itemLabelPlaceholder: "π.χ. Έλεγχος κουζίνας",
-
     itemDescription: "Περιγραφή",
     itemDescriptionPlaceholder: "Προαιρετική επεξήγηση του βήματος.",
-
     itemFieldType: "Τύπος πεδίου",
     itemCategory: "Κατηγορία",
     itemCategoryPlaceholder: "π.χ. inspection",
@@ -123,28 +155,8 @@ const texts = {
 
     addItem: "Προσθήκη στοιχείου",
     removeItem: "Αφαίρεση",
-    createTemplate: "Δημιουργία προτύπου",
+    createChecklist: "Δημιουργία λίστας",
     creating: "Δημιουργία...",
-
-    existingTemplates: "Υπάρχοντα πρότυπα",
-    existingTemplatesSubtitle:
-      "Εδώ εμφανίζονται μόνο τα πρότυπα καθαριότητας του ακινήτου. Τα παλιά πρότυπα αναλωσίμων αποκλείονται από αυτή τη σελίδα.",
-    noTemplates: "Δεν υπάρχουν πρότυπα για αυτό το ακίνητο.",
-    noTemplatesForFilter: "Δεν υπάρχουν πρότυπα για το συγκεκριμένο φίλτρο.",
-
-    viewTemplate: "Προβολή",
-
-    primaryBadge: "Κύριο πρότυπο",
-    helperBadge: "Βοηθητικό πρότυπο",
-    activeBadge: "Ενεργό",
-    inactiveBadge: "Ανενεργό",
-
-    itemsCount: "Στοιχεία",
-
-    loading: "Φόρτωση...",
-    loadError: "Αποτυχία φόρτωσης προτύπων checklist.",
-    saveError: "Αποτυχία δημιουργίας προτύπου checklist.",
-    createdSuccess: "Το πρότυπο δημιουργήθηκε επιτυχώς.",
 
     yesNo: "Ναι / Όχι",
     text: "Κείμενο",
@@ -152,67 +164,82 @@ const texts = {
     choice: "Επιλογή",
     photo: "Φωτογραφία",
 
-    mainType: "Κύριο πρότυπο",
-    supportType: "Βοηθητικό πρότυπο",
-
-    activeLabel: "Ενεργό",
-    inactiveLabel: "Ανενεργό",
-
     languageGreek: "Ελληνικά",
     languageEnglish: "English",
   },
   en: {
-    pageEyebrow: "Property cleaning checklist templates",
-    pageTitleFallback: "Property cleaning checklist",
+    pageEyebrow: "Property lists management",
+    pageTitleFallback: "Property lists",
     pageSubtitle:
-      "Manage only the cleaning checklist logic of the property here. Supplies are managed separately in the supplies page and not as checklist templates.",
-    backToChecklists: "Back to checklists",
+      "Each property has only two lists: one main cleaning checklist and one supplies list built automatically from the active property supplies.",
+
     backToProperty: "Back to property",
+    backToChecklists: "Back to checklists",
 
-    totalTemplates: "Total templates",
-    primaryTemplates: "Primary templates",
-    activeTemplates: "Active templates",
-    inactiveTemplates: "Inactive templates",
+    loading: "Loading...",
+    loadError: "Failed to load property lists.",
+    saveError: "Failed to create cleaning checklist.",
+    createdSuccess: "Main cleaning checklist created successfully.",
 
-    filterAllSubtitle: "All cleaning templates for this property",
-    filterPrimarySubtitle: "Only the primary template",
-    filterActiveSubtitle: "Only active templates",
-    filterInactiveSubtitle: "Only inactive templates",
+    propertyCode: "Code",
+    propertyAddress: "Address",
 
-    showNewTemplate: "New template",
-    hideNewTemplate: "Hide form",
+    summaryTitle: "Summary",
+    cleaningSummary: "Cleaning checklist",
+    suppliesSummary: "Supplies list",
+    configured: "Configured",
+    missing: "Missing",
+    activeSupplies: "Active supplies",
 
-    newTemplateTitle: "New cleaning template",
-    newTemplateSubtitle:
-      "Create a new template for the main cleaning workflow or for helper cleaning / inspection cases.",
+    cleaningSectionTitle: "Main cleaning checklist",
+    cleaningSectionSubtitle:
+      "This is the single main cleaning checklist of the property and is used automatically in tasks when sending a cleaning checklist.",
+    noCleaningTitle: "No main cleaning checklist yet",
+    noCleaningSubtitle:
+      "Create the single main cleaning checklist for this property.",
+    createCleaningChecklist: "Create main checklist",
+    hideCreateForm: "Hide form",
+    editCleaningChecklist: "View / edit checklist",
+    cleaningItemsCount: "Checklist items",
+    cleaningStatus: "Status",
+    activeBadge: "Active",
+    inactiveBadge: "Inactive",
 
-    templateTitle: "Template title",
-    templateTitlePlaceholder: "e.g. Main property cleaning list",
+    suppliesSectionTitle: "Supplies list",
+    suppliesSectionSubtitle:
+      "The supplies list is not managed manually here. It is built automatically from the active supplies of the property supplies page and is attached to the task when sending the supplies list.",
+    manageSupplies: "Manage supplies",
+    suppliesReadyTitle: "Supplies list is ready",
+    suppliesReadySubtitle:
+      "The task will automatically use the active property supplies.",
+    noSuppliesTitle: "There are no active supplies",
+    noSuppliesSubtitle:
+      "Go to the supplies page and activate the items you want to participate in the task supplies list.",
+    activeSuppliesCount: "Active supplies",
+    sampleItems: "Sample active items",
 
-    templateDescription: "Description",
-    templateDescriptionPlaceholder: "Short description of this template.",
-
-    templateType: "Template type",
-    activeStatus: "Status",
-    setAsPrimary: "Set as primary template for this property",
-
+    formTitle: "New main cleaning checklist",
+    formSubtitle:
+      "You define one single main checklist for the property. We do not create support templates in this flow.",
+    checklistTitle: "Checklist title",
+    checklistTitlePlaceholder: "e.g. Main property cleaning checklist",
+    checklistDescription: "Description",
+    checklistDescriptionPlaceholder:
+      "Short description of the main cleaning checklist.",
     checklistItems: "Checklist items",
     checklistItemsSubtitle:
-      "Define the steps that will run each time this cleaning checklist is executed.",
+      "Define the steps shown to the partner in the cleaning section.",
 
     itemLabel: "Item title",
     itemLabelPlaceholder: "e.g. Kitchen inspection",
-
     itemDescription: "Description",
     itemDescriptionPlaceholder: "Optional explanation for this step.",
-
     itemFieldType: "Field type",
     itemCategory: "Category",
     itemCategoryPlaceholder: "e.g. inspection",
 
     itemChoices: "Choices",
-    itemChoicesSubtitle:
-      "Add the options that will be shown to the partner.",
+    itemChoicesSubtitle: "Add the options shown to the partner.",
     choicePlaceholder: "e.g. Good",
     addChoice: "Add choice",
     removeChoice: "Remove choice",
@@ -223,40 +250,14 @@ const texts = {
 
     addItem: "Add item",
     removeItem: "Remove",
-    createTemplate: "Create template",
+    createChecklist: "Create checklist",
     creating: "Creating...",
-
-    existingTemplates: "Existing templates",
-    existingTemplatesSubtitle:
-      "Only property cleaning templates are shown here. Legacy supplies templates are excluded from this page.",
-    noTemplates: "There are no templates for this property.",
-    noTemplatesForFilter: "There are no templates for this filter.",
-
-    viewTemplate: "View",
-
-    primaryBadge: "Primary template",
-    helperBadge: "Support template",
-    activeBadge: "Active",
-    inactiveBadge: "Inactive",
-
-    itemsCount: "Items",
-
-    loading: "Loading...",
-    loadError: "Failed to load checklist templates.",
-    saveError: "Failed to create checklist template.",
-    createdSuccess: "Template created successfully.",
 
     yesNo: "Yes / No",
     text: "Text",
     number: "Number",
     choice: "Choice",
     photo: "Photo",
-
-    mainType: "Main template",
-    supportType: "Support template",
-
-    activeLabel: "Active",
-    inactiveLabel: "Inactive",
 
     languageGreek: "Ελληνικά",
     languageEnglish: "English",
@@ -327,21 +328,45 @@ function normalizeTemplate(rawValue: unknown): ChecklistTemplate {
     isActive: Boolean(raw.isActive ?? false),
     createdAt: raw.createdAt ? String(raw.createdAt) : undefined,
     updatedAt: raw.updatedAt ? String(raw.updatedAt) : undefined,
-    items: itemsRaw.map((item: unknown, index: number) =>
-      normalizeTemplateItem(item, index, templateId || "template")
-    ),
+    items: itemsRaw
+      .map((item: unknown, index: number) =>
+        normalizeTemplateItem(item, index, templateId || "template")
+      )
+      .sort((a, b) => a.sortOrder - b.sortOrder),
   }
 }
 
-function getTemplateTypeLabel(templateType: string, language: Language) {
-  const t = texts[language]
-  const normalized = String(templateType).toLowerCase()
+function normalizeSupply(rawValue: unknown): PropertySupply | null {
+  const raw = (rawValue ?? {}) as Record<string, unknown>
+  const id = String(raw.id ?? "").trim()
+  const name = String(raw.name ?? raw.title ?? "").trim()
 
-  if (normalized === "main" || normalized === "core") {
-    return t.mainType
+  if (!id || !name) return null
+
+  return {
+    id,
+    name,
+    code:
+      raw.code === null || raw.code === undefined ? null : String(raw.code),
+    isActive: Boolean(raw.isActive ?? false),
+    fillLevel:
+      raw.fillLevel === null || raw.fillLevel === undefined
+        ? null
+        : String(raw.fillLevel),
   }
+}
 
-  return t.supportType
+function buildEmptyItem(): NewItemDraft {
+  return {
+    label: "",
+    description: "",
+    itemType: "boolean",
+    category: "inspection",
+    isRequired: true,
+    requiresPhoto: false,
+    opensIssueOnFail: false,
+    options: [""],
+  }
 }
 
 function joinOptions(options: string[]) {
@@ -363,29 +388,17 @@ export default function PropertyChecklistsPage({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
   const [successMessage, setSuccessMessage] = useState("")
-  const [property, setProperty] = useState<PropertyInfo | null>(null)
-  const [templates, setTemplates] = useState<ChecklistTemplate[]>([])
-  const [activeFilter, setActiveFilter] = useState<TemplateFilter>("all")
-  const [showCreateForm, setShowCreateForm] = useState(false)
 
+  const [property, setProperty] = useState<PropertyInfo | null>(null)
+  const [primaryTemplate, setPrimaryTemplate] = useState<ChecklistTemplate | null>(
+    null
+  )
+  const [activeSupplies, setActiveSupplies] = useState<PropertySupply[]>([])
+
+  const [showCreateForm, setShowCreateForm] = useState(false)
   const [templateTitle, setTemplateTitle] = useState("")
   const [templateDescription, setTemplateDescription] = useState("")
-  const [templateType, setTemplateType] = useState("main")
-  const [isPrimary, setIsPrimary] = useState(true)
-  const [isActive, setIsActive] = useState(true)
-
-  const [items, setItems] = useState<NewItemDraft[]>([
-    {
-      label: "",
-      description: "",
-      itemType: "boolean",
-      category: "inspection",
-      isRequired: true,
-      requiresPhoto: false,
-      opensIssueOnFail: false,
-      options: [""],
-    },
-  ])
+  const [items, setItems] = useState<NewItemDraft[]>([buildEmptyItem()])
 
   const t = texts[language]
 
@@ -407,34 +420,39 @@ export default function PropertyChecklistsPage({
       setLoading(true)
       setError("")
 
-      const response = await fetch(`/api/property-checklists/${propertyId}`, {
-        method: "GET",
-        cache: "no-store",
-      })
+      const [checklistsResponse, suppliesResponse] = await Promise.all([
+        fetch(`/api/property-checklists/${propertyId}`, {
+          method: "GET",
+          cache: "no-store",
+        }),
+        fetch(`/api/properties/${propertyId}/supplies`, {
+          method: "GET",
+          cache: "no-store",
+        }),
+      ])
 
-      const data: PropertyChecklistResponse = await response.json()
+      const checklistData: PropertyChecklistResponse =
+        await checklistsResponse.json()
+      const suppliesData: PropertySuppliesResponse = await suppliesResponse.json()
 
-      if (!response.ok) {
+      if (!checklistsResponse.ok) {
         throw new Error(
-          typeof (data as { error?: unknown })?.error === "string"
-            ? (data as { error?: string }).error
+          typeof (checklistData as { error?: unknown })?.error === "string"
+            ? (checklistData as { error?: string }).error
             : t.loadError
         )
       }
 
-      const rawTemplates = Array.isArray(data?.templates) ? data.templates : []
+      const rawProperty = checklistData?.property ?? null
+      const rawPrimaryTemplate = checklistData?.primaryTemplate ?? null
+      const rawSupplies = Array.isArray(suppliesData?.supplies)
+        ? suppliesData.supplies
+        : []
 
-      const normalizedTemplates = rawTemplates
-        .map((template: unknown) => normalizeTemplate(template))
-        .sort((a: ChecklistTemplate, b: ChecklistTemplate) => {
-          if (a.isPrimary && !b.isPrimary) return -1
-          if (!a.isPrimary && b.isPrimary) return 1
-          if (a.isActive && !b.isActive) return -1
-          if (!a.isActive && b.isActive) return 1
-          return a.title.localeCompare(b.title, "el")
-        })
-
-      const rawProperty = data?.property ?? null
+      const normalizedSupplies = rawSupplies
+        .map((supply: unknown) => normalizeSupply(supply))
+        .filter((supply): supply is PropertySupply => supply !== null)
+        .filter((supply) => supply.isActive)
 
       setProperty({
         id: String(rawProperty?.id ?? propertyId),
@@ -442,7 +460,11 @@ export default function PropertyChecklistsPage({
         name: String(rawProperty?.name ?? ""),
         address: String(rawProperty?.address ?? ""),
       })
-      setTemplates(normalizedTemplates)
+
+      setPrimaryTemplate(
+        rawPrimaryTemplate ? normalizeTemplate(rawPrimaryTemplate) : null
+      )
+      setActiveSupplies(normalizedSupplies)
     } catch (err) {
       setError(err instanceof Error ? err.message : t.loadError)
     } finally {
@@ -453,43 +475,18 @@ export default function PropertyChecklistsPage({
   useEffect(() => {
     void loadData()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [propertyId, language])
+  }, [propertyId])
 
-  const totalCount = templates.length
-  const primaryCount = templates.filter((template) => template.isPrimary).length
-  const activeCount = templates.filter((template) => template.isActive).length
-  const inactiveCount = templates.filter((template) => !template.isActive).length
+  const suppliesPreview = useMemo(() => activeSupplies.slice(0, 6), [activeSupplies])
 
-  const filteredTemplates = useMemo(() => {
-    if (activeFilter === "primary") {
-      return templates.filter((template) => template.isPrimary)
-    }
-
-    if (activeFilter === "active") {
-      return templates.filter((template) => template.isActive)
-    }
-
-    if (activeFilter === "inactive") {
-      return templates.filter((template) => !template.isActive)
-    }
-
-    return templates
-  }, [templates, activeFilter])
+  function resetForm() {
+    setTemplateTitle("")
+    setTemplateDescription("")
+    setItems([buildEmptyItem()])
+  }
 
   function addItem() {
-    setItems((prev) => [
-      ...prev,
-      {
-        label: "",
-        description: "",
-        itemType: "boolean",
-        category: "inspection",
-        isRequired: true,
-        requiresPhoto: false,
-        opensIssueOnFail: false,
-        options: [""],
-      },
-    ])
+    setItems((prev) => [...prev, buildEmptyItem()])
   }
 
   function removeItem(index: number) {
@@ -554,7 +551,7 @@ export default function PropertyChecklistsPage({
     )
   }
 
-  async function handleCreateTemplate(e: React.FormEvent<HTMLFormElement>) {
+  async function handleCreateChecklist(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
 
     try {
@@ -565,9 +562,9 @@ export default function PropertyChecklistsPage({
       const payload = {
         title: templateTitle,
         description: templateDescription,
-        templateType,
-        isPrimary,
-        isActive,
+        templateType: "main",
+        isPrimary: true,
+        isActive: true,
         items: items.map((item, index) => ({
           label: item.label,
           description: item.description,
@@ -598,24 +595,7 @@ export default function PropertyChecklistsPage({
         )
       }
 
-      setTemplateTitle("")
-      setTemplateDescription("")
-      setTemplateType("main")
-      setIsPrimary(true)
-      setIsActive(true)
-      setItems([
-        {
-          label: "",
-          description: "",
-          itemType: "boolean",
-          category: "inspection",
-          isRequired: true,
-          requiresPhoto: false,
-          opensIssueOnFail: false,
-          options: [""],
-        },
-      ])
-
+      resetForm()
       setSuccessMessage(t.createdSuccess)
       setShowCreateForm(false)
       await loadData()
@@ -639,16 +619,22 @@ export default function PropertyChecklistsPage({
       <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div className="space-y-2">
           <p className="text-sm font-medium text-slate-500">{t.pageEyebrow}</p>
+
           <div>
             <h1 className="text-4xl font-bold tracking-tight text-slate-900">
               {property?.name || t.pageTitleFallback}
             </h1>
+
             <p className="mt-2 max-w-3xl text-sm text-slate-600">
               {t.pageSubtitle}
             </p>
-            <p className="mt-3 text-sm text-slate-500">
-              {[property?.code, property?.address].filter(Boolean).join(" • ")}
-            </p>
+
+            <div className="mt-3 flex flex-wrap gap-3 text-sm text-slate-500">
+              {property?.code ? (
+                <span>{t.propertyCode}: {property.code}</span>
+              ) : null}
+              {property?.address ? <span>• {property.address}</span> : null}
+            </div>
           </div>
         </div>
 
@@ -697,338 +683,472 @@ export default function PropertyChecklistsPage({
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <FilterCard
-          title={t.totalTemplates}
-          value={totalCount}
-          subtitle={t.filterAllSubtitle}
-          active={activeFilter === "all"}
-          onClick={() => setActiveFilter("all")}
+      <div className="grid gap-4 md:grid-cols-3">
+        <SummaryCard
+          title={t.cleaningSummary}
+          value={primaryTemplate ? t.configured : t.missing}
         />
-        <FilterCard
-          title={t.primaryTemplates}
-          value={primaryCount}
-          subtitle={t.filterPrimarySubtitle}
-          active={activeFilter === "primary"}
-          onClick={() => setActiveFilter("primary")}
+        <SummaryCard
+          title={t.suppliesSummary}
+          value={activeSupplies.length > 0 ? t.configured : t.missing}
         />
-        <FilterCard
-          title={t.activeTemplates}
-          value={activeCount}
-          subtitle={t.filterActiveSubtitle}
-          active={activeFilter === "active"}
-          onClick={() => setActiveFilter("active")}
-        />
-        <FilterCard
-          title={t.inactiveTemplates}
-          value={inactiveCount}
-          subtitle={t.filterInactiveSubtitle}
-          active={activeFilter === "inactive"}
-          onClick={() => setActiveFilter("inactive")}
+        <SummaryCard
+          title={t.activeSupplies}
+          value={String(activeSupplies.length)}
         />
       </div>
 
       <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div>
             <h2 className="text-2xl font-bold text-slate-900">
-              {t.newTemplateTitle}
+              {t.cleaningSectionTitle}
             </h2>
             <p className="mt-2 max-w-3xl text-sm text-slate-600">
-              {t.newTemplateSubtitle}
+              {t.cleaningSectionSubtitle}
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={() => setShowCreateForm((prev) => !prev)}
-            className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700"
-          >
-            {showCreateForm ? t.hideNewTemplate : t.showNewTemplate}
-          </button>
+          {primaryTemplate ? (
+            <Link
+              href={`/property-checklists/${propertyId}/templates/${primaryTemplate.id}?lang=${language}`}
+              className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+            >
+              {t.editCleaningChecklist}
+            </Link>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowCreateForm((prev) => !prev)}
+              className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700"
+            >
+              {showCreateForm ? t.hideCreateForm : t.createCleaningChecklist}
+            </button>
+          )}
         </div>
 
-        {showCreateForm ? (
-          <form onSubmit={handleCreateTemplate} className="mt-6 space-y-6">
-            <div className="grid gap-5">
-              <div>
-                <label className="mb-2 block text-sm font-medium text-slate-700">
-                  {t.templateTitle}
-                </label>
-                <input
-                  value={templateTitle}
-                  onChange={(e) => setTemplateTitle(e.target.value)}
-                  placeholder={t.templateTitlePlaceholder}
-                  className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                  required
-                />
-              </div>
+        {primaryTemplate ? (
+          <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-5">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-xl font-bold text-slate-900">
+                {primaryTemplate.title}
+              </h3>
 
-              <div>
-                <label className="mb-2 block text-sm font-medium text-slate-700">
-                  {t.templateDescription}
-                </label>
-                <textarea
-                  value={templateDescription}
-                  onChange={(e) => setTemplateDescription(e.target.value)}
-                  placeholder={t.templateDescriptionPlaceholder}
-                  className="min-h-[120px] w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                />
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-slate-700">
-                    {t.templateType}
-                  </label>
-                  <select
-                    value={templateType}
-                    onChange={(e) => setTemplateType(e.target.value)}
-                    className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                  >
-                    <option value="main">{t.mainType}</option>
-                    <option value="support">{t.supportType}</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-slate-700">
-                    {t.activeStatus}
-                  </label>
-                  <select
-                    value={isActive ? "active" : "inactive"}
-                    onChange={(e) => setIsActive(e.target.value === "active")}
-                    className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                  >
-                    <option value="active">{t.activeLabel}</option>
-                    <option value="inactive">{t.inactiveLabel}</option>
-                  </select>
-                </div>
-              </div>
-
-              <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                <input
-                  type="checkbox"
-                  checked={isPrimary}
-                  onChange={(e) => setIsPrimary(e.target.checked)}
-                  className="h-4 w-4 rounded border-slate-300"
-                />
-                <span className="text-sm text-slate-700">{t.setAsPrimary}</span>
-              </label>
+              <span
+                className={cn(
+                  "rounded-full border px-3 py-1 text-xs font-semibold",
+                  primaryTemplate.isActive
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                    : "border-slate-200 bg-slate-100 text-slate-600"
+                )}
+              >
+                {primaryTemplate.isActive ? t.activeBadge : t.inactiveBadge}
+              </span>
             </div>
 
-            <div className="space-y-4">
-              <div>
-                <h3 className="text-xl font-bold text-slate-900">
+            {primaryTemplate.description ? (
+              <p className="mt-3 text-sm text-slate-600">
+                {primaryTemplate.description}
+              </p>
+            ) : null}
+
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              <InfoCard
+                label={t.cleaningItemsCount}
+                value={String(primaryTemplate.items.length)}
+              />
+              <InfoCard
+                label={t.cleaningStatus}
+                value={primaryTemplate.isActive ? t.activeBadge : t.inactiveBadge}
+              />
+            </div>
+
+            {primaryTemplate.items.length > 0 ? (
+              <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4">
+                <p className="mb-3 text-sm font-semibold text-slate-800">
                   {t.checklistItems}
-                </h3>
-                <p className="mt-1 text-sm text-slate-600">
-                  {t.checklistItemsSubtitle}
                 </p>
-              </div>
 
-              <div className="space-y-4">
-                {items.map((item, index) => (
-                  <div
-                    key={`new-item-${index}`}
-                    className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
-                  >
-                    <div className="mb-4 flex items-center justify-between gap-3">
-                      <p className="text-sm font-semibold text-slate-700">
-                        #{index + 1}
-                      </p>
+                <div className="space-y-2">
+                  {primaryTemplate.items.map((item, index) => (
+                    <div
+                      key={item.id}
+                      className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3"
+                    >
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-semibold text-slate-700">
+                          {index + 1}. {item.label}
+                        </span>
 
-                      {items.length > 1 ? (
-                        <button
-                          type="button"
-                          onClick={() => removeItem(index)}
-                          className="rounded-xl border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50"
-                        >
-                          {t.removeItem}
-                        </button>
+                        {item.isRequired ? (
+                          <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs text-slate-600">
+                            {t.required}
+                          </span>
+                        ) : null}
+
+                        {item.requiresPhoto ? (
+                          <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs text-slate-600">
+                            {t.requiresPhoto}
+                          </span>
+                        ) : null}
+                      </div>
+
+                      {item.description ? (
+                        <p className="mt-2 text-sm text-slate-600">
+                          {item.description}
+                        </p>
                       ) : null}
                     </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <>
+            <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-5">
+              <h3 className="text-base font-semibold text-amber-900">
+                {t.noCleaningTitle}
+              </h3>
+              <p className="mt-2 text-sm text-amber-800">
+                {t.noCleaningSubtitle}
+              </p>
+            </div>
 
-                    <div className="grid gap-4">
-                      <div>
-                        <label className="mb-2 block text-sm font-medium text-slate-700">
-                          {t.itemLabel}
-                        </label>
-                        <input
-                          value={item.label}
-                          onChange={(e) =>
-                            updateItem(index, "label", e.target.value)
-                          }
-                          placeholder={t.itemLabelPlaceholder}
-                          className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                          required
-                        />
-                      </div>
+            {showCreateForm ? (
+              <form onSubmit={handleCreateChecklist} className="mt-6 space-y-6">
+                <div>
+                  <h3 className="text-xl font-bold text-slate-900">
+                    {t.formTitle}
+                  </h3>
+                  <p className="mt-1 text-sm text-slate-600">
+                    {t.formSubtitle}
+                  </p>
+                </div>
 
-                      <div>
-                        <label className="mb-2 block text-sm font-medium text-slate-700">
-                          {t.itemDescription}
-                        </label>
-                        <textarea
-                          value={item.description}
-                          onChange={(e) =>
-                            updateItem(index, "description", e.target.value)
-                          }
-                          placeholder={t.itemDescriptionPlaceholder}
-                          className="min-h-[100px] w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                        />
-                      </div>
+                <div className="grid gap-5">
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-slate-700">
+                      {t.checklistTitle}
+                    </label>
+                    <input
+                      value={templateTitle}
+                      onChange={(e) => setTemplateTitle(e.target.value)}
+                      placeholder={t.checklistTitlePlaceholder}
+                      className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                      required
+                    />
+                  </div>
 
-                      <div className="grid gap-4 md:grid-cols-2">
-                        <div>
-                          <label className="mb-2 block text-sm font-medium text-slate-700">
-                            {t.itemFieldType}
-                          </label>
-                          <select
-                            value={item.itemType}
-                            onChange={(e) =>
-                              updateItem(index, "itemType", e.target.value)
-                            }
-                            className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                          >
-                            <option value="boolean">{t.yesNo}</option>
-                            <option value="text">{t.text}</option>
-                            <option value="number">{t.number}</option>
-                            <option value="choice">{t.choice}</option>
-                            <option value="photo">{t.photo}</option>
-                          </select>
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-slate-700">
+                      {t.checklistDescription}
+                    </label>
+                    <textarea
+                      value={templateDescription}
+                      onChange={(e) => setTemplateDescription(e.target.value)}
+                      placeholder={t.checklistDescriptionPlaceholder}
+                      className="min-h-[120px] w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <h4 className="text-xl font-bold text-slate-900">
+                      {t.checklistItems}
+                    </h4>
+                    <p className="mt-1 text-sm text-slate-600">
+                      {t.checklistItemsSubtitle}
+                    </p>
+                  </div>
+
+                  <div className="space-y-4">
+                    {items.map((item, index) => (
+                      <div
+                        key={`new-item-${index}`}
+                        className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                      >
+                        <div className="mb-4 flex items-center justify-between gap-3">
+                          <p className="text-sm font-semibold text-slate-700">
+                            #{index + 1}
+                          </p>
+
+                          {items.length > 1 ? (
+                            <button
+                              type="button"
+                              onClick={() => removeItem(index)}
+                              className="rounded-xl border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50"
+                            >
+                              {t.removeItem}
+                            </button>
+                          ) : null}
                         </div>
 
-                        <div>
-                          <label className="mb-2 block text-sm font-medium text-slate-700">
-                            {t.itemCategory}
-                          </label>
-                          <input
-                            value={item.category}
-                            onChange={(e) =>
-                              updateItem(index, "category", e.target.value)
-                            }
-                            placeholder={t.itemCategoryPlaceholder}
-                            className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                          />
-                        </div>
-                      </div>
-
-                      {item.itemType === "choice" ? (
-                        <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                          <div className="mb-3">
-                            <h4 className="text-sm font-semibold text-slate-800">
-                              {t.itemChoices}
-                            </h4>
-                            <p className="mt-1 text-xs text-slate-500">
-                              {t.itemChoicesSubtitle}
-                            </p>
+                        <div className="grid gap-4">
+                          <div>
+                            <label className="mb-2 block text-sm font-medium text-slate-700">
+                              {t.itemLabel}
+                            </label>
+                            <input
+                              value={item.label}
+                              onChange={(e) =>
+                                updateItem(index, "label", e.target.value)
+                              }
+                              placeholder={t.itemLabelPlaceholder}
+                              className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                              required
+                            />
                           </div>
 
-                          <div className="space-y-3">
-                            {item.options.map((choice, choiceIndex) => (
-                              <div
-                                key={`item-${index}-choice-${choiceIndex}`}
-                                className="flex items-center gap-3"
+                          <div>
+                            <label className="mb-2 block text-sm font-medium text-slate-700">
+                              {t.itemDescription}
+                            </label>
+                            <textarea
+                              value={item.description}
+                              onChange={(e) =>
+                                updateItem(index, "description", e.target.value)
+                              }
+                              placeholder={t.itemDescriptionPlaceholder}
+                              className="min-h-[100px] w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                            />
+                          </div>
+
+                          <div className="grid gap-4 md:grid-cols-2">
+                            <div>
+                              <label className="mb-2 block text-sm font-medium text-slate-700">
+                                {t.itemFieldType}
+                              </label>
+                              <select
+                                value={item.itemType}
+                                onChange={(e) =>
+                                  updateItem(index, "itemType", e.target.value)
+                                }
+                                className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                               >
-                                <input
-                                  value={choice}
-                                  onChange={(e) =>
-                                    updateChoice(index, choiceIndex, e.target.value)
-                                  }
-                                  placeholder={t.choicePlaceholder}
-                                  className="flex-1 rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                                />
+                                <option value="boolean">{t.yesNo}</option>
+                                <option value="text">{t.text}</option>
+                                <option value="number">{t.number}</option>
+                                <option value="choice">{t.choice}</option>
+                                <option value="photo">{t.photo}</option>
+                              </select>
+                            </div>
+
+                            <div>
+                              <label className="mb-2 block text-sm font-medium text-slate-700">
+                                {t.itemCategory}
+                              </label>
+                              <input
+                                value={item.category}
+                                onChange={(e) =>
+                                  updateItem(index, "category", e.target.value)
+                                }
+                                placeholder={t.itemCategoryPlaceholder}
+                                className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                              />
+                            </div>
+                          </div>
+
+                          {item.itemType === "choice" ? (
+                            <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                              <div className="mb-3">
+                                <h5 className="text-sm font-semibold text-slate-800">
+                                  {t.itemChoices}
+                                </h5>
+                                <p className="mt-1 text-xs text-slate-500">
+                                  {t.itemChoicesSubtitle}
+                                </p>
+                              </div>
+
+                              <div className="space-y-3">
+                                {item.options.map((choice, choiceIndex) => (
+                                  <div
+                                    key={`item-${index}-choice-${choiceIndex}`}
+                                    className="flex items-center gap-3"
+                                  >
+                                    <input
+                                      value={choice}
+                                      onChange={(e) =>
+                                        updateChoice(
+                                          index,
+                                          choiceIndex,
+                                          e.target.value
+                                        )
+                                      }
+                                      placeholder={t.choicePlaceholder}
+                                      className="flex-1 rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                                    />
+
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        removeChoice(index, choiceIndex)
+                                      }
+                                      className="rounded-xl border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50"
+                                    >
+                                      {t.removeChoice}
+                                    </button>
+                                  </div>
+                                ))}
 
                                 <button
                                   type="button"
-                                  onClick={() => removeChoice(index, choiceIndex)}
-                                  className="rounded-xl border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50"
+                                  onClick={() => addChoice(index)}
+                                  className="rounded-xl border border-slate-300 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
                                 >
-                                  {t.removeChoice}
+                                  {t.addChoice}
                                 </button>
                               </div>
-                            ))}
+                            </div>
+                          ) : null}
 
-                            <button
-                              type="button"
-                              onClick={() => addChoice(index)}
-                              className="rounded-xl border border-slate-300 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
-                            >
-                              {t.addChoice}
-                            </button>
+                          <div className="grid gap-3 md:grid-cols-3">
+                            <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                              <input
+                                type="checkbox"
+                                checked={item.isRequired}
+                                onChange={(e) =>
+                                  updateItem(index, "isRequired", e.target.checked)
+                                }
+                                className="h-4 w-4 rounded border-slate-300"
+                              />
+                              <span className="text-sm text-slate-700">
+                                {t.required}
+                              </span>
+                            </label>
+
+                            <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                              <input
+                                type="checkbox"
+                                checked={item.requiresPhoto}
+                                onChange={(e) =>
+                                  updateItem(
+                                    index,
+                                    "requiresPhoto",
+                                    e.target.checked
+                                  )
+                                }
+                                className="h-4 w-4 rounded border-slate-300"
+                              />
+                              <span className="text-sm text-slate-700">
+                                {t.requiresPhoto}
+                              </span>
+                            </label>
+
+                            <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                              <input
+                                type="checkbox"
+                                checked={item.opensIssueOnFail}
+                                onChange={(e) =>
+                                  updateItem(
+                                    index,
+                                    "opensIssueOnFail",
+                                    e.target.checked
+                                  )
+                                }
+                                className="h-4 w-4 rounded border-slate-300"
+                              />
+                              <span className="text-sm text-slate-700">
+                                {t.opensIssueOnFail}
+                              </span>
+                            </label>
                           </div>
                         </div>
-                      ) : null}
-
-                      <div className="grid gap-3 md:grid-cols-3">
-                        <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                          <input
-                            type="checkbox"
-                            checked={item.isRequired}
-                            onChange={(e) =>
-                              updateItem(index, "isRequired", e.target.checked)
-                            }
-                            className="h-4 w-4 rounded border-slate-300"
-                          />
-                          <span className="text-sm text-slate-700">
-                            {t.required}
-                          </span>
-                        </label>
-
-                        <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                          <input
-                            type="checkbox"
-                            checked={item.requiresPhoto}
-                            onChange={(e) =>
-                              updateItem(index, "requiresPhoto", e.target.checked)
-                            }
-                            className="h-4 w-4 rounded border-slate-300"
-                          />
-                          <span className="text-sm text-slate-700">
-                            {t.requiresPhoto}
-                          </span>
-                        </label>
-
-                        <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                          <input
-                            type="checkbox"
-                            checked={item.opensIssueOnFail}
-                            onChange={(e) =>
-                              updateItem(index, "opensIssueOnFail", e.target.checked)
-                            }
-                            className="h-4 w-4 rounded border-slate-300"
-                          />
-                          <span className="text-sm text-slate-700">
-                            {t.opensIssueOnFail}
-                          </span>
-                        </label>
                       </div>
-                    </div>
+                    ))}
                   </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <button
+                      type="button"
+                      onClick={addItem}
+                      className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                    >
+                      {t.addItem}
+                    </button>
+
+                    <button
+                      type="submit"
+                      disabled={saving}
+                      className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      {saving ? t.creating : t.createChecklist}
+                    </button>
+                  </div>
+                </div>
+              </form>
+            ) : null}
+          </>
+        )}
+      </section>
+
+      <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+          <div>
+            <h2 className="text-2xl font-bold text-slate-900">
+              {t.suppliesSectionTitle}
+            </h2>
+            <p className="mt-2 max-w-3xl text-sm text-slate-600">
+              {t.suppliesSectionSubtitle}
+            </p>
+          </div>
+
+          <Link
+            href={`/properties/${propertyId}/supplies`}
+            className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            {t.manageSupplies}
+          </Link>
+        </div>
+
+        {activeSupplies.length > 0 ? (
+          <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+            <h3 className="text-base font-semibold text-emerald-900">
+              {t.suppliesReadyTitle}
+            </h3>
+            <p className="mt-2 text-sm text-emerald-800">
+              {t.suppliesReadySubtitle}
+            </p>
+
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              <InfoCard
+                label={t.activeSuppliesCount}
+                value={String(activeSupplies.length)}
+              />
+              <InfoCard
+                label={t.suppliesSummary}
+                value={t.configured}
+              />
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-emerald-100 bg-white p-4">
+              <p className="mb-3 text-sm font-semibold text-slate-800">
+                {t.sampleItems}
+              </p>
+
+              <div className="flex flex-wrap gap-2">
+                {suppliesPreview.map((supply) => (
+                  <span
+                    key={supply.id}
+                    className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-700"
+                  >
+                    {supply.name}
+                  </span>
                 ))}
               </div>
-
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <button
-                  type="button"
-                  onClick={addItem}
-                  className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-                >
-                  {t.addItem}
-                </button>
-
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
-                >
-                  {saving ? t.creating : t.createTemplate}
-                </button>
-              </div>
             </div>
-          </form>
-        ) : null}
+          </div>
+        ) : (
+          <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-5">
+            <h3 className="text-base font-semibold text-amber-900">
+              {t.noSuppliesTitle}
+            </h3>
+            <p className="mt-2 text-sm text-amber-800">
+              {t.noSuppliesSubtitle}
+            </p>
+          </div>
+        )}
       </section>
 
       {error ? (
@@ -1042,135 +1162,38 @@ export default function PropertyChecklistsPage({
           {successMessage}
         </div>
       ) : null}
-
-      <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="mb-5">
-          <h2 className="text-2xl font-bold text-slate-900">
-            {t.existingTemplates}
-          </h2>
-          <p className="mt-2 text-sm text-slate-600">
-            {t.existingTemplatesSubtitle}
-          </p>
-        </div>
-
-        {templates.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-5 py-8 text-center text-sm text-slate-500">
-            {t.noTemplates}
-          </div>
-        ) : filteredTemplates.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-5 py-8 text-center text-sm text-slate-500">
-            {t.noTemplatesForFilter}
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {filteredTemplates.map((template) => (
-              <div
-                key={template.id}
-                className="rounded-2xl border border-slate-200 bg-white p-4"
-              >
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="text-xl font-bold text-slate-900">
-                        {template.title}
-                      </h3>
-
-                      {template.isPrimary ? (
-                        <span className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
-                          {t.primaryBadge}
-                        </span>
-                      ) : (
-                        <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
-                          {t.helperBadge}
-                        </span>
-                      )}
-
-                      <span
-                        className={cn(
-                          "rounded-full border px-3 py-1 text-xs font-semibold",
-                          template.isActive
-                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                            : "border-slate-200 bg-slate-50 text-slate-600"
-                        )}
-                      >
-                        {template.isActive ? t.activeBadge : t.inactiveBadge}
-                      </span>
-
-                      <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
-                        {getTemplateTypeLabel(template.templateType, language)}
-                      </span>
-                    </div>
-
-                    {template.description ? (
-                      <p className="mt-3 text-sm text-slate-600">
-                        {template.description}
-                      </p>
-                    ) : null}
-
-                    <p className="mt-3 text-sm text-slate-500">
-                      {t.itemsCount}: {template.items.length}
-                    </p>
-                  </div>
-
-                  <div className="flex shrink-0 items-center gap-3">
-                    <Link
-                      href={`/property-checklists/${propertyId}/templates/${template.id}?lang=${language}`}
-                      className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-                    >
-                      {t.viewTemplate}
-                    </Link>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
     </div>
   )
 }
 
-function FilterCard({
+function SummaryCard({
   title,
   value,
-  subtitle,
-  active,
-  onClick,
 }: {
   title: string
-  value: number
-  subtitle: string
-  active: boolean
-  onClick: () => void
+  value: string
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "rounded-3xl border p-5 text-left shadow-sm transition",
-        active
-          ? "border-slate-900 bg-slate-900 text-white"
-          : "border-slate-200 bg-white hover:border-slate-300"
-      )}
-    >
-      <p
-        className={cn(
-          "text-sm font-medium",
-          active ? "text-white/80" : "text-slate-600"
-        )}
-      >
-        {title}
+    <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+      <p className="text-sm font-medium text-slate-600">{title}</p>
+      <p className="mt-3 text-3xl font-bold tracking-tight text-slate-900">
+        {value}
       </p>
-      <p className="mt-3 text-4xl font-bold tracking-tight">{value}</p>
-      <p
-        className={cn(
-          "mt-2 text-sm",
-          active ? "text-white/80" : "text-slate-500"
-        )}
-      >
-        {subtitle}
-      </p>
-    </button>
+    </div>
+  )
+}
+
+function InfoCard({
+  label,
+  value,
+}: {
+  label: string
+  value: string
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+      <p className="text-sm font-medium text-slate-500">{label}</p>
+      <p className="mt-2 text-lg font-semibold text-slate-900">{value}</p>
+    </div>
   )
 }

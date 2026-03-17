@@ -16,6 +16,10 @@ function isExpired(date?: Date | string | null) {
   return parsed.getTime() < Date.now()
 }
 
+function normalizeStatus(value: unknown) {
+  return String(value ?? "").trim().toLowerCase()
+}
+
 export async function GET(_req: NextRequest, context: RouteContext) {
   try {
     const { token } = await context.params
@@ -124,28 +128,30 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       }
     }
 
-    const rows = Array.from(latestAssignmentsMap.values()).map((assignment) => ({
-      assignmentId: assignment.id,
-      assignmentStatus: assignment.status,
-      assignedAt: assignment.assignedAt,
-      acceptedAt: assignment.acceptedAt,
-      startedAt: assignment.startedAt,
-      completedAt: assignment.completedAt,
-      task: {
-        id: assignment.task.id,
-        title: assignment.task.title,
-        description: assignment.task.description,
-        taskType: assignment.task.taskType,
-        priority: assignment.task.priority,
-        status: assignment.task.status,
-        scheduledDate: assignment.task.scheduledDate,
-        scheduledStartTime: assignment.task.scheduledStartTime,
-        scheduledEndTime: assignment.task.scheduledEndTime,
-        requiresChecklist: assignment.task.requiresChecklist,
-        checklistRun: assignment.task.checklistRun,
-        property: assignment.task.property,
-      },
-    }))
+    const rows = Array.from(latestAssignmentsMap.values())
+      .filter((assignment) => normalizeStatus(assignment.task.status) !== "cancelled")
+      .map((assignment) => ({
+        assignmentId: assignment.id,
+        assignmentStatus: assignment.status,
+        assignedAt: assignment.assignedAt,
+        acceptedAt: assignment.acceptedAt,
+        startedAt: assignment.startedAt,
+        completedAt: assignment.completedAt,
+        task: {
+          id: assignment.task.id,
+          title: assignment.task.title,
+          description: assignment.task.description,
+          taskType: assignment.task.taskType,
+          priority: assignment.task.priority,
+          status: assignment.task.status,
+          scheduledDate: assignment.task.scheduledDate,
+          scheduledStartTime: assignment.task.scheduledStartTime,
+          scheduledEndTime: assignment.task.scheduledEndTime,
+          requiresChecklist: assignment.task.requiresChecklist,
+          checklistRun: assignment.task.checklistRun,
+          property: assignment.task.property,
+        },
+      }))
 
     return NextResponse.json({
       partner: portalAccess.partner,

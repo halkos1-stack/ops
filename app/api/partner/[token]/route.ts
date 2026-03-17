@@ -16,6 +16,14 @@ function isExpired(date?: Date | string | null) {
   return parsed.getTime() < Date.now()
 }
 
+function normalizeStatus(value: unknown) {
+  return String(value ?? "").trim().toLowerCase()
+}
+
+function isCancelledTaskStatus(value: unknown) {
+  return normalizeStatus(value) === "cancelled"
+}
+
 export async function GET(_req: NextRequest, context: RouteContext) {
   try {
     const { token } = await context.params
@@ -64,6 +72,12 @@ export async function GET(_req: NextRequest, context: RouteContext) {
                         status: true,
                       },
                     },
+                    supplyRun: {
+                      select: {
+                        id: true,
+                        status: true,
+                      },
+                    },
                   },
                 },
               },
@@ -106,19 +120,23 @@ export async function GET(_req: NextRequest, context: RouteContext) {
 
     const latestAssignments = Array.from(latestAssignmentsMap.values())
 
-    const pendingAcceptance = latestAssignments.filter((assignment) =>
-      ["assigned"].includes(String(assignment.status || "").toLowerCase())
+    const activeAssignments = latestAssignments.filter(
+      (assignment) => !isCancelledTaskStatus(assignment.task?.status)
+    )
+
+    const pendingAcceptance = activeAssignments.filter((assignment) =>
+      ["assigned"].includes(normalizeStatus(assignment.status))
     ).length
 
-    const accepted = latestAssignments.filter((assignment) =>
-      ["accepted"].includes(String(assignment.status || "").toLowerCase())
+    const accepted = activeAssignments.filter((assignment) =>
+      ["accepted"].includes(normalizeStatus(assignment.status))
     ).length
 
-    const inProgress = latestAssignments.filter((assignment) =>
-      ["in_progress"].includes(String(assignment.status || "").toLowerCase())
+    const inProgress = activeAssignments.filter((assignment) =>
+      ["in_progress"].includes(normalizeStatus(assignment.status))
     ).length
 
-    const completedToday = latestAssignments.filter((assignment) => {
+    const completedToday = activeAssignments.filter((assignment) => {
       if (!assignment.completedAt) return false
 
       const today = new Date()
@@ -131,10 +149,10 @@ export async function GET(_req: NextRequest, context: RouteContext) {
       )
     }).length
 
-    const urgentItems = latestAssignments
+    const urgentItems = activeAssignments
       .filter((assignment) =>
         ["assigned", "accepted", "in_progress"].includes(
-          String(assignment.status || "").toLowerCase()
+          normalizeStatus(assignment.status)
         )
       )
       .slice(0, 8)
@@ -151,6 +169,7 @@ export async function GET(_req: NextRequest, context: RouteContext) {
           scheduledEndTime: assignment.task.scheduledEndTime,
           property: assignment.task.property,
           checklistRun: assignment.task.checklistRun,
+          supplyRun: assignment.task.supplyRun,
         },
       }))
 
@@ -165,7 +184,7 @@ export async function GET(_req: NextRequest, context: RouteContext) {
         status: portalAccess.partner.status,
       },
       stats: {
-        totalAssignments: latestAssignments.length,
+        totalAssignments: activeAssignments.length,
         pendingAcceptance,
         accepted,
         inProgress,

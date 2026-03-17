@@ -63,6 +63,8 @@ type SupplyAnswerPayload = {
 }
 
 type PagePayload = {
+  isCancelled?: boolean
+  cancellationMessage?: string | null
   assignment: {
     id: string
     status: string
@@ -386,13 +388,20 @@ function getTaskPageTexts(language: PortalLanguage) {
       savingSupplies: "Saving...",
       submittingSupplies: "Submitting...",
       supplyLevel: "Level",
-      lastUpdated: "Last updated",
       lowOption: "Low",
       mediumOption: "Medium",
       fullOption: "Full",
       suppliesSaveSuccess: "Supplies progress was saved.",
       suppliesSubmitSuccess: "Supplies were submitted successfully.",
       supplyNotes: "Supply notes",
+      popupClose: "Close",
+      checklistPopupTitle: "Cleaning checklist",
+      suppliesPopupTitle: "Supplies",
+      cancelledTaskTitle: "Cancelled task",
+      cancelledTaskMessage:
+        "This task has been cancelled by the manager and no further action is required.",
+      cancelledReadonly:
+        "The task has been cancelled. Actions and submissions are disabled.",
     }
   }
 
@@ -492,13 +501,20 @@ function getTaskPageTexts(language: PortalLanguage) {
     savingSupplies: "Αποθήκευση...",
     submittingSupplies: "Υποβολή...",
     supplyLevel: "Επίπεδο",
-    lastUpdated: "Τελευταία ενημέρωση",
     lowOption: "Έλλειψη",
     mediumOption: "Μέτρια",
     fullOption: "Πλήρης",
     suppliesSaveSuccess: "Η πρόοδος των αναλωσίμων αποθηκεύτηκε.",
     suppliesSubmitSuccess: "Τα αναλώσιμα υποβλήθηκαν επιτυχώς.",
     supplyNotes: "Σημειώσεις αναλωσίμου",
+    popupClose: "Κλείσιμο",
+    checklistPopupTitle: "Λίστα καθαριότητας",
+    suppliesPopupTitle: "Αναλώσιμα",
+    cancelledTaskTitle: "Ακυρωμένη εργασία",
+    cancelledTaskMessage:
+      "Η εργασία έχει ακυρωθεί από τον διαχειριστή και δεν απαιτείται πλέον καμία ενέργεια.",
+    cancelledReadonly:
+      "Η εργασία έχει ακυρωθεί. Οι ενέργειες και οι υποβολές είναι απενεργοποιημένες.",
   }
 }
 
@@ -592,6 +608,41 @@ function LanguageSwitcher({
       >
         {common.english}
       </button>
+    </div>
+  )
+}
+
+function PopupShell({
+  title,
+  isOpen,
+  onClose,
+  closeLabel,
+  children,
+}: {
+  title: string
+  isOpen: boolean
+  onClose: () => void
+  closeLabel: string
+  children: React.ReactNode
+}) {
+  if (!isOpen) return null
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/25 p-4">
+      <div className="flex h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+          <h2 className="text-2xl font-bold text-slate-950">{title}</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            {closeLabel}
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">{children}</div>
+      </div>
     </div>
   )
 }
@@ -723,24 +774,48 @@ export default function PartnerPortalTaskPage() {
     setSupplyValues(nextValues)
   }, [data])
 
-  const canRespond = useMemo(() => {
-    return data?.assignment?.status === "assigned"
+  const isCancelled = useMemo(() => {
+    return Boolean(data?.isCancelled) || String(data?.task?.status || "").toLowerCase() === "cancelled"
   }, [data])
 
+  const canRespond = useMemo(() => {
+    if (isCancelled) return false
+    return data?.assignment?.status === "assigned"
+  }, [data, isCancelled])
+
   const canShowTaskSections = useMemo(() => {
+    if (isCancelled) return false
+
     return (
       data?.assignment?.status === "accepted" ||
       data?.assignment?.status === "in_progress" ||
       data?.assignment?.status === "completed"
     )
-  }, [data])
+  }, [data, isCancelled])
 
-  const canEditTaskSections = useMemo(() => {
+  const canEditChecklist = useMemo(() => {
+    if (isCancelled) return false
+
     return (
       data?.assignment?.status === "accepted" ||
       data?.assignment?.status === "in_progress"
     )
-  }, [data])
+  }, [data, isCancelled])
+
+  const canEditSupplies = useMemo(() => {
+    if (isCancelled) return false
+
+    const assignmentOk =
+      data?.assignment?.status === "accepted" ||
+      data?.assignment?.status === "in_progress"
+
+    if (!assignmentOk) return false
+
+    if (!data?.task?.sendSuppliesChecklist) return false
+
+    const supplyRunStatus = String(data?.task?.supplyRun?.status || "").toLowerCase()
+    return supplyRunStatus !== "completed"
+  }, [data, isCancelled])
 
   function getBackUrl() {
     if (!token) return "#"
@@ -805,7 +880,7 @@ export default function PartnerPortalTaskPage() {
   }
 
   async function uploadPhoto(itemId: string, file: File) {
-    if (!token || !taskId) return
+    if (!token || !taskId || isCancelled) return
 
     try {
       setUploadingItemId(itemId)
@@ -863,7 +938,7 @@ export default function PartnerPortalTaskPage() {
   }
 
   async function respond(action: "accept" | "reject") {
-    if (!token || !data?.assignment?.id) return
+    if (!token || !data?.assignment?.id || isCancelled) return
 
     if (action === "reject" && !rejectionReason.trim()) {
       setError(t.rejectionReasonRequired)
@@ -907,7 +982,12 @@ export default function PartnerPortalTaskPage() {
   }
 
   async function submitChecklist(mode: "save" | "submit") {
-    if (!token || !taskId || !data?.task?.checklistRun?.template?.items?.length) {
+    if (
+      !token ||
+      !taskId ||
+      !data?.task?.checklistRun?.template?.items?.length ||
+      isCancelled
+    ) {
       return
     }
 
@@ -962,6 +1042,11 @@ export default function PartnerPortalTaskPage() {
       }
 
       setSuccess(mode === "submit" ? t.submitSuccess : t.saveSuccess)
+
+      if (mode === "submit") {
+        setChecklistOpen(false)
+      }
+
       await loadData()
     } catch (err) {
       console.error("Checklist submit error:", err)
@@ -972,7 +1057,7 @@ export default function PartnerPortalTaskPage() {
   }
 
   async function submitSupplies(mode: "save" | "submit") {
-    if (!token || !taskId || !data?.task?.property?.supplies?.length) {
+    if (!token || !taskId || !data?.task?.property?.supplies?.length || isCancelled) {
       return
     }
 
@@ -1017,6 +1102,11 @@ export default function PartnerPortalTaskPage() {
       }
 
       setSuccess(mode === "submit" ? t.suppliesSubmitSuccess : t.suppliesSaveSuccess)
+
+      if (mode === "submit") {
+        setSuppliesOpen(false)
+      }
+
       await loadData()
     } catch (err) {
       console.error("Supplies submit error:", err)
@@ -1069,6 +1159,12 @@ export default function PartnerPortalTaskPage() {
                 >
                   {getPortalStatusLabel(language, data.assignment.status)}
                 </span>
+
+                {isCancelled ? (
+                  <span className="rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">
+                    {t.cancelledTaskTitle}
+                  </span>
+                ) : null}
               </div>
             </div>
 
@@ -1092,6 +1188,15 @@ export default function PartnerPortalTaskPage() {
           </div>
         </section>
 
+        {isCancelled ? (
+          <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-700">
+            <div className="font-semibold">{t.cancelledTaskTitle}</div>
+            <div className="mt-1">
+              {data.cancellationMessage || t.cancelledTaskMessage}
+            </div>
+          </div>
+        ) : null}
+
         {error ? (
           <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}
@@ -1105,7 +1210,7 @@ export default function PartnerPortalTaskPage() {
         ) : null}
 
         <section className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-          <div className="xl:col-span-2 space-y-6">
+          <div className="space-y-6 xl:col-span-2">
             <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
               <h2 className="text-2xl font-bold text-slate-950">{t.taskDetails}</h2>
 
@@ -1172,7 +1277,11 @@ export default function PartnerPortalTaskPage() {
             <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
               <h2 className="text-2xl font-bold text-slate-950">{t.actions}</h2>
 
-              {!canRespond ? (
+              {isCancelled ? (
+                <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 p-5 text-sm text-red-700">
+                  {t.cancelledReadonly}
+                </div>
+              ) : !canRespond ? (
                 <div className="mt-4 rounded-2xl border border-dashed border-slate-300 p-5 text-sm text-slate-500">
                   {t.noFurtherResponse}
                 </div>
@@ -1226,10 +1335,10 @@ export default function PartnerPortalTaskPage() {
                   <div className="flex flex-wrap gap-3">
                     <button
                       type="button"
-                      onClick={() => setChecklistOpen((prev) => !prev)}
+                      onClick={() => setChecklistOpen(true)}
                       className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                     >
-                      {checklistOpen ? t.closeChecklist : t.openChecklist}
+                      {t.openChecklist}
                     </button>
                   </div>
                 </div>
@@ -1246,305 +1355,6 @@ export default function PartnerPortalTaskPage() {
                     {getPortalStatusLabel(language, data.task.checklistRun.status)}
                   </p>
                 </div>
-
-                {checklistOpen ? (
-                  data.task.checklistRun.template?.items?.length ? (
-                    <div className="mt-4 space-y-4">
-                      {data.task.checklistRun.template.items.map((item, index) => {
-                        const value = checklistValues[item.id] || getEmptyChecklistFormValue()
-                        const inputMode = getItemInputMode(item.itemType)
-                        const options = parseOptions(item.optionsText)
-
-                        return (
-                          <div
-                            key={item.id}
-                            className="rounded-2xl border border-slate-200 p-4"
-                          >
-                            <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                              <div className="min-w-0">
-                                <p className="text-sm font-semibold text-slate-950">
-                                  {index + 1}. {item.label}
-                                </p>
-                                <p className="mt-1 text-xs text-slate-500">
-                                  {item.description || t.noItemDescription}
-                                </p>
-                              </div>
-
-                              <div className="flex flex-wrap gap-2">
-                                {item.isRequired ? (
-                                  <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">
-                                    {t.required}
-                                  </span>
-                                ) : null}
-
-                                {item.requiresPhoto ? (
-                                  <span className="rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs font-semibold text-violet-700">
-                                    {t.photoRequired}
-                                  </span>
-                                ) : null}
-
-                                {item.opensIssueOnFail ? (
-                                  <span className="rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">
-                                    {t.issueOnFail}
-                                  </span>
-                                ) : null}
-                              </div>
-                            </div>
-
-                            <div className="mt-4 space-y-4">
-                              {inputMode === "boolean" ? (
-                                <div>
-                                  <label className="mb-2 block text-sm font-medium text-slate-700">
-                                    {t.booleanAnswer}
-                                  </label>
-                                  <div className="flex flex-wrap gap-3">
-                                    <button
-                                      type="button"
-                                      disabled={!canEditTaskSections}
-                                      onClick={() =>
-                                        updateChecklistValue(item.id, {
-                                          valueBoolean: true,
-                                        })
-                                      }
-                                      className={`rounded-2xl px-4 py-2 text-sm font-semibold ${
-                                        value.valueBoolean === true
-                                          ? "bg-emerald-600 text-white"
-                                          : "border border-slate-300 bg-white text-slate-700"
-                                      } disabled:opacity-60`}
-                                    >
-                                      {t.yesOption}
-                                    </button>
-
-                                    <button
-                                      type="button"
-                                      disabled={!canEditTaskSections}
-                                      onClick={() =>
-                                        updateChecklistValue(item.id, {
-                                          valueBoolean: false,
-                                        })
-                                      }
-                                      className={`rounded-2xl px-4 py-2 text-sm font-semibold ${
-                                        value.valueBoolean === false
-                                          ? "bg-red-600 text-white"
-                                          : "border border-slate-300 bg-white text-slate-700"
-                                      } disabled:opacity-60`}
-                                    >
-                                      {t.noOption}
-                                    </button>
-                                  </div>
-                                </div>
-                              ) : null}
-
-                              {inputMode === "text" ? (
-                                <div>
-                                  <label className="mb-2 block text-sm font-medium text-slate-700">
-                                    {t.textAnswer}
-                                  </label>
-                                  <textarea
-                                    rows={3}
-                                    disabled={!canEditTaskSections}
-                                    value={value.valueText}
-                                    onChange={(e) =>
-                                      updateChecklistValue(item.id, {
-                                        valueText: e.target.value,
-                                      })
-                                    }
-                                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-slate-400 disabled:bg-slate-50"
-                                  />
-                                </div>
-                              ) : null}
-
-                              {inputMode === "number" ? (
-                                <div>
-                                  <label className="mb-2 block text-sm font-medium text-slate-700">
-                                    {t.numberAnswer}
-                                  </label>
-                                  <input
-                                    type="number"
-                                    disabled={!canEditTaskSections}
-                                    value={value.valueNumber}
-                                    onChange={(e) =>
-                                      updateChecklistValue(item.id, {
-                                        valueNumber: e.target.value,
-                                      })
-                                    }
-                                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-slate-400 disabled:bg-slate-50"
-                                  />
-                                </div>
-                              ) : null}
-
-                              {inputMode === "select" ? (
-                                <div>
-                                  <label className="mb-2 block text-sm font-medium text-slate-700">
-                                    {t.selectAnswer}
-                                  </label>
-                                  <select
-                                    disabled={!canEditTaskSections}
-                                    value={value.valueSelect}
-                                    onChange={(e) =>
-                                      updateChecklistValue(item.id, {
-                                        valueSelect: e.target.value,
-                                      })
-                                    }
-                                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-slate-400 disabled:bg-slate-50"
-                                  >
-                                    <option value="">{t.chooseOption}</option>
-                                    {options.map((option, optionIndex) => (
-                                      <option
-                                        key={`${item.id}-option-${optionIndex}-${option}`}
-                                        value={option}
-                                      >
-                                        {option}
-                                      </option>
-                                    ))}
-                                  </select>
-                                </div>
-                              ) : null}
-
-                              <div>
-                                <label className="mb-2 block text-sm font-medium text-slate-700">
-                                  {t.answerNotes}
-                                </label>
-                                <textarea
-                                  rows={2}
-                                  disabled={!canEditTaskSections}
-                                  value={value.notes}
-                                  onChange={(e) =>
-                                    updateChecklistValue(item.id, {
-                                      notes: e.target.value,
-                                    })
-                                  }
-                                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-slate-400 disabled:bg-slate-50"
-                                />
-                              </div>
-
-                              {item.requiresPhoto ? (
-                                <div className="rounded-2xl border border-violet-200 bg-violet-50/40 p-4">
-                                  <p className="text-sm font-semibold text-violet-900">
-                                    {t.photoSection}
-                                  </p>
-
-                                  <div className="mt-3 flex flex-wrap gap-3">
-                                    <button
-                                      type="button"
-                                      disabled={!canEditTaskSections || uploadingItemId === item.id}
-                                      onClick={() =>
-                                        cameraInputRefs.current[item.id]?.click()
-                                      }
-                                      className="rounded-2xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-60"
-                                    >
-                                      {uploadingItemId === item.id
-                                        ? t.uploadingPhoto
-                                        : t.takePhoto}
-                                    </button>
-
-                                    <button
-                                      type="button"
-                                      disabled={!canEditTaskSections || uploadingItemId === item.id}
-                                      onClick={() =>
-                                        fileInputRefs.current[item.id]?.click()
-                                      }
-                                      className="rounded-2xl border border-violet-300 bg-white px-4 py-2 text-sm font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-60"
-                                    >
-                                      {uploadingItemId === item.id
-                                        ? t.uploadingPhoto
-                                        : t.chooseFile}
-                                    </button>
-                                  </div>
-
-                                  <input
-                                    ref={(el) => {
-                                      cameraInputRefs.current[item.id] = el
-                                    }}
-                                    type="file"
-                                    accept="image/*"
-                                    capture="environment"
-                                    className="hidden"
-                                    onChange={(e) => onPhotoInputChange(item.id, e)}
-                                  />
-
-                                  <input
-                                    ref={(el) => {
-                                      fileInputRefs.current[item.id] = el
-                                    }}
-                                    type="file"
-                                    accept="image/*"
-                                    className="hidden"
-                                    onChange={(e) => onPhotoInputChange(item.id, e)}
-                                  />
-
-                                  {value.photoUrls.length > 0 ? (
-                                    <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-3">
-                                      {value.photoUrls.map((photoUrl) => (
-                                        <div
-                                          key={photoUrl}
-                                          className="rounded-2xl border border-violet-200 bg-white p-3"
-                                        >
-                                          <img
-                                            src={photoUrl}
-                                            alt={item.label}
-                                            className="h-32 w-full rounded-xl object-cover"
-                                          />
-                                          {canEditTaskSections ? (
-                                            <button
-                                              type="button"
-                                              onClick={() =>
-                                                removePhoto(item.id, photoUrl)
-                                              }
-                                              className="mt-3 w-full rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-100"
-                                            >
-                                              {t.removePhoto}
-                                            </button>
-                                          ) : null}
-                                        </div>
-                                      ))}
-                                    </div>
-                                  ) : null}
-                                </div>
-                              ) : null}
-                            </div>
-                          </div>
-                        )
-                      })}
-
-                      <div className="flex flex-wrap justify-end gap-3 border-t border-slate-200 pt-4">
-                        {canEditTaskSections ? (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => submitChecklist("save")}
-                              disabled={checklistSubmitting !== null}
-                              className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-                            >
-                              {checklistSubmitting === "save"
-                                ? t.savingProgress
-                                : t.saveProgress}
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => submitChecklist("submit")}
-                              disabled={checklistSubmitting !== null}
-                              className="rounded-2xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
-                            >
-                              {checklistSubmitting === "submit"
-                                ? t.submittingChecklist
-                                : t.submitChecklist}
-                            </button>
-                          </>
-                        ) : (
-                          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
-                            {t.checklistReadonly}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="mt-4 rounded-2xl border border-dashed border-slate-300 p-5 text-sm text-slate-500">
-                      {t.checklistNoItems}
-                    </div>
-                  )
-                ) : null}
               </section>
             ) : null}
 
@@ -1560,10 +1370,10 @@ export default function PartnerPortalTaskPage() {
                   <div className="flex flex-wrap gap-3">
                     <button
                       type="button"
-                      onClick={() => setSuppliesOpen((prev) => !prev)}
+                      onClick={() => setSuppliesOpen(true)}
                       className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                     >
-                      {suppliesOpen ? t.closeSupplies : t.openSupplies}
+                      {t.openSupplies}
                     </button>
                   </div>
                 </div>
@@ -1580,135 +1390,6 @@ export default function PartnerPortalTaskPage() {
                     )}
                   </p>
                 </div>
-
-                {suppliesOpen ? (
-                  data.task.property.supplies?.length ? (
-                    <div className="mt-4 space-y-4">
-                      {data.task.property.supplies.map((supply, index) => {
-                        const value = supplyValues[supply.id] || getEmptySupplyFormValue()
-
-                        return (
-                          <div
-                            key={supply.id}
-                            className="rounded-2xl border border-slate-200 p-4"
-                          >
-                            <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                              <div className="min-w-0">
-                                <p className="text-sm font-semibold text-slate-950">
-                                  {index + 1}. {supply.supplyItem?.name || "—"}
-                                </p>
-                                <p className="mt-1 text-xs text-slate-500">
-                                  {supply.supplyItem?.code || "—"}
-                                  {supply.supplyItem?.category
-                                    ? ` • ${supply.supplyItem.category}`
-                                    : ""}
-                                </p>
-                              </div>
-
-                              <div className="flex flex-wrap gap-2">
-                                <span
-                                  className={`rounded-full px-3 py-1 text-xs font-semibold ${fillLevelBadgeClasses(
-                                    value.fillLevel || supply.fillLevel
-                                  )}`}
-                                >
-                                  {getFillLevelLabel(
-                                    language,
-                                    value.fillLevel || supply.fillLevel
-                                  )}
-                                </span>
-                              </div>
-                            </div>
-
-                            <div className="mt-4 grid gap-4 md:grid-cols-2">
-                              <div>
-                                <label className="mb-2 block text-sm font-medium text-slate-700">
-                                  {t.supplyLevel}
-                                </label>
-                                <select
-                                  disabled={!canEditTaskSections}
-                                  value={value.fillLevel}
-                                  onChange={(e) =>
-                                    updateSupplyValue(supply.id, {
-                                      fillLevel: e.target.value,
-                                    })
-                                  }
-                                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-slate-400 disabled:bg-slate-50"
-                                >
-                                  <option value="">{t.chooseOption}</option>
-                                  <option value="low">{t.lowOption}</option>
-                                  <option value="medium">{t.mediumOption}</option>
-                                  <option value="full">{t.fullOption}</option>
-                                </select>
-                              </div>
-
-                              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                                <p className="text-sm text-slate-500">
-                                  {t.lastUpdated}
-                                </p>
-                                <p className="mt-1 text-sm font-semibold text-slate-900">
-                                  {formatDateTime(supply.lastUpdatedAt, language)}
-                                </p>
-                              </div>
-
-                              <div className="md:col-span-2">
-                                <label className="mb-2 block text-sm font-medium text-slate-700">
-                                  {t.supplyNotes}
-                                </label>
-                                <textarea
-                                  rows={2}
-                                  disabled={!canEditTaskSections}
-                                  value={value.notes}
-                                  onChange={(e) =>
-                                    updateSupplyValue(supply.id, {
-                                      notes: e.target.value,
-                                    })
-                                  }
-                                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-slate-400 disabled:bg-slate-50"
-                                />
-                              </div>
-                            </div>
-                          </div>
-                        )
-                      })}
-
-                      <div className="flex flex-wrap justify-end gap-3 border-t border-slate-200 pt-4">
-                        {canEditTaskSections ? (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => submitSupplies("save")}
-                              disabled={suppliesSubmitting !== null}
-                              className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-                            >
-                              {suppliesSubmitting === "save"
-                                ? t.savingSupplies
-                                : t.saveSupplies}
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => submitSupplies("submit")}
-                              disabled={suppliesSubmitting !== null}
-                              className="rounded-2xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
-                            >
-                              {suppliesSubmitting === "submit"
-                                ? t.submittingSupplies
-                                : t.submitSupplies}
-                            </button>
-                          </>
-                        ) : (
-                          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
-                            {t.suppliesReadonly}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="mt-4 rounded-2xl border border-dashed border-slate-300 p-5 text-sm text-slate-500">
-                      {t.suppliesNoItems}
-                    </div>
-                  )
-                ) : null}
               </section>
             ) : null}
           </div>
@@ -1770,6 +1451,473 @@ export default function PartnerPortalTaskPage() {
           </div>
         </section>
       </div>
+
+      <PopupShell
+        title={t.checklistPopupTitle}
+        isOpen={checklistOpen}
+        onClose={() => setChecklistOpen(false)}
+        closeLabel={t.popupClose}
+      >
+        {isCancelled ? (
+          <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-sm text-red-700">
+            {data.cancellationMessage || t.cancelledTaskMessage}
+          </div>
+        ) : !data.task.checklistRun?.template?.items?.length ? (
+          <div className="rounded-2xl border border-dashed border-slate-300 p-5 text-sm text-slate-500">
+            {t.checklistNoItems}
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {data.task.checklistRun.template.items.map((item, index) => {
+              const value = checklistValues[item.id] || getEmptyChecklistFormValue()
+              const inputMode = getItemInputMode(item.itemType)
+              const options = parseOptions(item.optionsText)
+
+              return (
+                <div
+                  key={item.id}
+                  className="rounded-2xl border border-slate-200 p-4"
+                >
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-slate-950">
+                        {index + 1}. {item.label}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {item.description || t.noItemDescription}
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      {item.isRequired ? (
+                        <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">
+                          {t.required}
+                        </span>
+                      ) : null}
+
+                      {item.requiresPhoto ? (
+                        <span className="rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs font-semibold text-violet-700">
+                          {t.photoRequired}
+                        </span>
+                      ) : null}
+
+                      {item.opensIssueOnFail ? (
+                        <span className="rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">
+                          {t.issueOnFail}
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 space-y-4">
+                    {inputMode === "boolean" ? (
+                      <div>
+                        <label className="mb-2 block text-sm font-medium text-slate-700">
+                          {t.booleanAnswer}
+                        </label>
+                        <div className="flex flex-wrap gap-3">
+                          <button
+                            type="button"
+                            disabled={!canEditChecklist}
+                            onClick={() =>
+                              updateChecklistValue(item.id, {
+                                valueBoolean: true,
+                              })
+                            }
+                            className={`rounded-2xl px-4 py-2 text-sm font-semibold ${
+                              value.valueBoolean === true
+                                ? "bg-emerald-600 text-white"
+                                : "border border-slate-300 bg-white text-slate-700"
+                            } disabled:opacity-60`}
+                          >
+                            {t.yesOption}
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={!canEditChecklist}
+                            onClick={() =>
+                              updateChecklistValue(item.id, {
+                                valueBoolean: false,
+                              })
+                            }
+                            className={`rounded-2xl px-4 py-2 text-sm font-semibold ${
+                              value.valueBoolean === false
+                                ? "bg-red-600 text-white"
+                                : "border border-slate-300 bg-white text-slate-700"
+                            } disabled:opacity-60`}
+                          >
+                            {t.noOption}
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {inputMode === "text" ? (
+                      <div>
+                        <label className="mb-2 block text-sm font-medium text-slate-700">
+                          {t.textAnswer}
+                        </label>
+                        <textarea
+                          rows={3}
+                          disabled={!canEditChecklist}
+                          value={value.valueText}
+                          onChange={(e) =>
+                            updateChecklistValue(item.id, {
+                              valueText: e.target.value,
+                            })
+                          }
+                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-slate-400 disabled:bg-slate-50"
+                        />
+                      </div>
+                    ) : null}
+
+                    {inputMode === "number" ? (
+                      <div>
+                        <label className="mb-2 block text-sm font-medium text-slate-700">
+                          {t.numberAnswer}
+                        </label>
+                        <input
+                          type="number"
+                          disabled={!canEditChecklist}
+                          value={value.valueNumber}
+                          onChange={(e) =>
+                            updateChecklistValue(item.id, {
+                              valueNumber: e.target.value,
+                            })
+                          }
+                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-slate-400 disabled:bg-slate-50"
+                        />
+                      </div>
+                    ) : null}
+
+                    {inputMode === "select" ? (
+                      <div>
+                        <label className="mb-2 block text-sm font-medium text-slate-700">
+                          {t.selectAnswer}
+                        </label>
+                        <select
+                          disabled={!canEditChecklist}
+                          value={value.valueSelect}
+                          onChange={(e) =>
+                            updateChecklistValue(item.id, {
+                              valueSelect: e.target.value,
+                            })
+                          }
+                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-slate-400 disabled:bg-slate-50"
+                        >
+                          <option value="">{t.chooseOption}</option>
+                          {options.map((option, optionIndex) => (
+                            <option
+                              key={`${item.id}-option-${optionIndex}-${option}`}
+                              value={option}
+                            >
+                              {option}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : null}
+
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-700">
+                        {t.answerNotes}
+                      </label>
+                      <textarea
+                        rows={2}
+                        disabled={!canEditChecklist}
+                        value={value.notes}
+                        onChange={(e) =>
+                          updateChecklistValue(item.id, {
+                            notes: e.target.value,
+                          })
+                        }
+                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-slate-400 disabled:bg-slate-50"
+                      />
+                    </div>
+
+                    {item.requiresPhoto ? (
+                      <div className="rounded-2xl border border-violet-200 bg-violet-50/40 p-4">
+                        <p className="text-sm font-semibold text-violet-900">
+                          {t.photoSection}
+                        </p>
+
+                        <div className="mt-3 flex flex-wrap gap-3">
+                          <button
+                            type="button"
+                            disabled={!canEditChecklist || uploadingItemId === item.id}
+                            onClick={() =>
+                              cameraInputRefs.current[item.id]?.click()
+                            }
+                            className="rounded-2xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-60"
+                          >
+                            {uploadingItemId === item.id
+                              ? t.uploadingPhoto
+                              : t.takePhoto}
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={!canEditChecklist || uploadingItemId === item.id}
+                            onClick={() =>
+                              fileInputRefs.current[item.id]?.click()
+                            }
+                            className="rounded-2xl border border-violet-300 bg-white px-4 py-2 text-sm font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-60"
+                          >
+                            {uploadingItemId === item.id
+                              ? t.uploadingPhoto
+                              : t.chooseFile}
+                          </button>
+                        </div>
+
+                        <input
+                          ref={(el) => {
+                            cameraInputRefs.current[item.id] = el
+                          }}
+                          type="file"
+                          accept="image/*"
+                          capture="environment"
+                          className="hidden"
+                          onChange={(e) => onPhotoInputChange(item.id, e)}
+                        />
+
+                        <input
+                          ref={(el) => {
+                            fileInputRefs.current[item.id] = el
+                          }}
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => onPhotoInputChange(item.id, e)}
+                        />
+
+                        {value.photoUrls.length > 0 ? (
+                          <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-3">
+                            {value.photoUrls.map((photoUrl) => (
+                              <div
+                                key={photoUrl}
+                                className="rounded-2xl border border-violet-200 bg-white p-3"
+                              >
+                                <img
+                                  src={photoUrl}
+                                  alt={item.label}
+                                  className="h-32 w-full rounded-xl object-cover"
+                                />
+                                {canEditChecklist ? (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      removePhoto(item.id, photoUrl)
+                                    }
+                                    className="mt-3 w-full rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-100"
+                                  >
+                                    {t.removePhoto}
+                                  </button>
+                                ) : null}
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              )
+            })}
+
+            <div className="sticky bottom-0 flex flex-wrap justify-end gap-3 border-t border-slate-200 bg-white pt-4">
+              {canEditChecklist ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => submitChecklist("save")}
+                    disabled={checklistSubmitting !== null}
+                    className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                  >
+                    {checklistSubmitting === "save"
+                      ? t.savingProgress
+                      : t.saveProgress}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => submitChecklist("submit")}
+                    disabled={checklistSubmitting !== null}
+                    className="rounded-2xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+                  >
+                    {checklistSubmitting === "submit"
+                      ? t.submittingChecklist
+                      : t.submitChecklist}
+                  </button>
+                </>
+              ) : (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+                  {isCancelled ? t.cancelledReadonly : t.checklistReadonly}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </PopupShell>
+
+      <PopupShell
+        title={t.suppliesPopupTitle}
+        isOpen={suppliesOpen}
+        onClose={() => setSuppliesOpen(false)}
+        closeLabel={t.popupClose}
+      >
+        {isCancelled ? (
+          <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-sm text-red-700">
+            {data.cancellationMessage || t.cancelledTaskMessage}
+          </div>
+        ) : !data.task.property.supplies?.length ? (
+          <div className="rounded-2xl border border-dashed border-slate-300 p-5 text-sm text-slate-500">
+            {t.suppliesNoItems}
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {data.task.property.supplies.map((supply, index) => {
+              const value = supplyValues[supply.id] || getEmptySupplyFormValue()
+              const currentLevel = value.fillLevel || supply.fillLevel
+
+              return (
+                <div
+                  key={supply.id}
+                  className="rounded-2xl border border-slate-200 p-4"
+                >
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-slate-950">
+                        {index + 1}. {supply.supplyItem?.name || "—"}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {supply.supplyItem?.code || "—"}
+                        {supply.supplyItem?.category
+                          ? ` • ${supply.supplyItem.category}`
+                          : ""}
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      <span
+                        className={`rounded-full px-3 py-1 text-xs font-semibold ${fillLevelBadgeClasses(
+                          currentLevel
+                        )}`}
+                      >
+                        {getFillLevelLabel(language, currentLevel)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 space-y-4">
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-700">
+                        {t.supplyLevel}
+                      </label>
+
+                      <div className="grid gap-3 md:grid-cols-3">
+                        <button
+                          type="button"
+                          disabled={!canEditSupplies}
+                          onClick={() =>
+                            updateSupplyValue(supply.id, { fillLevel: "low" })
+                          }
+                          className={`rounded-2xl border px-4 py-3 text-sm font-semibold transition ${
+                            currentLevel === "low"
+                              ? "border-red-300 bg-red-400 text-white"
+                              : "border-red-200 bg-white text-red-600"
+                          } disabled:opacity-60`}
+                        >
+                          {t.lowOption}
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={!canEditSupplies}
+                          onClick={() =>
+                            updateSupplyValue(supply.id, { fillLevel: "medium" })
+                          }
+                          className={`rounded-2xl border px-4 py-3 text-sm font-semibold transition ${
+                            currentLevel === "medium"
+                              ? "border-amber-300 bg-amber-400 text-white"
+                              : "border-amber-200 bg-white text-amber-600"
+                          } disabled:opacity-60`}
+                        >
+                          {t.mediumOption}
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={!canEditSupplies}
+                          onClick={() =>
+                            updateSupplyValue(supply.id, { fillLevel: "full" })
+                          }
+                          className={`rounded-2xl border px-4 py-3 text-sm font-semibold transition ${
+                            currentLevel === "full"
+                              ? "border-emerald-300 bg-emerald-400 text-white"
+                              : "border-emerald-200 bg-white text-emerald-600"
+                          } disabled:opacity-60`}
+                        >
+                          {t.fullOption}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-700">
+                        {t.supplyNotes}
+                      </label>
+                      <textarea
+                        rows={2}
+                        disabled={!canEditSupplies}
+                        value={value.notes}
+                        onChange={(e) =>
+                          updateSupplyValue(supply.id, {
+                            notes: e.target.value,
+                          })
+                        }
+                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-slate-400 disabled:bg-slate-50"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+
+            <div className="sticky bottom-0 flex flex-wrap justify-end gap-3 border-t border-slate-200 bg-white pt-4">
+              {canEditSupplies ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => submitSupplies("save")}
+                    disabled={suppliesSubmitting !== null}
+                    className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                  >
+                    {suppliesSubmitting === "save"
+                      ? t.savingSupplies
+                      : t.saveSupplies}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => submitSupplies("submit")}
+                    disabled={suppliesSubmitting !== null}
+                    className="rounded-2xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+                  >
+                    {suppliesSubmitting === "submit"
+                      ? t.submittingSupplies
+                      : t.submitSupplies}
+                  </button>
+                </>
+              ) : (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+                  {isCancelled ? t.cancelledReadonly : t.suppliesReadonly}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </PopupShell>
     </div>
   )
 }

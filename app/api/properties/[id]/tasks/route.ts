@@ -17,56 +17,10 @@ function toNullableText(value: unknown) {
   return text === "" ? null : text
 }
 
-async function resolveChecklistTemplate(params: {
+async function resolvePrimaryCleaningTemplate(params: {
   organizationId: string
   propertyId: string
-  checklistTemplateId?: string | null
-  checklistTemplateMode?: string | null
-  requiresChecklist: boolean
-  taskType: string
 }) {
-  if (!params.requiresChecklist) return null
-
-  if (params.checklistTemplateId) {
-    const explicit = await prisma.propertyChecklistTemplate.findFirst({
-      where: {
-        id: params.checklistTemplateId,
-        organizationId: params.organizationId,
-        propertyId: params.propertyId,
-        isActive: true,
-      },
-      select: {
-        id: true,
-      },
-    })
-
-    return explicit
-  }
-
-  const normalizedMode = String(
-    params.checklistTemplateMode ||
-      (params.taskType === "supplies" ? "supplies" : "main")
-  )
-    .trim()
-    .toLowerCase()
-
-  if (normalizedMode === "supplies") {
-    return prisma.propertyChecklistTemplate.findFirst({
-      where: {
-        organizationId: params.organizationId,
-        propertyId: params.propertyId,
-        templateType: "supplies",
-        isActive: true,
-      },
-      select: {
-        id: true,
-      },
-      orderBy: {
-        updatedAt: "desc",
-      },
-    })
-  }
-
   return prisma.propertyChecklistTemplate.findFirst({
     where: {
       organizationId: params.organizationId,
@@ -76,11 +30,21 @@ async function resolveChecklistTemplate(params: {
     },
     select: {
       id: true,
+      title: true,
+      templateType: true,
+      isPrimary: true,
+      isActive: true,
     },
-    orderBy: [
-      { isPrimary: "desc" },
-      { updatedAt: "desc" },
-    ],
+    orderBy: [{ isPrimary: "desc" }, { updatedAt: "desc" }],
+  })
+}
+
+async function countActivePropertySupplies(propertyId: string) {
+  return prisma.propertySupply.count({
+    where: {
+      propertyId,
+      isActive: true,
+    },
   })
 }
 
@@ -108,12 +72,9 @@ async function getPropertyTasksPayload(propertyId: string) {
     where: {
       propertyId,
       isActive: true,
+      templateType: "main",
     },
-    orderBy: [
-      { templateType: "asc" },
-      { isPrimary: "desc" },
-      { updatedAt: "desc" },
-    ],
+    orderBy: [{ isPrimary: "desc" }, { updatedAt: "desc" }],
   })
 
   const bookings = await prisma.booking.findMany({
@@ -129,10 +90,7 @@ async function getPropertyTasksPayload(propertyId: string) {
     where: {
       propertyId,
     },
-    orderBy: [
-      { scheduledDate: "asc" },
-      { createdAt: "desc" },
-    ],
+    orderBy: [{ scheduledDate: "asc" }, { createdAt: "desc" }],
     include: {
       booking: true,
       assignments: {
@@ -170,6 +128,27 @@ async function getPropertyTasksPayload(propertyId: string) {
               id: true,
               issueCreated: true,
               createdAt: true,
+            },
+          },
+        },
+      },
+      supplyRun: {
+        include: {
+          answers: {
+            include: {
+              propertySupply: {
+                include: {
+                  supplyItem: {
+                    select: {
+                      id: true,
+                      code: true,
+                      name: true,
+                      category: true,
+                      unit: true,
+                    },
+                  },
+                },
+              },
             },
           },
         },
@@ -318,19 +297,49 @@ export async function POST(req: NextRequest, context: RouteContext) {
       )
     }
 
-    const requiresChecklist =
-      body.requiresChecklist === undefined
-        ? true
-        : Boolean(body.requiresChecklist)
+    const sendCleaningChecklist = Boolean(body.sendCleaningChecklist)
+    const sendSuppliesChecklist = Boolean(body.sendSuppliesChecklist)
 
-    const checklistTemplate = await resolveChecklistTemplate({
-      organizationId: property.organizationId,
-      propertyId: property.id,
-      checklistTemplateId: toNullableText(body.checklistTemplateId),
-      checklistTemplateMode: toNullableText(body.checklistTemplateMode),
-      requiresChecklist,
-      taskType,
-    })
+    if (!sendCleaningChecklist && !sendSuppliesChecklist) {
+      return NextResponse.json(
+        { error: "Πρέπει να επιλεγεί τουλάχιστον μία ενότητα εργασίας." },
+        { status: 400 }
+      )
+    }
+
+    let primaryCleaningTemplate: { id: string; title: string; templateType: string; isPrimary: boolean; isActive: boolean } | null =
+      null
+
+    if (sendCleaningChecklist) {
+      primaryCleaningTemplate = await resolvePrimaryCleaningTemplate({
+        organizationId: property.organizationId,
+        propertyId: property.id,
+      })
+
+      if (!primaryCleaningTemplate) {
+        return NextResponse.json(
+          {
+            error:
+              "Δεν υπάρχει ενεργή βασική λίστα καθαριότητας για αυτό το ακίνητο.",
+          },
+          { status: 400 }
+        )
+      }
+    }
+
+    if (sendSuppliesChecklist) {
+      const activeSuppliesCount = await countActivePropertySupplies(property.id)
+
+      if (activeSuppliesCount === 0) {
+        return NextResponse.json(
+          {
+            error:
+              "Δεν υπάρχουν ενεργά αναλώσιμα για αποστολή λίστας αναλωσίμων.",
+          },
+          { status: 400 }
+        )
+      }
+    }
 
     const bookingId = toNullableText(body.bookingId)
 
@@ -371,18 +380,29 @@ export async function POST(req: NextRequest, context: RouteContext) {
           scheduledEndTime: toNullableText(body.scheduledEndTime),
           dueDate: body.dueDate ? new Date(body.dueDate) : null,
           requiresPhotos: Boolean(body.requiresPhotos),
-          requiresChecklist,
+          requiresChecklist: sendCleaningChecklist,
           requiresApproval: Boolean(body.requiresApproval),
+          sendCleaningChecklist,
+          sendSuppliesChecklist,
           notes: toNullableText(body.notes),
           resultNotes: toNullableText(body.resultNotes),
         },
       })
 
-      if (requiresChecklist && checklistTemplate?.id) {
+      if (sendCleaningChecklist && primaryCleaningTemplate?.id) {
         await tx.taskChecklistRun.create({
           data: {
             taskId: task.id,
-            templateId: checklistTemplate.id,
+            templateId: primaryCleaningTemplate.id,
+            status: "pending",
+          },
+        })
+      }
+
+      if (sendSuppliesChecklist) {
+        await tx.taskSupplyRun.create({
+          data: {
+            taskId: task.id,
             status: "pending",
           },
         })
@@ -396,15 +416,14 @@ export async function POST(req: NextRequest, context: RouteContext) {
           entityType: "TASK",
           entityId: task.id,
           action: "TASK_CREATED",
-          message:
-            taskType === "supplies"
-              ? `Δημιουργήθηκε νέα εργασία αναλωσίμων για το ακίνητο.`
-              : `Δημιουργήθηκε νέα εργασία "${title}".`,
+          message: `Δημιουργήθηκε νέα εργασία "${title}".`,
           actorType: auth.isSuperAdmin ? "SUPER_ADMIN" : auth.organizationRole,
           actorName: auth.email,
           metadata: {
             taskType,
-            checklistTemplateId: checklistTemplate?.id || null,
+            sendCleaningChecklist,
+            sendSuppliesChecklist,
+            checklistTemplateId: primaryCleaningTemplate?.id || null,
           },
         },
       })

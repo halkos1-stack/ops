@@ -535,13 +535,20 @@ function getTaskWorkflowHelp(status?: string | null) {
     case "completed":
       return "Η εργασία ολοκληρώθηκε και η λίστα υποβλήθηκε."
     case "cancelled":
-      return "Η εργασία έχει ακυρωθεί."
+      return "Η εργασία έχει ακυρωθεί και παραμένει διαθέσιμη μόνο για ιστορικό και έλεγχο."
     default:
       return "Παρακολούθηση κατάστασης και ενεργειών της εργασίας."
   }
 }
 
-function getChecklistStatusHelp(run?: ChecklistRun | null) {
+function getChecklistStatusHelp(run?: ChecklistRun | null, taskStatus?: string | null) {
+  const normalizedTaskStatus = String(taskStatus || "").toLowerCase()
+
+  if (normalizedTaskStatus === "cancelled") {
+    if (!run) return "Η εργασία ακυρώθηκε χωρίς να χρησιμοποιηθεί checklist."
+    return "Η εργασία ακυρώθηκε. Το checklist παραμένει μόνο για ιστορικό."
+  }
+
   if (!run) return "Δεν υπάρχει συνδεδεμένη λίστα για αυτή την εργασία."
 
   const status = String(run.status || "").toLowerCase()
@@ -563,6 +570,8 @@ function getChecklistStatusHelp(run?: ChecklistRun | null) {
 
 function getAssignmentButtonLabel(task: Task, latestAssignment: TaskAssignment | null) {
   const status = String(task.status || "").toLowerCase()
+
+  if (status === "cancelled") return "Η εργασία είναι ακυρωμένη"
 
   if (!latestAssignment) return "Ανάθεση σε συνεργάτη"
   if (status === "pending") return "Νέα ανάθεση"
@@ -748,6 +757,10 @@ export default function TaskDetailsPage() {
     return task ? getLatestAssignment(task) : null
   }, [task])
 
+  const isCancelled = useMemo(() => {
+    return String(task?.status || "").toLowerCase() === "cancelled"
+  }, [task])
+
   useEffect(() => {
     if (task?.property?.defaultPartner?.id) {
       setSelectedPartnerId(task.property.defaultPartner.id)
@@ -807,6 +820,11 @@ export default function TaskDetailsPage() {
   async function handleCreateAssignment() {
     if (!task || !selectedPartnerId) {
       setAssignmentError("Επέλεξε συνεργάτη πριν δημιουργήσεις ανάθεση.")
+      return
+    }
+
+    if (isCancelled) {
+      setAssignmentError("Η εργασία είναι ακυρωμένη και δεν μπορεί να ανατεθεί ξανά.")
       return
     }
 
@@ -949,6 +967,12 @@ export default function TaskDetailsPage() {
                   Λίστα: {task.checklistRun.template.title}
                 </span>
               ) : null}
+
+              {isCancelled ? (
+                <span className="rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">
+                  Ιστορικό ακύρωσης
+                </span>
+              ) : null}
             </div>
 
             <p className="mt-3 text-sm text-slate-600">
@@ -977,7 +1001,27 @@ export default function TaskDetailsPage() {
           </div>
         </div>
 
-        {overdue ? (
+        {isCancelled ? (
+          <div className="mt-5 rounded-2xl border border-red-200 bg-red-50 p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-red-700">
+                  Η εργασία έχει ακυρωθεί
+                </p>
+                <p className="mt-1 text-sm text-red-700">
+                  Η εργασία δεν ανήκει πλέον στις ενεργές ροές και παραμένει διαθέσιμη μόνο για ιστορικό, έλεγχο και audit trail.
+                </p>
+              </div>
+
+              <Link
+                href={`/properties/${task.property.id}/tasks/history`}
+                className="inline-flex shrink-0 items-center rounded-xl border border-red-200 bg-white px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-100"
+              >
+                Άνοιγμα ιστορικού ακινήτου
+              </Link>
+            </div>
+          </div>
+        ) : overdue ? (
           <div className="mt-5 rounded-2xl border border-red-200 bg-red-50 p-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
@@ -1016,7 +1060,15 @@ export default function TaskDetailsPage() {
         />
         <StatCard
           label="Κατάσταση λίστας"
-          value={checklistSubmitted ? "Υποβλήθηκε" : "Δεν υποβλήθηκε"}
+          value={
+            isCancelled
+              ? task.checklistRun
+                ? "Διατηρείται στο ιστορικό"
+                : "Δεν χρησιμοποιήθηκε"
+              : checklistSubmitted
+              ? "Υποβλήθηκε"
+              : "Δεν υποβλήθηκε"
+          }
         />
       </section>
 
@@ -1036,7 +1088,7 @@ export default function TaskDetailsPage() {
                 <button
                   type="button"
                   onClick={handleCreateAssignment}
-                  disabled={assigning || !selectedPartnerId}
+                  disabled={assigning || !selectedPartnerId || isCancelled}
                   className="inline-flex items-center rounded-2xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {assigning
@@ -1081,7 +1133,15 @@ export default function TaskDetailsPage() {
               />
               <FieldCard
                 label="Κατάσταση λίστας"
-                value={checklistSubmitted ? "Υποβλήθηκε" : "Δεν υποβλήθηκε"}
+                value={
+                  isCancelled
+                    ? task.checklistRun
+                      ? "Διατηρείται στο ιστορικό"
+                      : "Δεν χρησιμοποιήθηκε"
+                    : checklistSubmitted
+                    ? "Υποβλήθηκε"
+                    : "Δεν υποβλήθηκε"
+                }
               />
             </div>
 
@@ -1093,7 +1153,7 @@ export default function TaskDetailsPage() {
             <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <p className="text-sm font-semibold text-slate-900">Οδηγία λίστας</p>
               <p className="mt-1 text-sm text-slate-700">
-                {getChecklistStatusHelp(task.checklistRun)}
+                {getChecklistStatusHelp(task.checklistRun, task.status)}
               </p>
             </div>
 
@@ -1115,7 +1175,9 @@ export default function TaskDetailsPage() {
               </div>
 
               <div className="rounded-2xl border border-slate-200 p-4">
-                <p className="text-sm text-slate-500">Τελικό αποτέλεσμα</p>
+                <p className="text-sm text-slate-500">
+                  {isCancelled ? "Σημείωση ακύρωσης" : "Τελικό αποτέλεσμα"}
+                </p>
                 <p className="mt-1 text-sm text-slate-800">
                   {task.resultNotes || "Δεν υπάρχουν τελικές σημειώσεις."}
                 </p>
@@ -1151,6 +1213,12 @@ export default function TaskDetailsPage() {
               </p>
             </div>
 
+            {isCancelled ? (
+              <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                Η εργασία είναι ακυρωμένη. Δεν επιτρέπεται νέα ανάθεση από αυτή τη σελίδα.
+              </div>
+            ) : null}
+
             <div className="grid gap-4 md:grid-cols-2">
               <div>
                 <label className="mb-2 block text-sm font-medium text-slate-700">
@@ -1159,7 +1227,8 @@ export default function TaskDetailsPage() {
                 <select
                   value={selectedPartnerId}
                   onChange={(e) => setSelectedPartnerId(e.target.value)}
-                  className="w-full rounded-2xl border border-slate-300 px-4 py-3 outline-none transition focus:border-blue-500"
+                  disabled={isCancelled}
+                  className="w-full rounded-2xl border border-slate-300 px-4 py-3 outline-none transition focus:border-blue-500 disabled:bg-slate-100 disabled:text-slate-500"
                 >
                   <option value="">Επέλεξε συνεργάτη</option>
                   {filteredPartners.map((partner) => (
@@ -1192,7 +1261,8 @@ export default function TaskDetailsPage() {
                   rows={4}
                   value={assignmentNotes}
                   onChange={(e) => setAssignmentNotes(e.target.value)}
-                  className="w-full rounded-2xl border border-slate-300 px-4 py-3 outline-none transition focus:border-blue-500"
+                  disabled={isCancelled}
+                  className="w-full rounded-2xl border border-slate-300 px-4 py-3 outline-none transition focus:border-blue-500 disabled:bg-slate-100 disabled:text-slate-500"
                   placeholder="Προαιρετικές οδηγίες προς συνεργάτη"
                 />
               </div>
@@ -1202,7 +1272,7 @@ export default function TaskDetailsPage() {
               <button
                 type="button"
                 onClick={handleCreateAssignment}
-                disabled={assigning}
+                disabled={assigning || isCancelled}
                 className="rounded-2xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {assigning
@@ -1217,7 +1287,8 @@ export default function TaskDetailsPage() {
                   setAssignmentError("")
                   setAssignmentSuccess("")
                 }}
-                className="rounded-2xl border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                disabled={isCancelled}
+                className="rounded-2xl border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Καθαρισμός
               </button>
@@ -1235,7 +1306,7 @@ export default function TaskDetailsPage() {
               </div>
             ) : null}
 
-            {latestPortalLink ? (
+            {latestPortalLink && !isCancelled ? (
               <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
                 <p className="text-sm font-semibold text-slate-900">Link portal συνεργάτη</p>
                 <p className="mt-2 break-all text-sm text-slate-600">{latestPortalLink}</p>
@@ -1401,7 +1472,9 @@ export default function TaskDetailsPage() {
 
                 {!task.checklistRun.answers || task.checklistRun.answers.length === 0 ? (
                   <div className="rounded-2xl border border-dashed border-slate-300 p-5 text-sm text-slate-500">
-                    Δεν υπάρχουν ακόμη απαντήσεις checklist.
+                    {isCancelled
+                      ? "Δεν υπάρχουν απαντήσεις checklist. Η εργασία ακυρώθηκε πριν από υποβολή."
+                      : "Δεν υπάρχουν ακόμη απαντήσεις checklist."}
                   </div>
                 ) : (
                   <div className="space-y-3">

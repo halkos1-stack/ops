@@ -3,7 +3,6 @@ import { prisma } from "@/lib/prisma"
 import { requireApiAppAccess, canAccessOrganization } from "@/lib/route-access"
 import {
   SUPPLY_PRESETS,
-  SUPPLY_STATUS_OPTIONS,
   getSupplyPresetByCode,
   buildCustomSupplyCode,
 } from "@/lib/supply-presets"
@@ -16,11 +15,6 @@ type RouteContext = {
 
 function toText(value: unknown) {
   return String(value ?? "").trim()
-}
-
-function toNullableText(value: unknown) {
-  const text = String(value ?? "").trim()
-  return text === "" ? null : text
 }
 
 function toNumberOrNull(value: unknown) {
@@ -47,246 +41,6 @@ async function getPropertyBase(propertyId: string) {
       postalCode: true,
       country: true,
       status: true,
-    },
-  })
-}
-
-function buildSupplyChecklistLabel(name: string) {
-  return `Επάρκεια ${name}`
-}
-
-async function getOrCreateSupplyTemplate(
-  propertyId: string,
-  organizationId: string
-) {
-  const existing = await prisma.propertyChecklistTemplate.findFirst({
-    where: {
-      propertyId,
-      organizationId,
-      templateType: "supplies",
-      isActive: true,
-    },
-    include: {
-      items: {
-        orderBy: {
-          sortOrder: "asc",
-        },
-      },
-    },
-    orderBy: {
-      updatedAt: "desc",
-    },
-  })
-
-  if (existing) return existing
-
-  return prisma.propertyChecklistTemplate.create({
-    data: {
-      propertyId,
-      organizationId,
-      title: "Λίστα αναλωσίμων",
-      description:
-        "Δυναμική λίστα αναλωσίμων και αναφοράς ζημιών / βλαβών για το ακίνητο.",
-      templateType: "supplies",
-      isPrimary: false,
-      isActive: true,
-    },
-    include: {
-      items: {
-        orderBy: {
-          sortOrder: "asc",
-        },
-      },
-    },
-  })
-}
-
-async function ensureIssueReportItem(params: {
-  templateId: string
-  issueType: "damage" | "repair"
-  label: string
-  description: string
-  sortOrder: number
-}) {
-  const existing = await prisma.propertyChecklistTemplateItem.findFirst({
-    where: {
-      templateId: params.templateId,
-      category: "issue_report",
-      issueTypeOnFail: params.issueType,
-    },
-  })
-
-  if (existing) {
-    return prisma.propertyChecklistTemplateItem.update({
-      where: { id: existing.id },
-      data: {
-        label: params.label,
-        description: params.description,
-        itemType: "text",
-        isRequired: false,
-        sortOrder: params.sortOrder,
-        category: "issue_report",
-        requiresPhoto: false,
-        opensIssueOnFail: false,
-        issueTypeOnFail: params.issueType,
-        issueSeverityOnFail: "medium",
-        failureValuesText: null,
-        linkedSupplyItemId: null,
-        supplyUpdateMode: "none",
-        supplyQuantity: null,
-      },
-    })
-  }
-
-  return prisma.propertyChecklistTemplateItem.create({
-    data: {
-      templateId: params.templateId,
-      label: params.label,
-      description: params.description,
-      itemType: "text",
-      isRequired: false,
-      sortOrder: params.sortOrder,
-      category: "issue_report",
-      requiresPhoto: false,
-      opensIssueOnFail: false,
-      optionsText: null,
-      issueTypeOnFail: params.issueType,
-      issueSeverityOnFail: "medium",
-      failureValuesText: null,
-      linkedSupplyItemId: null,
-      supplyUpdateMode: "none",
-      supplyQuantity: null,
-    },
-  })
-}
-
-async function syncSupplyTemplate(propertyId: string, organizationId: string) {
-  const template = await getOrCreateSupplyTemplate(propertyId, organizationId)
-
-  const propertySupplies = await prisma.propertySupply.findMany({
-    where: {
-      propertyId,
-    },
-    include: {
-      supplyItem: true,
-    },
-    orderBy: [
-      {
-        supplyItem: {
-          name: "asc",
-        },
-      },
-    ],
-  })
-
-  const activeSupplyIds = new Set(propertySupplies.map((row) => row.supplyItemId))
-
-  const existingItems = await prisma.propertyChecklistTemplateItem.findMany({
-    where: {
-      templateId: template.id,
-    },
-    orderBy: {
-      sortOrder: "asc",
-    },
-  })
-
-  const supplyItems = existingItems.filter(
-    (item) => String(item.category || "").toLowerCase() === "supplies"
-  )
-
-  for (const existing of supplyItems) {
-    if (!existing.linkedSupplyItemId) continue
-    if (!activeSupplyIds.has(existing.linkedSupplyItemId)) {
-      await prisma.propertyChecklistTemplateItem.delete({
-        where: { id: existing.id },
-      })
-    }
-  }
-
-  let sortOrder = 10
-
-  for (const row of propertySupplies) {
-    const preset = getSupplyPresetByCode(row.supplyItem.code)
-    const existing = existingItems.find(
-      (item) => item.linkedSupplyItemId === row.supplyItemId
-    )
-
-    const label =
-      preset?.checklistLabelEl || buildSupplyChecklistLabel(row.supplyItem.name)
-
-    const description =
-      preset
-        ? `Κατάσταση αναλωσίμου: ${row.supplyItem.name}`
-        : `Κατάσταση custom αναλωσίμου: ${row.supplyItem.name}`
-
-    const data = {
-      label,
-      description,
-      itemType: "select",
-      isRequired: true,
-      sortOrder,
-      category: "supplies",
-      requiresPhoto: false,
-      opensIssueOnFail: false,
-      optionsText: SUPPLY_STATUS_OPTIONS.join("\n"),
-      issueTypeOnFail: "supplies",
-      issueSeverityOnFail: "medium",
-      failureValuesText: null,
-      linkedSupplyItemId: row.supplyItemId,
-      supplyUpdateMode: "status_map",
-      supplyQuantity: null,
-    }
-
-    if (existing) {
-      await prisma.propertyChecklistTemplateItem.update({
-        where: { id: existing.id },
-        data,
-      })
-    } else {
-      await prisma.propertyChecklistTemplateItem.create({
-        data: {
-          templateId: template.id,
-          ...data,
-        },
-      })
-    }
-
-    sortOrder += 10
-  }
-
-  await ensureIssueReportItem({
-    templateId: template.id,
-    issueType: "damage",
-    label: "Αναφορά ζημιάς",
-    description:
-      "Καταχώρισε ελεύθερα οποιαδήποτε ζημιά εντόπισες στο ακίνητο.",
-    sortOrder,
-  })
-
-  sortOrder += 10
-
-  await ensureIssueReportItem({
-    templateId: template.id,
-    issueType: "repair",
-    label: "Αναφορά βλάβης",
-    description:
-      "Καταχώρισε ελεύθερα οποιαδήποτε βλάβη ή τεχνικό θέμα εντόπισες στο ακίνητο.",
-    sortOrder,
-  })
-
-  return prisma.propertyChecklistTemplate.findUnique({
-    where: {
-      id: template.id,
-    },
-    include: {
-      items: {
-        orderBy: {
-          sortOrder: "asc",
-        },
-        include: {
-          supplyItem: true,
-        },
-      },
     },
   })
 }
@@ -370,27 +124,32 @@ async function buildResponse(propertyId: string) {
     }
   })
 
-  const supplyTemplate = await prisma.propertyChecklistTemplate.findFirst({
-    where: {
-      propertyId,
-      organizationId: property.organizationId,
-      templateType: "supplies",
-      isActive: true,
+  const activeSupplies = property.propertySupplies.map((row) => ({
+    id: row.id,
+    propertySupplyId: row.id,
+    currentStock: row.currentStock,
+    targetStock: row.targetStock,
+    reorderThreshold: row.reorderThreshold,
+    lastUpdatedAt: row.lastUpdatedAt,
+    notes: row.notes,
+    fillLevel: (row as any).fillLevel ?? "full",
+    isActive: true,
+    supplyItemId: row.supplyItemId,
+    name: row.supplyItem.name,
+    code: row.supplyItem.code,
+    category: row.supplyItem.category,
+    unit: row.supplyItem.unit,
+    minimumStock: row.supplyItem.minimumStock,
+    supplyItem: {
+      id: row.supplyItem.id,
+      code: row.supplyItem.code,
+      name: row.supplyItem.name,
+      category: row.supplyItem.category,
+      unit: row.supplyItem.unit,
+      minimumStock: row.supplyItem.minimumStock,
+      isActive: row.supplyItem.isActive,
     },
-    include: {
-      items: {
-        orderBy: {
-          sortOrder: "asc",
-        },
-        include: {
-          supplyItem: true,
-        },
-      },
-    },
-    orderBy: {
-      updatedAt: "desc",
-    },
-  })
+  }))
 
   return {
     property: {
@@ -405,10 +164,10 @@ async function buildResponse(propertyId: string) {
       country: property.country,
       status: property.status,
     },
-    activeSupplies: property.propertySupplies,
+    activeSupplies,
+    supplies: activeSupplies,
     builtInCatalog,
     customCatalog,
-    supplyTemplate,
   }
 }
 
@@ -436,8 +195,6 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         { status: 403 }
       )
     }
-
-    await syncSupplyTemplate(property.id, property.organizationId)
 
     const payload = await buildResponse(property.id)
 
@@ -542,7 +299,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
         })
       }
 
-      await syncSupplyTemplate(property.id, property.organizationId)
       const payload = await buildResponse(property.id)
       return NextResponse.json(payload)
     }
@@ -611,7 +367,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
         })
       }
 
-      await syncSupplyTemplate(property.id, property.organizationId)
       const payload = await buildResponse(property.id)
       return NextResponse.json(payload)
     }
@@ -673,146 +428,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
           notes: customMarker,
         },
       })
-
-      await syncSupplyTemplate(property.id, property.organizationId)
-      const payload = await buildResponse(property.id)
-      return NextResponse.json(payload)
-    }
-
-    if (action === "sync_template") {
-      await syncSupplyTemplate(property.id, property.organizationId)
-      const payload = await buildResponse(property.id)
-      return NextResponse.json(payload)
-    }
-
-    if (action === "update_template_item") {
-      const templateItemId = toText(body?.templateItemId)
-      const label = toText(body?.label)
-      const description = toNullableText(body?.description)
-      const isRequired =
-        body?.isRequired === undefined ? undefined : Boolean(body.isRequired)
-      const requiresPhoto =
-        body?.requiresPhoto === undefined ? undefined : Boolean(body.requiresPhoto)
-      const sortOrder = toNumberOrNull(body?.sortOrder)
-
-      if (!templateItemId) {
-        return NextResponse.json(
-          { error: "Το templateItemId είναι υποχρεωτικό." },
-          { status: 400 }
-        )
-      }
-
-      const templateItem = await prisma.propertyChecklistTemplateItem.findUnique({
-        where: {
-          id: templateItemId,
-        },
-        include: {
-          template: true,
-        },
-      })
-
-      if (
-        !templateItem ||
-        templateItem.template.propertyId !== property.id ||
-        templateItem.template.templateType !== "supplies"
-      ) {
-        return NextResponse.json(
-          { error: "Το στοιχείο λίστας δεν βρέθηκε." },
-          { status: 404 }
-        )
-      }
-
-      await prisma.propertyChecklistTemplateItem.update({
-        where: {
-          id: templateItemId,
-        },
-        data: {
-          ...(label ? { label } : {}),
-          ...(description !== undefined ? { description } : {}),
-          ...(typeof isRequired === "boolean" ? { isRequired } : {}),
-          ...(typeof requiresPhoto === "boolean" ? { requiresPhoto } : {}),
-          ...(typeof sortOrder === "number" ? { sortOrder } : {}),
-        },
-      })
-
-      const payload = await buildResponse(property.id)
-      return NextResponse.json(payload)
-    }
-
-    if (action === "upsert_issue_report_item") {
-      const issueType =
-        toText(body?.issueType).toLowerCase() === "damage" ? "damage" : "repair"
-      const label =
-        toText(body?.label) ||
-        (issueType === "damage" ? "Αναφορά ζημιάς" : "Αναφορά βλάβης")
-      const description =
-        toNullableText(body?.description) ||
-        (issueType === "damage"
-          ? "Καταχώρισε ζημιά που εντόπισες στο ακίνητο."
-          : "Καταχώρισε βλάβη ή τεχνικό θέμα που εντόπισες στο ακίνητο.")
-      const requiresPhoto = Boolean(body?.requiresPhoto)
-
-      const template = await getOrCreateSupplyTemplate(
-        property.id,
-        property.organizationId
-      )
-
-      const existing = await prisma.propertyChecklistTemplateItem.findFirst({
-        where: {
-          templateId: template.id,
-          category: "issue_report",
-          issueTypeOnFail: issueType,
-        },
-      })
-
-      if (existing) {
-        await prisma.propertyChecklistTemplateItem.update({
-          where: {
-            id: existing.id,
-          },
-          data: {
-            label,
-            description,
-            itemType: "text",
-            isRequired: false,
-            requiresPhoto,
-            opensIssueOnFail: false,
-            issueTypeOnFail: issueType,
-            issueSeverityOnFail: "medium",
-            category: "issue_report",
-            supplyUpdateMode: "none",
-            linkedSupplyItemId: null,
-            supplyQuantity: null,
-          },
-        })
-      } else {
-        const count = await prisma.propertyChecklistTemplateItem.count({
-          where: {
-            templateId: template.id,
-          },
-        })
-
-        await prisma.propertyChecklistTemplateItem.create({
-          data: {
-            templateId: template.id,
-            label,
-            description,
-            itemType: "text",
-            isRequired: false,
-            sortOrder: (count + 1) * 10,
-            category: "issue_report",
-            requiresPhoto,
-            opensIssueOnFail: false,
-            optionsText: null,
-            issueTypeOnFail: issueType,
-            issueSeverityOnFail: "medium",
-            failureValuesText: null,
-            linkedSupplyItemId: null,
-            supplyUpdateMode: "none",
-            supplyQuantity: null,
-          },
-        })
-      }
 
       const payload = await buildResponse(property.id)
       return NextResponse.json(payload)

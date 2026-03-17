@@ -1,125 +1,110 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import { buildTenantWhere } from "@/lib/route-access"
+import { requireApiAppAccessWithDevBypass } from "@/lib/dev-api-access"
 
-function toNullableString(value: unknown) {
-  if (value === undefined || value === null) return null
-  const text = String(value).trim()
-  return text === "" ? null : text
+function parseDateParam(value: string | null) {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  return date
 }
 
-function toStringValue(value: unknown, fallback = "") {
-  if (value === undefined || value === null) return fallback
-  return String(value).trim()
-}
+export async function GET(req: NextRequest) {
+  const access = await requireApiAppAccessWithDevBypass(req)
+  if (!access.ok) return access.response
 
-function toNumberValue(value: unknown, fallback = 0) {
-  if (value === undefined || value === null || value === "") return fallback
-  const num = Number(value)
-  return Number.isFinite(num) ? num : fallback
-}
-
-export async function GET() {
   try {
+    const url = new URL(req.url)
+
+    const syncStatus = url.searchParams.get("syncStatus")
+    const status = url.searchParams.get("status")
+    const needsMapping = url.searchParams.get("needsMapping")
+    const propertyId = url.searchParams.get("propertyId")
+    const sourcePlatform = url.searchParams.get("sourcePlatform")
+    const hasTasks = url.searchParams.get("hasTasks")
+    const fromCheckOut = parseDateParam(url.searchParams.get("fromCheckOut"))
+    const toCheckOut = parseDateParam(url.searchParams.get("toCheckOut"))
+
+    const where = buildTenantWhere(access.auth, {
+      ...(syncStatus ? { syncStatus: syncStatus as never } : {}),
+      ...(status ? { status } : {}),
+      ...(propertyId ? { propertyId } : {}),
+      ...(sourcePlatform ? { sourcePlatform } : {}),
+      ...(needsMapping === "true" ? { needsMapping: true } : {}),
+      ...(needsMapping === "false" ? { needsMapping: false } : {}),
+      ...(hasTasks === "true" ? { tasks: { some: {} } } : {}),
+      ...(hasTasks === "false" ? { tasks: { none: {} } } : {}),
+      ...((fromCheckOut || toCheckOut)
+        ? {
+            checkOutDate: {
+              ...(fromCheckOut ? { gte: fromCheckOut } : {}),
+              ...(toCheckOut ? { lte: toCheckOut } : {}),
+            },
+          }
+        : {}),
+    })
+
     const bookings = await prisma.booking.findMany({
+      where,
       include: {
-        property: true,
+        property: {
+          select: {
+            id: true,
+            code: true,
+            name: true,
+            address: true,
+            city: true,
+            region: true,
+            status: true,
+          },
+        },
+        tasks: {
+          select: {
+            id: true,
+            title: true,
+            taskType: true,
+            status: true,
+            source: true,
+            priority: true,
+            scheduledDate: true,
+            scheduledStartTime: true,
+            scheduledEndTime: true,
+            dueDate: true,
+            alertEnabled: true,
+            alertAt: true,
+            createdAt: true,
+          },
+          orderBy: {
+            createdAt: "desc",
+          },
+        },
+        syncEvents: {
+          select: {
+            id: true,
+            eventType: true,
+            resultStatus: true,
+            message: true,
+            createdAt: true,
+          },
+          orderBy: {
+            createdAt: "desc",
+          },
+          take: 10,
+        },
       },
-      orderBy: {
-        createdAt: "desc",
-      },
+      orderBy: [
+        { checkOutDate: "asc" },
+        { createdAt: "desc" },
+      ],
     })
 
     return NextResponse.json(bookings)
   } catch (error) {
-    console.error("Get bookings error:", error)
+    console.error("Bookings GET error:", error)
 
     return NextResponse.json(
-      { error: "Failed to fetch bookings" },
-      { status: 500 }
-    )
-  }
-}
-
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json()
-
-    const propertyId = toStringValue(body.propertyId)
-    const sourcePlatform = toStringValue(body.sourcePlatform)
-    const externalBookingId = toNullableString(body.externalBookingId)
-    const guestName = toNullableString(body.guestName)
-    const guestPhone = toNullableString(body.guestPhone)
-    const guestEmail = toNullableString(body.guestEmail)
-    const checkInDate = toStringValue(body.checkInDate)
-    const checkOutDate = toStringValue(body.checkOutDate)
-    const checkInTime = toNullableString(body.checkInTime)
-    const checkOutTime = toNullableString(body.checkOutTime)
-    const adults = toNumberValue(body.adults, 1)
-    const children = toNumberValue(body.children, 0)
-    const infants = toNumberValue(body.infants, 0)
-    const status = toStringValue(body.status, "confirmed")
-    const notes = toNullableString(body.notes)
-
-    if (!propertyId || !sourcePlatform || !checkInDate || !checkOutDate) {
-      return NextResponse.json(
-        {
-          error:
-            "Ακίνητο, πλατφόρμα, check-in και check-out είναι υποχρεωτικά.",
-        },
-        { status: 400 }
-      )
-    }
-
-    const property = await prisma.property.findUnique({
-      where: {
-        id: propertyId,
-      },
-      select: {
-        id: true,
-      },
-    })
-
-    if (!property) {
-      return NextResponse.json(
-        { error: "Το ακίνητο δεν βρέθηκε." },
-        { status: 404 }
-      )
-    }
-
-    const booking = await prisma.booking.create({
-      data: {
-        property: {
-          connect: {
-            id: propertyId,
-          },
-        },
-        sourcePlatform,
-        externalBookingId,
-        guestName,
-        guestPhone,
-        guestEmail,
-        checkInDate: new Date(checkInDate),
-        checkOutDate: new Date(checkOutDate),
-        checkInTime,
-        checkOutTime,
-        adults,
-        children,
-        infants,
-        status,
-        notes,
-        importedAt: sourcePlatform === "manual" ? null : new Date(),
-      },
-      include: {
-        property: true,
-      },
-    })
-
-    return NextResponse.json(booking, { status: 201 })
-  } catch (error) {
-    console.error("Create booking error:", error)
-
-    return NextResponse.json(
-      { error: "Failed to create booking" },
+      { error: "Αποτυχία φόρτωσης κρατήσεων." },
       { status: 500 }
     )
   }

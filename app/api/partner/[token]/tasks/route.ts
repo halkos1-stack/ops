@@ -20,6 +20,10 @@ function normalizeStatus(value: unknown) {
   return String(value ?? "").trim().toLowerCase()
 }
 
+function isCancelledTaskStatus(value: unknown) {
+  return normalizeStatus(value) === "cancelled"
+}
+
 export async function GET(req: NextRequest, context: RouteContext) {
   try {
     const { token } = await context.params
@@ -124,6 +128,14 @@ export async function GET(req: NextRequest, context: RouteContext) {
                 completedAt: true,
               },
             },
+            supplyRun: {
+              select: {
+                id: true,
+                status: true,
+                startedAt: true,
+                completedAt: true,
+              },
+            },
           },
         },
       },
@@ -138,6 +150,10 @@ export async function GET(req: NextRequest, context: RouteContext) {
     }
 
     let latestAssignments = Array.from(latestAssignmentsMap.values())
+
+    latestAssignments = latestAssignments.filter(
+      (assignment) => !isCancelledTaskStatus(assignment.task.status)
+    )
 
     if (status) {
       latestAssignments = latestAssignments.filter(
@@ -165,6 +181,8 @@ export async function GET(req: NextRequest, context: RouteContext) {
       requiresChecklist: assignment.task.requiresChecklist,
       requiresPhotos: assignment.task.requiresPhotos,
       requiresApproval: assignment.task.requiresApproval,
+      sendCleaningChecklist: assignment.task.sendCleaningChecklist,
+      sendSuppliesChecklist: assignment.task.sendSuppliesChecklist,
       property: {
         id: assignment.task.property.id,
         code: assignment.task.property.code,
@@ -202,6 +220,14 @@ export async function GET(req: NextRequest, context: RouteContext) {
             status: assignment.task.checklistRun.status,
             startedAt: assignment.task.checklistRun.startedAt,
             completedAt: assignment.task.checklistRun.completedAt,
+          }
+        : null,
+      supplyRun: assignment.task.supplyRun
+        ? {
+            id: assignment.task.supplyRun.id,
+            status: assignment.task.supplyRun.status,
+            startedAt: assignment.task.supplyRun.startedAt,
+            completedAt: assignment.task.supplyRun.completedAt,
           }
         : null,
     }))
