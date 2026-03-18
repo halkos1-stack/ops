@@ -110,6 +110,9 @@ export default function NewTaskPage() {
   const [requiresPhotos, setRequiresPhotos] = useState(false)
   const [requiresApproval, setRequiresApproval] = useState(false)
 
+  const [alertEnabled, setAlertEnabled] = useState(false)
+  const [alertAt, setAlertAt] = useState("")
+
   const selectedProperty = useMemo(
     () => properties.find((property) => property.id === propertyId) || null,
     [properties, propertyId]
@@ -289,6 +292,10 @@ export default function NewTaskPage() {
         )
       }
 
+      if (alertEnabled && !alertAt) {
+        throw new Error("Πρέπει να ορίσεις ώρα alert.")
+      }
+
       const createTaskRes = await fetch("/api/tasks", {
         method: "POST",
         headers: {
@@ -310,6 +317,8 @@ export default function NewTaskPage() {
           sendSuppliesChecklist,
           requiresChecklist: sendCleaningChecklist,
           source: "manual",
+          alertEnabled,
+          alertAt: alertEnabled ? alertAt : null,
         }),
       })
 
@@ -322,7 +331,7 @@ export default function NewTaskPage() {
       const taskId = String(createTaskData?.task?.id || "").trim()
 
       if (!taskId) {
-        throw new Error("Η εργασία δημιουργήθηκε αλλά δεν επέστρεψε αναγνωριστικό.")
+        throw new Error("Η εργασία δημιουργήθηκε αλλά δεν επιστράφηκε αναγνωριστικό.")
       }
 
       const assignRes = await fetch("/api/task-assignments", {
@@ -365,6 +374,8 @@ export default function NewTaskPage() {
       setRequiresPhotos(false)
       setRequiresApproval(false)
       setSaveAsDefaultPartner(false)
+      setAlertEnabled(false)
+      setAlertAt("")
     } catch (err) {
       console.error("Σφάλμα δημιουργίας εργασίας:", err)
       setError(
@@ -391,7 +402,7 @@ export default function NewTaskPage() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <p className="text-sm text-slate-500">Δημιουργία και ανάθεση εργασίας</p>
-            <h1 className="mt-2 text-3xl font-bold text-slate-950">Νέα εργασία</h1>
+            <h1 className="mt-2 text-3xl font-bold text-slate-950">Εργασία</h1>
             <p className="mt-2 text-sm text-slate-500">
               Η εργασία δημιουργείται πρώτα και μετά ανατίθεται στον συνεργάτη.
             </p>
@@ -443,14 +454,14 @@ export default function NewTaskPage() {
               <option value="">Επιλογή ακινήτου</option>
               {properties.map((property) => (
                 <option key={property.id} value={property.id}>
-                  {property.name} • {property.code}
+                  {property.name} · {property.code}
                 </option>
               ))}
             </select>
 
             {selectedProperty ? (
               <p className="mt-2 text-xs text-slate-500">
-                {selectedProperty.address} • {selectedProperty.city} •{" "}
+                {selectedProperty.address} · {selectedProperty.city} ·{" "}
                 {mapTypeToUi(selectedProperty.type)}
               </p>
             ) : null}
@@ -469,7 +480,7 @@ export default function NewTaskPage() {
               <option value="">Επιλογή συνεργάτη</option>
               {partners.map((partner) => (
                 <option key={partner.id} value={partner.id}>
-                  {partner.name} • {partner.specialty}
+                  {partner.name} · {partner.specialty}
                 </option>
               ))}
             </select>
@@ -580,6 +591,41 @@ export default function NewTaskPage() {
               onChange={(e) => setScheduledEndTime(e.target.value)}
               className="w-full rounded-2xl border border-slate-300 px-4 py-3 outline-none"
             />
+          </div>
+
+          <div className="md:col-span-2 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div className="mb-3">
+              <div className="text-sm font-semibold text-slate-900">Alert</div>
+              <div className="mt-1 text-xs text-slate-500">
+                Ενεργοποίησε προγραμματισμένο alert για συγκεκριμένη ώρα.
+              </div>
+            </div>
+
+            <label className="flex items-center gap-3 text-sm font-medium text-slate-700">
+              <input
+                type="checkbox"
+                checked={alertEnabled}
+                onChange={(e) => {
+                  setAlertEnabled(e.target.checked)
+                  if (!e.target.checked) setAlertAt("")
+                }}
+              />
+              Ενεργοποίηση alert
+            </label>
+
+            {alertEnabled ? (
+              <div className="mt-3">
+                <label className="mb-2 block text-sm font-medium text-slate-700">
+                  Ώρα alert
+                </label>
+                <input
+                  type="datetime-local"
+                  value={alertAt}
+                  onChange={(e) => setAlertAt(e.target.value)}
+                  className="w-full rounded-2xl border border-slate-300 px-4 py-3 outline-none"
+                />
+              </div>
+            ) : null}
           </div>
 
           <div className="md:col-span-2">

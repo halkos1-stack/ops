@@ -130,6 +130,8 @@ async function getFullPropertyList(where: Record<string, unknown>) {
           priority: true,
           taskType: true,
           scheduledDate: true,
+          alertEnabled: true,
+          alertAt: true,
 
           assignments: {
             orderBy: {
@@ -407,6 +409,8 @@ export async function POST(req: NextRequest) {
             priority: true,
             taskType: true,
             scheduledDate: true,
+            alertEnabled: true,
+            alertAt: true,
 
             assignments: {
               orderBy: {

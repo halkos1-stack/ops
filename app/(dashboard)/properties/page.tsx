@@ -53,6 +53,8 @@ type PropertyListItem = {
     priority?: string | null
     taskType?: string | null
     scheduledDate?: string | null
+    alertEnabled?: boolean
+    alertAt?: string | null
     assignments?: Array<{
       id: string
       status: string
@@ -90,7 +92,13 @@ type CreatePropertyFormState = {
   notes: string
 }
 
-type MetricFilter = "all" | "active" | "inactive" | "ready" | "requires_action"
+type MetricFilter =
+  | "all"
+  | "active"
+  | "inactive"
+  | "ready"
+  | "requires_action"
+  | "alerts"
 
 const initialCreateForm: CreatePropertyFormState = {
   name: "",
@@ -235,6 +243,7 @@ function getPropertiesPageTexts(language: "el" | "en") {
       inactive: "Inactive",
       ready: "Ready",
       requiresAction: "Needs action",
+      alerts: "Alerts",
 
       property: "Property",
       address: "Address",
@@ -246,6 +255,7 @@ function getPropertiesPageTexts(language: "el" | "en") {
       propertyReady: "Ready",
       propertyNeedsAction: "Needs action",
       criticalAlert: "Critical before check-in",
+      activeTaskAlert: "Active alert",
       noCriticalAlert: "No critical alert",
 
       formName: "Name *",
@@ -331,6 +341,7 @@ function getPropertiesPageTexts(language: "el" | "en") {
     inactive: "Ανενεργά",
     ready: "Έτοιμα",
     requiresAction: "Θέλουν ενέργειες",
+    alerts: "Alert",
 
     property: "Ακίνητο",
     address: "Διεύθυνση",
@@ -342,6 +353,7 @@ function getPropertiesPageTexts(language: "el" | "en") {
     propertyReady: "Έτοιμο",
     propertyNeedsAction: "Θέλει ενέργειες",
     criticalAlert: "Κρίσιμο πριν το check-in",
+    activeTaskAlert: "Ενεργό alert",
     noCriticalAlert: "Χωρίς κρίσιμο alert",
 
     formName: "Όνομα *",
@@ -526,10 +538,33 @@ function isTaskStillOperationallyOpen(
   return false
 }
 
+function isTaskAlertActive(
+  task: NonNullable<PropertyListItem["tasks"]>[number]
+) {
+  if (!isTaskStillOperationallyOpen(task)) return false
+  if (!task.alertEnabled) return false
+  if (!task.alertAt) return false
+
+  const alertDate = normalizeDate(task.alertAt)
+  if (!alertDate) return false
+
+  return alertDate.getTime() <= Date.now()
+}
+
 function getOpenTasksCount(property: PropertyListItem) {
   return safeArray(property.tasks).filter((task) =>
     isTaskStillOperationallyOpen(task)
   ).length
+}
+
+function getActiveAlertsCount(property: PropertyListItem) {
+  return safeArray(property.tasks).filter((task) =>
+    isTaskAlertActive(task)
+  ).length
+}
+
+function hasActiveAlert(property: PropertyListItem) {
+  return getActiveAlertsCount(property) > 0
 }
 
 function getNextUpcomingBooking(property: PropertyListItem) {
@@ -580,8 +615,9 @@ function isPropertyOperationallyReady(property: PropertyListItem) {
   const openIssues = getOpenIssuesCount(property)
   const openTasks = getOpenTasksCount(property)
   const criticalAlert = hasCriticalCheckInAlert(property)
+  const activeAlert = hasActiveAlert(property)
 
-  return openIssues === 0 && openTasks === 0 && !criticalAlert
+  return openIssues === 0 && openTasks === 0 && !criticalAlert && !activeAlert
 }
 
 function getPropertyReadinessDetails(
@@ -591,13 +627,35 @@ function getPropertyReadinessDetails(
   const openTasks = getOpenTasksCount(property)
   const openIssues = getOpenIssuesCount(property)
   const criticalAlert = hasCriticalCheckInAlert(property)
+  const activeAlerts = getActiveAlertsCount(property)
   const ready = isPropertyOperationallyReady(property)
 
   if (language === "en") {
     if (ready) {
       return {
         label: "Ready",
-        detail: "No critical alert",
+        detail: "No active operational alert",
+      }
+    }
+
+    if (activeAlerts > 0 && openTasks > 0 && openIssues > 0) {
+      return {
+        label: "Needs action",
+        detail: `${activeAlerts} alerts · ${openTasks} open tasks · ${openIssues} open issues`,
+      }
+    }
+
+    if (activeAlerts > 0 && openTasks > 0) {
+      return {
+        label: "Needs action",
+        detail: `${activeAlerts} alerts · ${openTasks} open tasks`,
+      }
+    }
+
+    if (activeAlerts > 0) {
+      return {
+        label: "Needs action",
+        detail: `${activeAlerts} active alerts`,
       }
     }
 
@@ -638,7 +696,28 @@ function getPropertyReadinessDetails(
   if (ready) {
     return {
       label: "Έτοιμο",
-      detail: "Χωρίς κρίσιμο alert",
+      detail: "Χωρίς ενεργό λειτουργικό alert",
+    }
+  }
+
+  if (activeAlerts > 0 && openTasks > 0 && openIssues > 0) {
+    return {
+      label: "Θέλει ενέργειες",
+      detail: `${activeAlerts} alert · ${openTasks} ανοιχτές εργασίες · ${openIssues} ανοιχτά θέματα`,
+    }
+  }
+
+  if (activeAlerts > 0 && openTasks > 0) {
+    return {
+      label: "Θέλει ενέργειες",
+      detail: `${activeAlerts} alert · ${openTasks} ανοιχτές εργασίες`,
+    }
+  }
+
+  if (activeAlerts > 0) {
+    return {
+      label: "Θέλει ενέργειες",
+      detail: `${activeAlerts} ενεργά alert`,
     }
   }
 
@@ -686,6 +765,8 @@ function matchesMetricFilter(property: PropertyListItem, metricFilter: MetricFil
       return isPropertyOperationallyReady(property)
     case "requires_action":
       return !isPropertyOperationallyReady(property)
+    case "alerts":
+      return hasActiveAlert(property)
     case "all":
     default:
       return true
@@ -788,12 +869,15 @@ export default function PropertiesPage() {
       (item) => !isPropertyOperationallyReady(item)
     ).length
 
+    const alerts = properties.filter((item) => hasActiveAlert(item)).length
+
     return {
       total: properties.length,
       active,
       inactive,
       ready,
       requiresAction,
+      alerts,
     }
   }, [properties])
 
@@ -949,7 +1033,7 @@ export default function PropertiesPage() {
           </div>
         </div>
 
-        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
           <button
             type="button"
             onClick={() => setMetricFilter("all")}
@@ -1017,6 +1101,20 @@ export default function PropertiesPage() {
             <div className="text-sm text-slate-500">{texts.requiresAction}</div>
             <div className="mt-2 text-3xl font-bold text-red-700">
               {summary.requiresAction}
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setMetricFilter("alerts")}
+            className={`rounded-2xl border p-5 text-left shadow-sm transition ${getMetricCardClasses(
+              metricFilter === "alerts",
+              "red"
+            )}`}
+          >
+            <div className="text-sm text-slate-500">{texts.alerts}</div>
+            <div className="mt-2 text-3xl font-bold text-red-700">
+              {summary.alerts}
             </div>
           </button>
         </section>
@@ -1142,6 +1240,7 @@ export default function PropertiesPage() {
                   <tbody className="divide-y divide-slate-100">
                     {filteredProperties.map((property) => {
                       const criticalAlert = hasCriticalCheckInAlert(property)
+                      const activeAlert = hasActiveAlert(property)
                       const ready = isPropertyOperationallyReady(property)
                       const readiness = getPropertyReadinessDetails(
                         property,
@@ -1182,6 +1281,12 @@ export default function PropertiesPage() {
                                 {readiness.label}
                               </span>
 
+                              {activeAlert ? (
+                                <span className="inline-flex w-fit rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 ring-1 ring-red-200">
+                                  {texts.activeTaskAlert}
+                                </span>
+                              ) : null}
+
                               {criticalAlert ? (
                                 <span className="inline-flex w-fit rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 ring-1 ring-red-200">
                                   {texts.criticalAlert}
@@ -1218,6 +1323,7 @@ export default function PropertiesPage() {
               <div className="grid gap-4 p-4 sm:p-6 xl:hidden">
                 {filteredProperties.map((property) => {
                   const criticalAlert = hasCriticalCheckInAlert(property)
+                  const activeAlert = hasActiveAlert(property)
                   const ready = isPropertyOperationallyReady(property)
                   const readiness = getPropertyReadinessDetails(
                     property,
@@ -1265,6 +1371,12 @@ export default function PropertiesPage() {
                         >
                           {readiness.label}
                         </span>
+
+                        {activeAlert ? (
+                          <span className="inline-flex rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 ring-1 ring-red-200">
+                            {texts.activeTaskAlert}
+                          </span>
+                        ) : null}
 
                         {criticalAlert ? (
                           <span className="inline-flex rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 ring-1 ring-red-200">

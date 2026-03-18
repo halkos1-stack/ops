@@ -77,6 +77,8 @@ type PropertyDetail = {
     completedAt?: string | null
     requiresPhotos?: boolean
     requiresApproval?: boolean
+    alertEnabled?: boolean
+    alertAt?: string | null
 
     sendCleaningChecklist?: boolean
     sendSuppliesChecklist?: boolean
@@ -118,10 +120,6 @@ type PropertyDetail = {
     cleaningChecklistRun?: ChecklistRunLite | null
     suppliesChecklistRun?: ChecklistRunLite | null
 
-    /**
-     * Συμβατότητα με παλιότερη δομή.
-     * Όταν δεν έχουν ακόμη καθαριστεί όλα τα routes, μπορεί να έρχεται μόνο ένα checklistRun.
-     */
     checklistRun?: ChecklistRunLite | null
   }>
 
@@ -205,7 +203,14 @@ type PropertyEditForm = {
   notes: string
 }
 
-type OpenTaskFilter = "all_open" | "pending" | "assigned" | "accepted" | "in_progress"
+type OpenTaskFilter =
+  | "all_open"
+  | "pending"
+  | "assigned"
+  | "accepted"
+  | "in_progress"
+  | "alerts"
+
 type SupplyFilter = "all" | "missing" | "medium" | "full"
 
 function safeArray<T>(value: T[] | undefined | null): T[] {
@@ -260,13 +265,14 @@ function getTexts(language: "el" | "en") {
       openPropertyTasksPage: "Open property tasks",
       overviewTitle: "Property summary",
       overviewSubtitle:
-        "Dynamic counters for open tasks, completed history and supplies.",
+        "Dynamic counters for open tasks, alerts, completed history and supplies.",
       openTasksTitle: "Open property tasks",
       openTasksSubtitle:
         "Only open tasks are shown here, based on the selected filter.",
       noOpenTasks: "There are no open tasks right now.",
       suppliesTitle: "Supplies",
-      suppliesSubtitle: "Only active supplies are shown here, with status filters.",
+      suppliesSubtitle:
+        "Only active supplies are shown here, with status filters.",
       issuesTitle: "Open issues / Repairs",
       issuesSubtitle: "Only open or in-progress issues are shown here.",
       noIssues: "There are no open issues.",
@@ -294,9 +300,6 @@ function getTexts(language: "el" | "en") {
       noCleaningChecklist: "No base cleaning checklist has been defined.",
       openChecklistManagement: "Open checklist management",
       editChecklist: "Edit checklist",
-      suppliesFlowTitle: "Supplies flow",
-      suppliesFlowSubtitle:
-        "The supplies list is generated automatically from the property's active supplies.",
       suppliesFlowInfo:
         "Supplies are not configured as a separate manual template in the main workflow.",
       openSuppliesPage: "Open supplies page",
@@ -317,6 +320,8 @@ function getTexts(language: "el" | "en") {
       createdAt: "Created",
       updatedAt: "Last update",
       lastUpdate: "Last update",
+      items: "Items",
+      email: "Email",
 
       statusActive: "Active",
       statusInactive: "Inactive",
@@ -328,6 +333,7 @@ function getTexts(language: "el" | "en") {
       taskAssigned: "Assigned / waiting acceptance",
       taskAccepted: "Accepted / waiting checklist",
       taskInProgress: "In progress",
+      taskAlerts: "Alerts",
       completedHistory: "Completed history",
 
       supplyAll: "All supplies",
@@ -340,6 +346,8 @@ function getTexts(language: "el" | "en") {
       priority: "Priority",
       normal: "Normal",
       borderline: "Borderline",
+      alert: "Alert",
+      activeAlert: "Active alert",
 
       cleaningSection: "Cleaning checklist",
       suppliesSection: "Supplies checklist",
@@ -347,7 +355,6 @@ function getTexts(language: "el" | "en") {
       notEnabled: "Not enabled",
       submitted: "Submitted",
       notSubmitted: "Not submitted",
-      noChecklist: "No checklist",
       autoFromPropertySupplies: "Automatic from active supplies",
 
       taskStatusHelpNew: "New task — click for assignment",
@@ -355,6 +362,7 @@ function getTexts(language: "el" | "en") {
       taskStatusHelpAccepted: "Accepted — waiting checklist",
       taskStatusHelpInProgress: "In progress",
       taskStatusHelpCompleted: "Task completed",
+      partnerAcceptedTask: "The partner accepted the task",
 
       saveError: "Failed to save changes.",
       partnerSaveError: "Failed to update default partner.",
@@ -378,13 +386,14 @@ function getTexts(language: "el" | "en") {
     openPropertyTasksPage: "Άνοιγμα εργασιών ακινήτου",
     overviewTitle: "Σύνοψη ακινήτου",
     overviewSubtitle:
-      "Δυναμικοί μετρητές για ανοιχτές εργασίες, ιστορικό ολοκληρωμένων και αναλώσιμα.",
+      "Δυναμικοί μετρητές για ανοιχτές εργασίες, alert, ιστορικό ολοκληρωμένων και αναλώσιμα.",
     openTasksTitle: "Ανοιχτές εργασίες ακινήτου",
     openTasksSubtitle:
       "Εμφανίζονται μόνο οι ανοιχτές εργασίες, με βάση το επιλεγμένο φίλτρο.",
     noOpenTasks: "Δεν υπάρχουν ανοιχτές εργασίες αυτή τη στιγμή.",
     suppliesTitle: "Αναλώσιμα",
-    suppliesSubtitle: "Εμφανίζονται μόνο τα ενεργά αναλώσιμα με φίλτρα κατάστασης.",
+    suppliesSubtitle:
+      "Εμφανίζονται μόνο τα ενεργά αναλώσιμα με φίλτρα κατάστασης.",
     issuesTitle: "Ανοιχτά θέματα / Βλάβες",
     issuesSubtitle: "Εμφανίζονται μόνο τα ανοιχτά ή σε εξέλιξη θέματα.",
     noIssues: "Δεν υπάρχουν ανοιχτά θέματα.",
@@ -412,9 +421,6 @@ function getTexts(language: "el" | "en") {
     noCleaningChecklist: "Δεν έχει οριστεί βασική λίστα καθαριότητας.",
     openChecklistManagement: "Άνοιγμα διαχείρισης λίστας",
     editChecklist: "Επεξεργασία λίστας",
-    suppliesFlowTitle: "Ροή αναλωσίμων",
-    suppliesFlowSubtitle:
-      "Η λίστα αναλωσίμων χτίζεται αυτόματα από τα ενεργά αναλώσιμα του ακινήτου.",
     suppliesFlowInfo:
       "Τα αναλώσιμα δεν ορίζονται ως ξεχωριστό χειροκίνητο template στη βασική ροή.",
     openSuppliesPage: "Άνοιγμα σελίδας αναλωσίμων",
@@ -435,6 +441,8 @@ function getTexts(language: "el" | "en") {
     createdAt: "Δημιουργία",
     updatedAt: "Τελευταία ενημέρωση",
     lastUpdate: "Τελευταία ενημέρωση",
+    items: "Στοιχεία",
+    email: "Email",
 
     statusActive: "Ενεργό",
     statusInactive: "Ανενεργό",
@@ -446,6 +454,7 @@ function getTexts(language: "el" | "en") {
     taskAssigned: "Ανατεθειμένες / αναμονή αποδοχής",
     taskAccepted: "Αποδεκτές / αναμονή checklist",
     taskInProgress: "Σε εξέλιξη",
+    taskAlerts: "Alert",
     completedHistory: "Ιστορικό ολοκληρωμένων",
 
     supplyAll: "Όλα τα αναλώσιμα",
@@ -458,6 +467,8 @@ function getTexts(language: "el" | "en") {
     priority: "Προτεραιότητα",
     normal: "Κανονικό",
     borderline: "Οριακό",
+    alert: "Alert",
+    activeAlert: "Ενεργό alert",
 
     cleaningSection: "Λίστα καθαριότητας",
     suppliesSection: "Λίστα αναλωσίμων",
@@ -465,7 +476,6 @@ function getTexts(language: "el" | "en") {
     notEnabled: "Δεν στάλθηκε",
     submitted: "Υποβλήθηκε",
     notSubmitted: "Δεν υποβλήθηκε",
-    noChecklist: "Χωρίς λίστα",
     autoFromPropertySupplies: "Αυτόματα από τα ενεργά αναλώσιμα",
 
     taskStatusHelpNew: "Νέα εργασία — πατήστε για ανάθεση",
@@ -473,6 +483,7 @@ function getTexts(language: "el" | "en") {
     taskStatusHelpAccepted: "Αποδεκτή — αναμονή checklist",
     taskStatusHelpInProgress: "Σε εξέλιξη",
     taskStatusHelpCompleted: "Η εργασία ολοκληρώθηκε",
+    partnerAcceptedTask: "Ο συνεργάτης αποδέχτηκε την εργασία",
 
     saveError: "Αποτυχία αποθήκευσης αλλαγών.",
     partnerSaveError: "Αποτυχία ενημέρωσης προεπιλεγμένου συνεργάτη.",
@@ -550,6 +561,46 @@ function taskStatusLabel(language: "el" | "en", status?: string | null) {
       return "Ακυρωμένη"
     default:
       return status || "—"
+  }
+}
+
+function priorityLabel(language: "el" | "en", priority?: string | null) {
+  const value = String(priority || "").toLowerCase()
+
+  if (language === "en") {
+    switch (value) {
+      case "low":
+        return "Low"
+      case "normal":
+        return "Normal"
+      case "medium":
+        return "Medium"
+      case "high":
+        return "High"
+      case "urgent":
+        return "Urgent"
+      case "critical":
+        return "Critical"
+      default:
+        return priority || "—"
+    }
+  }
+
+  switch (value) {
+    case "low":
+      return "Χαμηλή"
+    case "normal":
+      return "Κανονική"
+    case "medium":
+      return "Μεσαία"
+    case "high":
+      return "Υψηλή"
+    case "urgent":
+      return "Επείγουσα"
+    case "critical":
+      return "Κρίσιμη"
+    default:
+      return priority || "—"
   }
 }
 
@@ -777,7 +828,10 @@ function getSupplyStateThree(
   return "full"
 }
 
-function supplyStateLabel(language: "el" | "en", state: "missing" | "medium" | "full") {
+function supplyStateLabel(
+  language: "el" | "en",
+  state: "missing" | "medium" | "full"
+) {
   if (language === "en") {
     if (state === "missing") return "Missing"
     if (state === "medium") return "Medium"
@@ -829,7 +883,25 @@ function parseDateAndTime(dateValue?: string | null, timeValue?: string | null) 
   return composed
 }
 
+function isTaskAlertActive(task: NonNullable<PropertyDetail["tasks"]>[number]) {
+  const status = String(task.status || "").toLowerCase()
+
+  if (!["pending", "assigned", "accepted", "in_progress"].includes(status)) {
+    return false
+  }
+
+  if (!task.alertEnabled) return false
+  if (!task.alertAt) return false
+
+  const alertDate = normalizeDate(task.alertAt)
+  if (!alertDate) return false
+
+  return alertDate.getTime() <= Date.now()
+}
+
 function isTaskBorderline(task: NonNullable<PropertyDetail["tasks"]>[number]) {
+  if (isTaskAlertActive(task)) return true
+
   const status = String(task.status || "").toLowerCase()
   if (!["pending", "assigned", "accepted", "in_progress"].includes(status)) {
     return false
@@ -912,6 +984,7 @@ function getReadinessState(property: PropertyDetail | null, language: "el" | "en
     )
   )
 
+  const activeAlerts = openTasks.filter((task) => isTaskAlertActive(task))
   const hasPrimaryCleaningChecklist = Boolean(getPrimaryCleaningChecklist(property))
 
   const notFullSupplies = safeArray(property.propertySupplies).filter((supply) => {
@@ -933,6 +1006,7 @@ function getReadinessState(property: PropertyDetail | null, language: "el" | "en
   }
 
   if (
+    activeAlerts.length > 0 ||
     openIssues.length > 0 ||
     openTasks.length > 0 ||
     !hasPrimaryCleaningChecklist ||
@@ -943,8 +1017,8 @@ function getReadinessState(property: PropertyDetail | null, language: "el" | "en
       tone: "bg-amber-50 text-amber-700 ring-1 ring-amber-200",
       details:
         language === "en"
-          ? `Open tasks: ${openTasks.length} · Open issues: ${openIssues.length} · Supplies not full: ${notFullSupplies.length}`
-          : `Ανοιχτές εργασίες: ${openTasks.length} · Ανοιχτά θέματα: ${openIssues.length} · Αναλώσιμα μη πλήρη: ${notFullSupplies.length}`,
+          ? `Alerts: ${activeAlerts.length} · Open tasks: ${openTasks.length} · Open issues: ${openIssues.length} · Supplies not full: ${notFullSupplies.length}`
+          : `Alert: ${activeAlerts.length} · Ανοιχτές εργασίες: ${openTasks.length} · Ανοιχτά θέματα: ${openIssues.length} · Αναλώσιμα μη πλήρη: ${notFullSupplies.length}`,
     }
   }
 
@@ -1138,6 +1212,10 @@ export default function PropertyDetailPage() {
     return tasks.filter((task) => String(task.status || "").toLowerCase() === "completed").length
   }, [tasks])
 
+  const alertCount = useMemo(() => {
+    return openTasksBase.filter((task) => isTaskAlertActive(task)).length
+  }, [openTasksBase])
+
   const openTaskCounts = useMemo(() => {
     return {
       all_open: openTasksBase.length,
@@ -1145,19 +1223,27 @@ export default function PropertyDetailPage() {
       assigned: openTasksBase.filter((task) => String(task.status || "").toLowerCase() === "assigned").length,
       accepted: openTasksBase.filter((task) => String(task.status || "").toLowerCase() === "accepted").length,
       in_progress: openTasksBase.filter((task) => String(task.status || "").toLowerCase() === "in_progress").length,
+      alerts: openTasksBase.filter((task) => isTaskAlertActive(task)).length,
     }
   }, [openTasksBase])
 
   const visibleOpenTasks = useMemo(() => {
     let rows = [...openTasksBase]
 
-    if (openTaskFilter !== "all_open") {
+    if (openTaskFilter === "alerts") {
+      rows = rows.filter((task) => isTaskAlertActive(task))
+    } else if (openTaskFilter !== "all_open") {
       rows = rows.filter(
         (task) => String(task.status || "").toLowerCase() === openTaskFilter
       )
     }
 
     return rows.sort((a, b) => {
+      const aAlert = isTaskAlertActive(a) ? 1 : 0
+      const bAlert = isTaskAlertActive(b) ? 1 : 0
+
+      if (aAlert !== bAlert) return bAlert - aAlert
+
       const aBorder = isTaskBorderline(a) ? 1 : 0
       const bBorder = isTaskBorderline(b) ? 1 : 0
 
@@ -1360,6 +1446,12 @@ export default function PropertyDetailPage() {
                 >
                   {texts.readiness}: {readiness.label}
                 </span>
+
+                {alertCount > 0 ? (
+                  <span className="inline-flex rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 ring-1 ring-red-200">
+                    {texts.activeAlert}: {alertCount}
+                  </span>
+                ) : null}
               </div>
 
               <p className="mt-3 text-sm leading-6 text-slate-600">
@@ -1401,7 +1493,9 @@ export default function PropertyDetailPage() {
 
           <div className="mt-5 grid gap-6 xl:grid-cols-[1.35fr_1fr]">
             <div>
-              <div className="mb-3 text-sm font-semibold text-slate-800">Καταστάσεις ανοιχτών εργασιών</div>
+              <div className="mb-3 text-sm font-semibold text-slate-800">
+                {language === "en" ? "Open task states" : "Καταστάσεις ανοιχτών εργασιών"}
+              </div>
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 <CounterButton
                   label={texts.taskAllOpen}
@@ -1439,6 +1533,13 @@ export default function PropertyDetailPage() {
                   tone="blue"
                 />
                 <CounterButton
+                  label={texts.taskAlerts}
+                  value={openTaskCounts.alerts}
+                  active={openTaskFilter === "alerts"}
+                  onClick={() => setOpenTaskFilter("alerts")}
+                  tone="red"
+                />
+                <CounterButton
                   label={texts.completedHistory}
                   value={completedCount}
                   active={false}
@@ -1451,7 +1552,9 @@ export default function PropertyDetailPage() {
             </div>
 
             <div>
-              <div className="mb-3 text-sm font-semibold text-slate-800">Κατάσταση αναλωσίμων</div>
+              <div className="mb-3 text-sm font-semibold text-slate-800">
+                {language === "en" ? "Supplies status" : "Κατάσταση αναλωσίμων"}
+              </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <CounterButton
                   label={texts.supplyAll}
@@ -1511,6 +1614,7 @@ export default function PropertyDetailPage() {
                 {visibleOpenTasks.map((task) => {
                   const latestAssignment = getLatestAssignment(task)
                   const borderline = isTaskBorderline(task)
+                  const activeAlert = isTaskAlertActive(task)
                   const cleaningEnabled = Boolean(task.sendCleaningChecklist)
                   const suppliesEnabled = Boolean(task.sendSuppliesChecklist)
                   const cleaningRun = getCleaningRun(task)
@@ -1520,20 +1624,25 @@ export default function PropertyDetailPage() {
 
                   const showNormalBadge =
                     !borderline &&
+                    !activeAlert &&
                     ["accepted", "in_progress"].includes(String(task.status || "").toLowerCase())
 
                   const partnerValue =
                     String(task.status || "").toLowerCase() === "accepted"
                       ? latestAssignment?.partner?.name
-                        ? `${latestAssignment.partner.name} · Ο συνεργάτης αποδέχτηκε την εργασία`
-                        : "Ο συνεργάτης αποδέχτηκε την εργασία"
+                        ? `${latestAssignment.partner.name} · ${texts.partnerAcceptedTask}`
+                        : texts.partnerAcceptedTask
                       : latestAssignment?.partner?.name || "—"
 
                   return (
                     <div
                       key={task.id}
                       className={`rounded-2xl border p-4 ${
-                        borderline ? "border-red-200 bg-red-50/30" : "border-slate-200 bg-white"
+                        activeAlert
+                          ? "border-red-200 bg-red-50/30"
+                          : borderline
+                            ? "border-red-200 bg-red-50/30"
+                            : "border-slate-200 bg-white"
                       }`}
                     >
                       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -1549,7 +1658,13 @@ export default function PropertyDetailPage() {
                               {taskStatusLabel(language, task.status)}
                             </span>
 
-                            {borderline ? (
+                            {activeAlert ? (
+                              <span className="inline-flex rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 ring-1 ring-red-200">
+                                {texts.activeAlert}
+                              </span>
+                            ) : null}
+
+                            {!activeAlert && borderline ? (
                               <span className="inline-flex rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 ring-1 ring-red-200">
                                 {texts.borderline}
                               </span>
@@ -1567,7 +1682,7 @@ export default function PropertyDetailPage() {
                                   task.priority
                                 )}`}
                               >
-                                {task.priority}
+                                {priorityLabel(language, task.priority)}
                               </span>
                             ) : null}
                           </div>
@@ -1599,7 +1714,7 @@ export default function PropertyDetailPage() {
                         <InfoChip label={texts.partner} value={partnerValue} />
                       </div>
 
-                      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      <div className="mt-3 grid gap-3 sm:grid-cols-3">
                         <InfoChip
                           label={texts.cleaningSection}
                           value={
@@ -1623,6 +1738,15 @@ export default function PropertyDetailPage() {
                                   suppliesSubmitted
                                 )}`
                               : texts.notEnabled
+                          }
+                        />
+
+                        <InfoChip
+                          label={texts.alert}
+                          value={
+                            activeAlert
+                              ? formatDateTime(task.alertAt || null, texts.locale)
+                              : "—"
                           }
                         />
                       </div>
@@ -1754,7 +1878,7 @@ export default function PropertyDetailPage() {
                 {property.defaultPartner ? (
                   <div className="grid gap-2 md:grid-cols-2">
                     <InfoChip label={texts.name} value={property.defaultPartner.name} />
-                    <InfoChip label="Email" value={property.defaultPartner.email || "—"} />
+                    <InfoChip label={texts.email} value={property.defaultPartner.email || "—"} />
                   </div>
                 ) : (
                   <div className="rounded-xl bg-slate-50 p-3 text-sm text-slate-500">
@@ -1785,7 +1909,7 @@ export default function PropertyDetailPage() {
                   <div className="grid gap-2 md:grid-cols-2">
                     <InfoChip label={texts.name} value={primaryCleaningChecklist.title} />
                     <InfoChip
-                      label="Στοιχεία"
+                      label={texts.items}
                       value={String(safeArray(primaryCleaningChecklist.items).length)}
                     />
                   </div>
@@ -2078,7 +2202,7 @@ export default function PropertyDetailPage() {
             <div className="grid gap-4 md:grid-cols-3">
               <InfoChip label={texts.name} value={primaryCleaningChecklist.title} />
               <InfoChip
-                label="Στοιχεία"
+                label={texts.items}
                 value={String(safeArray(primaryCleaningChecklist.items).length)}
               />
               <InfoChip

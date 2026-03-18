@@ -1,0 +1,330 @@
+New-Item -ItemType Directory -Force scripts
+@'
+const { PrismaClient, Prisma } = require("@prisma/client");
+
+const prisma = new PrismaClient();
+
+function getModel(name) {
+  return Prisma.dmmf.datamodel.models.find((m) => m.name === name) || null;
+}
+
+function getEnum(name) {
+  return Prisma.dmmf.datamodel.enums.find((e) => e.name === name) || null;
+}
+
+function hasField(model, fieldName) {
+  return !!model?.fields?.find((f) => f.name === fieldName);
+}
+
+function getScalarFields(model) {
+  return (model?.fields || []).filter((f) => f.kind === "scalar");
+}
+
+function pickEnumValue(enumName, preferred = []) {
+  const enumDef = getEnum(enumName);
+  if (!enumDef || !enumDef.values?.length) return null;
+
+  for (const wanted of preferred) {
+    const found = enumDef.values.find((v) => v.name === wanted);
+    if (found) return found.name;
+  }
+
+  return enumDef.values[0].name;
+}
+
+function isGeneratedOrManaged(field) {
+  return (
+    field.isId ||
+    field.hasDefaultValue ||
+    field.name === "createdAt" ||
+    field.name === "updatedAt"
+  );
+}
+
+function createDate(baseDate, daysToAdd = 0, hour = 12, minute = 0) {
+  const d = new Date(baseDate);
+  d.setDate(d.getDate() + daysToAdd);
+  d.setHours(hour, minute, 0, 0);
+  return d;
+}
+
+function defaultValueForField(field, context = {}) {
+  const name = field.name.toLowerCase();
+
+  if (name === "organizationid") return context.organizationId ?? null;
+  if (name === "propertyid") return context.propertyId ?? null;
+  if (name === "bookingid") return context.bookingId ?? null;
+
+  if (field.kind === "enum") {
+    if (name.includes("syncstatus")) {
+      return pickEnumValue(field.type, ["SYNCED", "SUCCESS", "COMPLETED", "IMPORTED", "PENDING"]);
+    }
+
+    if (name.includes("mappingstatus")) {
+      return pickEnumValue(field.type, ["MAPPED", "READY", "MATCHED", "PENDING", "UNMAPPED"]);
+    }
+
+    if (name === "status") {
+      return pickEnumValue(field.type, ["CONFIRMED", "ACTIVE", "NEW", "PENDING"]);
+    }
+
+    return pickEnumValue(field.type);
+  }
+
+  if (field.type === "String") {
+    if (name.includes("externalbookingid")) return context.externalBookingId ?? `TEST-BOOKING-${Date.now()}`;
+    if (name === "code") return context.code ?? `CODE-${Date.now()}`;
+    if (name.includes("sourceplatform")) return context.sourcePlatform ?? "AIRBNB";
+    if (name === "platform") return context.sourcePlatform ?? "AIRBNB";
+    if (name.includes("listingexternalid")) return context.listingExternalId ?? `LISTING-EXT-${context.index ?? 1}`;
+    if (name.includes("listingid")) return context.listingExternalId ?? `LISTING-${context.index ?? 1}`;
+    if (name.includes("listingname")) return context.listingName ?? `Test Listing ${context.index ?? 1}`;
+    if (name.includes("guestname")) return context.guestName ?? `TEST GUEST ${context.index ?? 1}`;
+    if (name.includes("guestemail")) return context.guestEmail ?? `testguest${context.index ?? 1}@example.com`;
+    if (name.includes("guestphone")) return context.guestPhone ?? `69000000${String(context.index ?? 1).padStart(2, "0")}`;
+    if (name.includes("notes")) return context.notes ?? "Test booking generated automatically";
+    if (name.includes("title")) return context.title ?? `Test Booking ${context.index ?? 1}`;
+    if (name.includes("description")) return context.description ?? "Seeded booking for UI and OPS flow testing";
+    if (name.includes("reference")) return context.reference ?? `REF-${Date.now()}-${context.index ?? 1}`;
+    if (name.includes("channel")) return context.sourcePlatform ?? "AIRBNB";
+    if (name.includes("provider")) return context.sourcePlatform ?? "AIRBNB";
+    if (name.includes("name")) return context.fallbackName ?? `TEST ${field.name} ${context.index ?? 1}`;
+    return `TEST_${field.name}_${context.index ?? 1}`;
+  }
+
+  if (field.type === "Int") {
+    if (name.includes("guest")) return 2;
+    if (name.includes("adult")) return 2;
+    if (name.includes("child")) return 0;
+    if (name.includes("night")) return 3;
+    if (name.includes("version")) return 1;
+    if (name.includes("sort")) return context.index ?? 1;
+    return context.index ?? 1;
+  }
+
+  if (field.type === "Float" || field.type === "Decimal") {
+    if (name.includes("total")) return 420;
+    if (name.includes("amount")) return 420;
+    if (name.includes("price")) return 140;
+    return 1;
+  }
+
+  if (field.type === "Boolean") {
+    if (name.startsWith("is")) return true;
+    return false;
+  }
+
+  if (field.type === "DateTime") {
+    if (name.includes("checkin")) return context.checkInAt ?? createDate(new Date(), 2 + (context.index ?? 0), 15, 0);
+    if (name.includes("checkout")) return context.checkOutAt ?? createDate(new Date(), 5 + (context.index ?? 0), 11, 0);
+    if (name.includes("start")) return context.startAt ?? createDate(new Date(), 2 + (context.index ?? 0), 15, 0);
+    if (name.includes("end")) return context.endAt ?? createDate(new Date(), 5 + (context.index ?? 0), 11, 0);
+    if (name.includes("sync")) return new Date();
+    return new Date();
+  }
+
+  if (field.type === "Json") {
+    return {
+      seeded: true,
+      source: "seed-test-bookings.js",
+      createdAt: new Date().toISOString(),
+      index: context.index ?? 1,
+    };
+  }
+
+  return null;
+}
+
+function buildDataForModel(model, context = {}) {
+  const data = {};
+  const scalarFields = getScalarFields(model);
+
+  for (const field of scalarFields) {
+    if (isGeneratedOrManaged(field)) continue;
+
+    const value = defaultValueForField(field, context);
+
+    if (value !== null && value !== undefined) {
+      data[field.name] = value;
+    }
+  }
+
+  return data;
+}
+
+async function getFirstOrganization() {
+  const organizationModel = getModel("Organization");
+  if (!organizationModel) return null;
+
+  const org = await prisma.organization.findFirst({
+    orderBy: { createdAt: "asc" },
+  });
+
+  return org || null;
+}
+
+async function getPropertiesForOrganization(organizationId) {
+  const propertyModel = getModel("Property");
+  if (!propertyModel) return [];
+
+  const where = organizationId ? { organizationId } : {};
+
+  const properties = await prisma.property.findMany({
+    where,
+    orderBy: { createdAt: "asc" },
+    take: 10,
+  });
+
+  return properties;
+}
+
+async function createBookings(organization, properties) {
+  const bookingModel = getModel("Booking");
+
+  if (!bookingModel) {
+    throw new Error("Δεν βρέθηκε model Booking στο Prisma schema.");
+  }
+
+  const created = [];
+  const baseNow = Date.now();
+
+  for (let i = 0; i < 3; i++) {
+    const property = properties[i % Math.max(properties.length, 1)] || null;
+
+    const checkInAt = createDate(new Date(), 2 + i * 3, 15, 0);
+    const checkOutAt = createDate(new Date(), 4 + i * 3, 11, 0);
+
+    const context = {
+      index: i + 1,
+      organizationId: organization?.id ?? null,
+      propertyId: property?.id ?? null,
+      externalBookingId: `TEST-BOOKING-${baseNow}-${i + 1}`,
+      sourcePlatform: i % 2 === 0 ? "AIRBNB" : "BOOKING_COM",
+      listingExternalId: property?.code ? `LISTING-${property.code}` : `LISTING-${i + 1}`,
+      listingName: property?.name ? `${property.name} Listing` : `Test Listing ${i + 1}`,
+      guestName: `TEST GUEST ${i + 1}`,
+      guestEmail: `testguest${i + 1}@example.com`,
+      guestPhone: `69000000${String(i + 1).padStart(2, "0")}`,
+      notes: "Test booking generated for bookings flow",
+      title: `Booking ${i + 1}`,
+      description: "Seeded booking to test mapping and task creation flow",
+      reference: `REF-${baseNow}-${i + 1}`,
+      checkInAt,
+      checkOutAt,
+      startAt: checkInAt,
+      endAt: checkOutAt,
+      fallbackName: `TEST FIELD VALUE ${i + 1}`,
+    };
+
+    const data = buildDataForModel(bookingModel, context);
+
+    const booking = await prisma.booking.create({ data });
+    created.push({ booking, property });
+  }
+
+  return created;
+}
+
+async function createBookingMappings(organization, createdBookings) {
+  const mappingModel = getModel("BookingPropertyMapping");
+  if (!mappingModel) {
+    console.log("ℹ️ Δεν βρέθηκε model BookingPropertyMapping. Παραλείπεται το seed mapping.");
+    return [];
+  }
+
+  const createdMappings = [];
+
+  for (const item of createdBookings) {
+    if (!item.property) continue;
+
+    const context = {
+      organizationId: organization?.id ?? null,
+      bookingId: item.booking.id,
+      propertyId: item.property.id,
+      index: 1,
+      fallbackName: "TEST MAPPING",
+    };
+
+    const data = buildDataForModel(mappingModel, context);
+
+    const mapping = await prisma.bookingPropertyMapping.create({ data });
+    createdMappings.push(mapping);
+  }
+
+  return createdMappings;
+}
+
+async function createSyncEvents(organization, createdBookings) {
+  const syncEventModel = getModel("BookingSyncEvent");
+  if (!syncEventModel) {
+    console.log("ℹ️ Δεν βρέθηκε model BookingSyncEvent. Παραλείπεται το seed sync events.");
+    return [];
+  }
+
+  const createdEvents = [];
+
+  for (let i = 0; i < createdBookings.length; i++) {
+    const item = createdBookings[i];
+
+    const context = {
+      organizationId: organization?.id ?? null,
+      bookingId: item.booking.id,
+      index: i + 1,
+      title: `BOOKING IMPORT EVENT ${i + 1}`,
+      description: "Test sync/import event for booking",
+      fallbackName: `SYNC EVENT ${i + 1}`,
+    };
+
+    const data = buildDataForModel(syncEventModel, context);
+
+    const event = await prisma.bookingSyncEvent.create({ data });
+    createdEvents.push(event);
+  }
+
+  return createdEvents;
+}
+
+async function main() {
+  console.log("▶ Έναρξη seed test bookings...");
+
+  const organization = await getFirstOrganization();
+  if (!organization) {
+    throw new Error("Δεν βρέθηκε Organization στη βάση. Χρειάζεται πρώτα τουλάχιστον ένας οργανισμός.");
+  }
+
+  console.log(`✔ Βρέθηκε οργανισμός: ${organization.name || organization.id}`);
+
+  const properties = await getPropertiesForOrganization(organization.id);
+  console.log(`✔ Βρέθηκαν ${properties.length} ακίνητα για τον οργανισμό`);
+
+  const createdBookings = await createBookings(organization, properties);
+  console.log(`✔ Δημιουργήθηκαν ${createdBookings.length} test bookings`);
+
+  const createdMappings = await createBookingMappings(organization, createdBookings);
+  console.log(`✔ Δημιουργήθηκαν ${createdMappings.length} booking-property mappings`);
+
+  const createdEvents = await createSyncEvents(organization, createdBookings);
+  console.log(`✔ Δημιουργήθηκαν ${createdEvents.length} booking sync events`);
+
+  console.log("");
+  console.log("=== ΣΥΝΟΨΗ ===");
+  for (const item of createdBookings) {
+    console.log(`- Booking ID: ${item.booking.id}`);
+    console.log(`  Property: ${item.property?.name || "χωρίς mapping property object"}`);
+  }
+
+  console.log("");
+  console.log("✅ Το seed ολοκληρώθηκε επιτυχώς.");
+  console.log("Άνοιξε τώρα /bookings και /bookings/history.");
+}
+
+main()
+  .catch(async (error) => {
+    console.error("❌ Seed error:");
+    console.error(error);
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });
+'@ | Set-Content scripts\seed-test-bookings.js

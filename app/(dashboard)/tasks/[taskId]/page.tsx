@@ -174,6 +174,8 @@ type Task = {
   requiresPhotos?: boolean
   requiresChecklist?: boolean
   requiresApproval?: boolean
+  alertEnabled?: boolean
+  alertAt?: string | null
   notes?: string | null
   resultNotes?: string | null
   createdAt?: string
@@ -643,6 +645,18 @@ function getCurrentExecutionWindow(task: Task) {
   return `${date} · ${start}${end}`
 }
 
+function isManualAlertTriggered(task: Task) {
+  if (!task.alertEnabled || !task.alertAt) return false
+
+  const alertDate = new Date(task.alertAt)
+  if (Number.isNaN(alertDate.getTime())) return false
+
+  const status = String(task.status || "").toLowerCase()
+  if (["completed", "cancelled"].includes(status)) return false
+
+  return Date.now() >= alertDate.getTime()
+}
+
 function StatCard({
   label,
   value,
@@ -759,6 +773,11 @@ export default function TaskDetailsPage() {
 
   const isCancelled = useMemo(() => {
     return String(task?.status || "").toLowerCase() === "cancelled"
+  }, [task])
+
+  const manualAlertTriggered = useMemo(() => {
+    if (!task) return false
+    return isManualAlertTriggered(task)
   }, [task])
 
   useEffect(() => {
@@ -968,6 +987,12 @@ export default function TaskDetailsPage() {
                 </span>
               ) : null}
 
+              {task.alertEnabled && task.alertAt ? (
+                <span className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
+                  Alert: {formatDateTime(task.alertAt)}
+                </span>
+              ) : null}
+
               {isCancelled ? (
                 <span className="rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">
                   Ιστορικό ακύρωσης
@@ -1021,6 +1046,26 @@ export default function TaskDetailsPage() {
               </Link>
             </div>
           </div>
+        ) : manualAlertTriggered ? (
+          <div className="mt-5 rounded-2xl border border-orange-200 bg-orange-50 p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-orange-700">
+                  Ενεργοποιημένο χειροκίνητο alert
+                </p>
+                <p className="mt-1 text-sm text-orange-700">
+                  Το προγραμματισμένο alert της εργασίας έχει φτάσει ({formatDateTime(task.alertAt)}).
+                </p>
+              </div>
+
+              <Link
+                href={`/properties/${task.property.id}/tasks`}
+                className="inline-flex shrink-0 items-center rounded-xl border border-orange-200 bg-white px-4 py-2 text-sm font-semibold text-orange-700 hover:bg-orange-100"
+              >
+                Άνοιγμα εργασιών ακινήτου
+              </Link>
+            </div>
+          </div>
         ) : overdue ? (
           <div className="mt-5 rounded-2xl border border-red-200 bg-red-50 p-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1050,7 +1095,7 @@ export default function TaskDetailsPage() {
         </div>
       ) : null}
 
-      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-6">
         <StatCard label="Ημερομηνία" value={formatDate(task.scheduledDate)} />
         <StatCard label="Παράθυρο εκτέλεσης" value={getCurrentExecutionWindow(task)} />
         <StatCard label="Διάρκεια" value={duration} />
@@ -1068,6 +1113,14 @@ export default function TaskDetailsPage() {
               : checklistSubmitted
               ? "Υποβλήθηκε"
               : "Δεν υποβλήθηκε"
+          }
+        />
+        <StatCard
+          label="Χειροκίνητο alert"
+          value={
+            task.alertEnabled && task.alertAt
+              ? formatDateTime(task.alertAt)
+              : "Δεν υπάρχει"
           }
         />
       </section>
@@ -1136,7 +1189,7 @@ export default function TaskDetailsPage() {
                 value={
                   isCancelled
                     ? task.checklistRun
-                      ? "Διατηρείται στο ιστορικό"
+                      ? "Διατηρείται στο պատմικό"
                       : "Δεν χρησιμοποιήθηκε"
                     : checklistSubmitted
                     ? "Υποβλήθηκε"
@@ -1156,6 +1209,15 @@ export default function TaskDetailsPage() {
                 {getChecklistStatusHelp(task.checklistRun, task.status)}
               </p>
             </div>
+
+            {task.alertEnabled && task.alertAt ? (
+              <div className="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-4">
+                <p className="text-sm font-semibold text-blue-700">Προγραμματισμένο alert</p>
+                <p className="mt-1 text-sm text-blue-700">
+                  Το alert έχει οριστεί για: {formatDateTime(task.alertAt)}
+                </p>
+              </div>
+            ) : null}
 
             {task.description ? (
               <div className="mt-4 rounded-2xl border border-slate-200 p-4">

@@ -4,41 +4,41 @@ import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
 import { useAppLanguage } from "@/components/i18n/LanguageProvider"
 
-type Property = {
+type Ακίνητο = {
   id: string
+  code?: string
   name: string
-  address: string
-  createdAt: string
+  address?: string | null
+  city?: string | null
+  region?: string | null
+  status?: string | null
 }
 
-type Partner = {
-  id: string
-  name: string
-  email: string
-  phone: string | null
-  specialty: string
-  status: string
-  createdAt: string
-}
-
-type Task = {
+type Εργασία = {
   id: string
   title: string
+  description?: string | null
   status: string
-  date: string
+  priority?: string | null
+  taskType?: string | null
+  scheduledDate: string
+  scheduledStartTime?: string | null
+  scheduledEndTime?: string | null
+  alertEnabled?: boolean
+  alertAt?: string | null
   createdAt: string
-  propertyId: string
-  property?: Property
+  propertyId?: string | null
+  property?: Ακίνητο | null
 }
 
-type DashboardFilter =
-  | "all"
+type ΦίλτροΠίνακαΕλέγχου =
+  | "all_open"
   | "today"
   | "pending"
+  | "assigned"
+  | "accepted"
   | "in_progress"
-  | "completed"
-  | "cancelled"
-  | "urgent"
+  | "alerts"
 
 function normalizeDateOnly(dateValue: string | Date | null | undefined) {
   if (!dateValue) return null
@@ -52,13 +52,45 @@ function normalizeDateOnly(dateValue: string | Date | null | undefined) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate())
 }
 
-function formatDate(dateValue: string | Date | null | undefined, locale: string) {
+function formatDate(
+  dateValue: string | Date | null | undefined,
+  locale: string
+) {
   const normalized = normalizeDateOnly(dateValue)
-  if (!normalized) return "-"
+  if (!normalized) return "—"
   return normalized.toLocaleDateString(locale)
 }
 
-function isToday(dateValue: string | null | undefined) {
+function formatDateTime(
+  dateValue: string | Date | null | undefined,
+  locale: string
+) {
+  if (!dateValue) return "—"
+
+  const date = new Date(dateValue)
+  if (Number.isNaN(date.getTime())) return "—"
+
+  return new Intl.DateTimeFormat(locale, {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date)
+}
+
+function toDateInputValue(dateValue: Date) {
+  const local = new Date(dateValue.getTime() - dateValue.getTimezoneOffset() * 60000)
+  return local.toISOString().slice(0, 10)
+}
+
+function είναιΑνοιχτήΕργασία(εργασία: Εργασία) {
+  const κατάσταση = String(εργασία.status || "").toLowerCase()
+
+  return ["pending", "assigned", "accepted", "in_progress"].includes(κατάσταση)
+}
+
+function είναιΣήμερα(dateValue: string | null | undefined) {
   const today = normalizeDateOnly(new Date())
   const target = normalizeDateOnly(dateValue)
 
@@ -67,272 +99,85 @@ function isToday(dateValue: string | null | undefined) {
   return target.getTime() === today.getTime()
 }
 
-function isOverdueOrTodayOpenTask(task: Task) {
-  const status = task.status.toLowerCase()
+function είναιΕνεργόAlert(εργασία: Εργασία) {
+  if (!εργασία.alertEnabled) return false
+  if (!εργασία.alertAt) return false
+  if (!είναιΑνοιχτήΕργασία(εργασία)) return false
 
-  if (status === "completed" || status === "cancelled") {
+  const alertDate = new Date(εργασία.alertAt)
+  if (Number.isNaN(alertDate.getTime())) return false
+
+  return alertDate.getTime() <= Date.now()
+}
+
+function είναιΜέσαΣεΕύροςΗμερομηνίας(
+  εργασία: Εργασία,
+  από: string,
+  έως: string
+) {
+  const target = normalizeDateOnly(εργασία.scheduledDate)
+  if (!target) return false
+
+  const fromDate = από ? normalizeDateOnly(από) : null
+  const toDate = έως ? normalizeDateOnly(έως) : null
+
+  if (fromDate && target.getTime() < fromDate.getTime()) {
     return false
   }
 
-  const today = normalizeDateOnly(new Date())
-  const taskDate = normalizeDateOnly(task.date)
+  if (toDate && target.getTime() > toDate.getTime()) {
+    return false
+  }
 
-  if (!today || !taskDate) return false
-
-  return taskDate.getTime() <= today.getTime()
+  return true
 }
 
 function getTaskStatusClasses(status: string) {
   switch (status.toLowerCase()) {
-    case "completed":
-      return "border border-green-200 bg-green-100 text-green-700"
+    case "pending":
+      return "border border-amber-200 bg-amber-100 text-amber-700"
+    case "assigned":
+      return "border border-orange-200 bg-orange-100 text-orange-700"
+    case "accepted":
+      return "border border-sky-200 bg-sky-100 text-sky-700"
     case "in_progress":
       return "border border-blue-200 bg-blue-100 text-blue-700"
-    case "pending":
-      return "border border-amber-200 bg-amber-100 text-amber-700"
-    case "cancelled":
+    default:
+      return "border border-slate-200 bg-slate-100 text-slate-700"
+  }
+}
+
+function getPriorityClasses(priority?: string | null) {
+  switch (String(priority || "").toLowerCase()) {
+    case "urgent":
+    case "critical":
       return "border border-red-200 bg-red-100 text-red-700"
-    default:
-      return "border border-slate-200 bg-slate-100 text-slate-700"
-  }
-}
-
-function getPartnerStatusClasses(status: string) {
-  switch (status.toLowerCase()) {
-    case "active":
-      return "border border-green-200 bg-green-100 text-green-700"
-    case "inactive":
-      return "border border-slate-200 bg-slate-100 text-slate-700"
-    default:
+    case "high":
       return "border border-amber-200 bg-amber-100 text-amber-700"
-  }
-}
-
-function getDashboardTexts(language: "el" | "en") {
-  if (language === "en") {
-    return {
-      title: "Dashboard",
-      subtitle:
-        "Overall operational view for properties, tasks and partners.",
-      newProperty: "New property",
-      newTask: "New task",
-      loadError: "Dashboard data could not be loaded.",
-      loadingProperties: "Failed to load properties",
-      loadingTasks: "Failed to load tasks",
-      loadingPartners: "Failed to load partners",
-
-      totalProperties: "Total properties",
-      totalPropertiesHint: "Registered properties in the system",
-
-      totalTasks: "Total tasks",
-      totalTasksHint: "All tasks created in the system",
-
-      tasksToday: "Tasks today",
-      tasksTodayHint: "Scheduled for today",
-
-      activePartners: "Active partners",
-      activePartnersHint: "Partners available for assignment",
-
-      pendingTasks: "Pending",
-      pendingTasksHint: "Tasks not completed yet",
-
-      completedTasks: "Completed",
-      completedTasksHint: "Tasks successfully closed",
-
-      completionRate: "Completion rate",
-      completionRateHint: "Based on the total number of tasks",
-
-      urgentAlerts: "Urgent pending items",
-      urgentAlertsHint:
-        "Tasks requiring immediate attention because they are open and due today or overdue.",
-      noUrgentAlerts: "No urgent pending items right now.",
-      noUrgentAlertsHint: "Everything looks under control.",
-      urgentBadge: "Urgent",
-      dueToday: "Due today",
-      overdue: "Overdue",
-      withoutProperty: "Without property",
-
-      recentTasks: "Recent tasks",
-      recentTasksHint: "Latest task entries",
-      noTasks: "No tasks yet",
-      noTasksHint: "Start by creating the first task.",
-
-      recentProperties: "Recent properties",
-      recentPropertiesHint: "Latest property entries",
-      noProperties: "No properties yet",
-      noPropertiesHint: "Add the first property to get started.",
-
-      recentPartners: "Recent partners",
-      recentPartnersHint: "Latest partners in the system",
-      noPartners: "No partners yet",
-      noPartnersHint: "Add partners so you can assign tasks.",
-
-      viewAll: "View all",
-      createdAt: "Created",
-      filterResults: "Filtered tasks",
-      filterResultsHint: "Live view based on the selected dashboard filter.",
-      noFilteredTasks: "No tasks match the selected filter.",
-      noFilteredTasksHint: "Try another filter or create a new task.",
-
-      filterAll: "All tasks",
-      filterToday: "Today",
-      filterPending: "Pending",
-      filterInProgress: "In progress",
-      filterCompleted: "Completed",
-      filterCancelled: "Cancelled",
-      filterUrgent: "Urgent",
-
-      openAlertsLink: "View tasks",
-
-      taskStatus: {
-        completed: "Completed",
-        in_progress: "In progress",
-        pending: "Pending",
-        cancelled: "Cancelled",
-      },
-      partnerStatus: {
-        active: "Active",
-        inactive: "Inactive",
-      },
-      navigationTargetProperties: "/properties",
-      navigationTargetTasks: "/tasks",
-      navigationTargetPartners: "/partners",
-      locale: "en-GB",
-    }
-  }
-
-  return {
-    title: "Dashboard",
-    subtitle: "Συνολική εικόνα λειτουργίας για ακίνητα, εργασίες και συνεργάτες.",
-    newProperty: "Νέο ακίνητο",
-    newTask: "Νέα εργασία",
-    loadError: "Δεν ήταν δυνατή η φόρτωση του dashboard.",
-    loadingProperties: "Αποτυχία φόρτωσης ακινήτων",
-    loadingTasks: "Αποτυχία φόρτωσης εργασιών",
-    loadingPartners: "Αποτυχία φόρτωσης συνεργατών",
-
-    totalProperties: "Σύνολο ακινήτων",
-    totalPropertiesHint: "Καταχωρημένα ακίνητα στο σύστημα",
-
-    totalTasks: "Σύνολο εργασιών",
-    totalTasksHint: "Όλες οι εργασίες που έχουν δημιουργηθεί",
-
-    tasksToday: "Εργασίες σήμερα",
-    tasksTodayHint: "Προγραμματισμένες για τη σημερινή ημέρα",
-
-    activePartners: "Ενεργοί συνεργάτες",
-    activePartnersHint: "Συνεργάτες διαθέσιμοι για ανάθεση",
-
-    pendingTasks: "Σε αναμονή",
-    pendingTasksHint: "Εργασίες που δεν έχουν ολοκληρωθεί ακόμη",
-
-    completedTasks: "Ολοκληρωμένες",
-    completedTasksHint: "Εργασίες που έχουν κλείσει επιτυχώς",
-
-    completionRate: "Ποσοστό ολοκλήρωσης",
-    completionRateHint: "Βάσει του συνολικού αριθμού εργασιών",
-
-    urgentAlerts: "Επείγουσες εκκρεμότητες",
-    urgentAlertsHint:
-      "Εργασίες που χρειάζονται άμεση προσοχή επειδή είναι ανοιχτές και αφορούν σήμερα ή έχουν ήδη καθυστερήσει.",
-    noUrgentAlerts: "Δεν υπάρχουν επείγουσες εκκρεμότητες αυτή τη στιγμή.",
-    noUrgentAlertsHint: "Η λειτουργία φαίνεται ελεγχόμενη.",
-    urgentBadge: "Επείγον",
-    dueToday: "Για σήμερα",
-    overdue: "Σε καθυστέρηση",
-    withoutProperty: "Χωρίς ακίνητο",
-
-    recentTasks: "Πρόσφατες εργασίες",
-    recentTasksHint: "Οι τελευταίες καταχωρήσεις εργασιών",
-    noTasks: "Δεν υπάρχουν ακόμη εργασίες",
-    noTasksHint: "Ξεκίνησε δημιουργώντας την πρώτη εργασία.",
-
-    recentProperties: "Πρόσφατα ακίνητα",
-    recentPropertiesHint: "Οι τελευταίες καταχωρήσεις ακινήτων",
-    noProperties: "Δεν υπάρχουν ακόμη ακίνητα",
-    noPropertiesHint: "Πρόσθεσε το πρώτο ακίνητο για να ξεκινήσεις.",
-
-    recentPartners: "Πρόσφατοι συνεργάτες",
-    recentPartnersHint: "Οι τελευταίοι συνεργάτες του συστήματος",
-    noPartners: "Δεν υπάρχουν ακόμη συνεργάτες",
-    noPartnersHint: "Πρόσθεσε συνεργάτες για να μπορείς να κάνεις αναθέσεις.",
-
-    viewAll: "Προβολή όλων",
-    createdAt: "Δημιουργία",
-    filterResults: "Φιλτραρισμένες εργασίες",
-    filterResultsHint: "Ζωντανή προβολή βάσει του επιλεγμένου φίλτρου dashboard.",
-    noFilteredTasks: "Δεν βρέθηκαν εργασίες για το επιλεγμένο φίλτρο.",
-    noFilteredTasksHint: "Δοκίμασε άλλο φίλτρο ή δημιούργησε νέα εργασία.",
-
-    filterAll: "Όλες οι εργασίες",
-    filterToday: "Σήμερα",
-    filterPending: "Σε αναμονή",
-    filterInProgress: "Σε εξέλιξη",
-    filterCompleted: "Ολοκληρωμένες",
-    filterCancelled: "Ακυρωμένες",
-    filterUrgent: "Επείγουσες",
-
-    openAlertsLink: "Προβολή εργασιών",
-
-    taskStatus: {
-      completed: "Ολοκληρωμένη",
-      in_progress: "Σε εξέλιξη",
-      pending: "Σε αναμονή",
-      cancelled: "Ακυρωμένη",
-    },
-    partnerStatus: {
-      active: "Ενεργός",
-      inactive: "Ανενεργός",
-    },
-    navigationTargetProperties: "/properties",
-    navigationTargetTasks: "/tasks",
-    navigationTargetPartners: "/partners",
-    locale: "el-GR",
-  }
-}
-
-function getTaskStatusLabel(language: "el" | "en", status: string) {
-  const texts = getDashboardTexts(language)
-
-  switch (status.toLowerCase()) {
-    case "completed":
-      return texts.taskStatus.completed
-    case "in_progress":
-      return texts.taskStatus.in_progress
-    case "pending":
-      return texts.taskStatus.pending
-    case "cancelled":
-      return texts.taskStatus.cancelled
+    case "medium":
+    case "normal":
+      return "border border-sky-200 bg-sky-100 text-sky-700"
+    case "low":
+      return "border border-slate-200 bg-slate-100 text-slate-700"
     default:
-      return status
+      return "border border-slate-200 bg-slate-100 text-slate-700"
   }
 }
 
-function getPartnerStatusLabel(language: "el" | "en", status: string) {
-  const texts = getDashboardTexts(language)
-
-  switch (status.toLowerCase()) {
-    case "active":
-      return texts.partnerStatus.active
-    case "inactive":
-      return texts.partnerStatus.inactive
-    default:
-      return status
-  }
-}
-
-function getFilterCardClasses(
+function getCardClasses(
   active: boolean,
-  tone: "default" | "blue" | "amber" | "green" | "red"
+  tone: "default" | "amber" | "orange" | "sky" | "blue" | "red"
 ) {
   if (active) {
     switch (tone) {
-      case "blue":
-        return "border-blue-300 bg-blue-50 ring-2 ring-blue-200"
       case "amber":
         return "border-amber-300 bg-amber-50 ring-2 ring-amber-200"
-      case "green":
-        return "border-green-300 bg-green-50 ring-2 ring-green-200"
+      case "orange":
+        return "border-orange-300 bg-orange-50 ring-2 ring-orange-200"
+      case "sky":
+        return "border-sky-300 bg-sky-50 ring-2 ring-sky-200"
+      case "blue":
+        return "border-blue-300 bg-blue-50 ring-2 ring-blue-200"
       case "red":
         return "border-red-300 bg-red-50 ring-2 ring-red-200"
       default:
@@ -343,50 +188,230 @@ function getFilterCardClasses(
   return "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
 }
 
+function getDashboardTexts(language: "el" | "en") {
+  if (language === "en") {
+    return {
+      locale: "en-GB",
+      title: "Dashboard",
+      subtitle:
+        "Operational control view with open tasks, active alerts and date filters.",
+      newTask: "New task",
+      loadError: "Dashboard data could not be loaded.",
+      loadingTasks: "Failed to load tasks",
+
+      openTasks: "Open tasks",
+      openTasksHint: "Only active tasks that still require action",
+
+      tasksToday: "Tasks today",
+      tasksTodayHint: "Open tasks scheduled for today",
+
+      alertsNow: "Active alerts",
+      alertsNowHint: "Open tasks with active alert time",
+
+      pendingTasks: "New",
+      pendingTasksHint: "Open tasks waiting for assignment or action",
+
+      assignedTasks: "Assigned",
+      assignedTasksHint: "Tasks assigned and waiting for acceptance",
+
+      acceptedTasks: "Accepted",
+      acceptedTasksHint: "Tasks accepted and ready for execution",
+
+      inProgressTasks: "In progress",
+      inProgressTasksHint: "Tasks currently being executed",
+
+      recentOpenTasks: "Open tasks",
+      recentOpenTasksHint:
+        "Operational list filtered by status and date range.",
+
+      noTasks: "No open tasks found.",
+      noTasksHint: "Try another filter or create a new task.",
+
+      fromDate: "From",
+      toDate: "To",
+      clearDates: "Clear dates",
+
+      filterAllOpen: "All open",
+      filterToday: "Today",
+      filterPending: "New",
+      filterAssigned: "Assigned",
+      filterAccepted: "Accepted",
+      filterInProgress: "In progress",
+      filterAlerts: "Alerts",
+
+      withoutProperty: "Without property",
+      scheduledDate: "Date",
+      scheduledTime: "Time",
+      alertTime: "Alert",
+      noAlert: "No alert",
+      openTask: "Open task",
+      openTasksPage: "Open tasks page",
+      noDescription: "No description available.",
+
+      status: {
+        pending: "New",
+        assigned: "Assigned",
+        accepted: "Accepted",
+        in_progress: "In progress",
+      },
+
+      priority: {
+        low: "Low",
+        normal: "Normal",
+        medium: "Medium",
+        high: "High",
+        urgent: "Urgent",
+      },
+    }
+  }
+
+  return {
+    locale: "el-GR",
+    title: "Πίνακας Ελέγχου",
+    subtitle:
+      "Λειτουργική εικόνα ελέγχου με ανοιχτές εργασίες, ενεργά alert και φίλτρα ημερομηνιών.",
+    newTask: "Νέα εργασία",
+    loadError: "Δεν ήταν δυνατή η φόρτωση του Πίνακα Ελέγχου.",
+    loadingTasks: "Αποτυχία φόρτωσης εργασιών",
+
+    openTasks: "Ανοιχτές εργασίες",
+    openTasksHint: "Μόνο ενεργές εργασίες που απαιτούν ακόμη ενέργεια",
+
+    tasksToday: "Εργασίες σήμερα",
+    tasksTodayHint: "Ανοιχτές εργασίες προγραμματισμένες για σήμερα",
+
+    alertsNow: "Ενεργά alert",
+    alertsNowHint: "Ανοιχτές εργασίες με ενεργή ώρα alert",
+
+    pendingTasks: "Νέες",
+    pendingTasksHint: "Ανοιχτές εργασίες που περιμένουν ανάθεση ή ενέργεια",
+
+    assignedTasks: "Ανατεθειμένες",
+    assignedTasksHint: "Εργασίες που έχουν ανατεθεί και περιμένουν αποδοχή",
+
+    acceptedTasks: "Αποδεκτές",
+    acceptedTasksHint: "Εργασίες που έχουν αποδεχτεί και είναι έτοιμες για εκτέλεση",
+
+    inProgressTasks: "Σε εξέλιξη",
+    inProgressTasksHint: "Εργασίες που εκτελούνται τώρα",
+
+    recentOpenTasks: "Ανοιχτές εργασίες",
+    recentOpenTasksHint:
+      "Λειτουργική λίστα εργασιών με φίλτρα κατάστασης και εύρους ημερομηνιών.",
+
+    noTasks: "Δεν βρέθηκαν ανοιχτές εργασίες.",
+    noTasksHint: "Δοκίμασε άλλο φίλτρο ή δημιούργησε νέα εργασία.",
+
+    fromDate: "Από",
+    toDate: "Έως",
+    clearDates: "Καθαρισμός ημερομηνιών",
+
+    filterAllOpen: "Όλες οι ανοιχτές",
+    filterToday: "Σήμερα",
+    filterPending: "Νέες",
+    filterAssigned: "Ανατεθειμένες",
+    filterAccepted: "Αποδεκτές",
+    filterInProgress: "Σε εξέλιξη",
+    filterAlerts: "Alert",
+
+    withoutProperty: "Χωρίς ακίνητο",
+    scheduledDate: "Ημερομηνία",
+    scheduledTime: "Ώρα",
+    alertTime: "Alert",
+    noAlert: "Χωρίς alert",
+    openTask: "Άνοιγμα εργασίας",
+    openTasksPage: "Σελίδα εργασιών",
+    noDescription: "Δεν υπάρχει διαθέσιμη περιγραφή.",
+
+    status: {
+      pending: "Νέα",
+      assigned: "Ανατεθειμένη",
+      accepted: "Αποδεκτή",
+      in_progress: "Σε εξέλιξη",
+    },
+
+    priority: {
+      low: "Χαμηλή",
+      normal: "Κανονική",
+      medium: "Μεσαία",
+      high: "Υψηλή",
+      urgent: "Επείγουσα",
+    },
+  }
+}
+
+function getTaskStatusLabel(language: "el" | "en", status: string) {
+  const texts = getDashboardTexts(language)
+
+  switch (status.toLowerCase()) {
+    case "pending":
+      return texts.status.pending
+    case "assigned":
+      return texts.status.assigned
+    case "accepted":
+      return texts.status.accepted
+    case "in_progress":
+      return texts.status.in_progress
+    default:
+      return status
+  }
+}
+
+function getPriorityLabel(language: "el" | "en", priority?: string | null) {
+  const texts = getDashboardTexts(language)
+
+  switch (String(priority || "").toLowerCase()) {
+    case "low":
+      return texts.priority.low
+    case "normal":
+      return texts.priority.normal
+    case "medium":
+      return texts.priority.medium
+    case "high":
+      return texts.priority.high
+    case "urgent":
+      return texts.priority.urgent
+    default:
+      return priority || "—"
+  }
+}
+
 export default function DashboardPage() {
   const { language } = useAppLanguage()
   const texts = getDashboardTexts(language)
 
-  const [properties, setProperties] = useState<Property[]>([])
-  const [tasks, setTasks] = useState<Task[]>([])
-  const [partners, setPartners] = useState<Partner[]>([])
-
+  const σήμερα = useMemo(() => new Date(), [])
+  const [εργασίες, setΕργασίες] = useState<Εργασία[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
-  const [activeFilter, setActiveFilter] = useState<DashboardFilter>("all")
+  const [activeFilter, setActiveFilter] =
+    useState<ΦίλτροΠίνακαΕλέγχου>("all_open")
+
+  const [ημερομηνίαΑπό, setΗμερομηνίαΑπό] = useState(
+    toDateInputValue(σήμερα)
+  )
+  const [ημερομηνίαΈως, setΗμερομηνίαΈως] = useState("")
 
   async function loadDashboardData() {
     try {
       setLoading(true)
       setError("")
 
-      const [propertiesRes, tasksRes, partnersRes] = await Promise.all([
-        fetch("/api/properties", { cache: "no-store" }),
-        fetch("/api/tasks", { cache: "no-store" }),
-        fetch("/api/partners", { cache: "no-store" }),
-      ])
+      const params = new URLSearchParams()
+      params.set("openOnly", "true")
+      if (ημερομηνίαΑπό) params.set("dateFrom", ημερομηνίαΑπό)
+      if (ημερομηνίαΈως) params.set("dateTo", ημερομηνίαΈως)
 
-      if (!propertiesRes.ok) {
-        throw new Error(texts.loadingProperties)
-      }
+      const response = await fetch(`/api/tasks?${params.toString()}`, {
+        cache: "no-store",
+      })
 
-      if (!tasksRes.ok) {
+      if (!response.ok) {
         throw new Error(texts.loadingTasks)
       }
 
-      if (!partnersRes.ok) {
-        throw new Error(texts.loadingPartners)
-      }
-
-      const [propertiesData, tasksData, partnersData] = await Promise.all([
-        propertiesRes.json(),
-        tasksRes.json(),
-        partnersRes.json(),
-      ])
-
-      setProperties(Array.isArray(propertiesData) ? propertiesData : [])
-      setTasks(Array.isArray(tasksData) ? tasksData : [])
-      setPartners(Array.isArray(partnersData) ? partnersData : [])
+      const data = await response.json()
+      setΕργασίες(Array.isArray(data) ? data : [])
     } catch (err) {
       console.error("Dashboard load error:", err)
       setError(texts.loadError)
@@ -398,108 +423,100 @@ export default function DashboardPage() {
   useEffect(() => {
     loadDashboardData()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [ημερομηνίαΑπό, ημερομηνίαΈως])
 
-  const totalProperties = properties.length
-  const totalTasks = tasks.length
-
-  const activePartners = useMemo(() => {
-    return partners.filter(
-      (partner) => partner.status.toLowerCase() === "active"
-    ).length
-  }, [partners])
-
-  const pendingTasks = useMemo(() => {
-    return tasks.filter((task) => task.status.toLowerCase() === "pending").length
-  }, [tasks])
-
-  const inProgressTasks = useMemo(() => {
-    return tasks.filter(
-      (task) => task.status.toLowerCase() === "in_progress"
-    ).length
-  }, [tasks])
-
-  const completedTasks = useMemo(() => {
-    return tasks.filter(
-      (task) => task.status.toLowerCase() === "completed"
-    ).length
-  }, [tasks])
-
-  const cancelledTasks = useMemo(() => {
-    return tasks.filter(
-      (task) => task.status.toLowerCase() === "cancelled"
-    ).length
-  }, [tasks])
+  const openTasks = useMemo(() => {
+    return εργασίες.filter((εργασία) => είναιΑνοιχτήΕργασία(εργασία))
+  }, [εργασίες])
 
   const tasksToday = useMemo(() => {
-    return tasks.filter((task) => isToday(task.date)).length
-  }, [tasks])
+    return openTasks.filter((εργασία) => είναιΣήμερα(εργασία.scheduledDate))
+  }, [openTasks])
 
-  const urgentTasks = useMemo(() => {
-    return tasks.filter((task) => isOverdueOrTodayOpenTask(task))
-  }, [tasks])
+  const alertTasks = useMemo(() => {
+    return openTasks.filter((εργασία) => είναιΕνεργόAlert(εργασία))
+  }, [openTasks])
 
-  const completionRate = useMemo(() => {
-    if (tasks.length === 0) return 0
-    return Math.round((completedTasks / tasks.length) * 100)
-  }, [tasks, completedTasks])
+  const pendingTasks = useMemo(() => {
+    return openTasks.filter(
+      (εργασία) => String(εργασία.status).toLowerCase() === "pending"
+    )
+  }, [openTasks])
+
+  const assignedTasks = useMemo(() => {
+    return openTasks.filter(
+      (εργασία) => String(εργασία.status).toLowerCase() === "assigned"
+    )
+  }, [openTasks])
+
+  const acceptedTasks = useMemo(() => {
+    return openTasks.filter(
+      (εργασία) => String(εργασία.status).toLowerCase() === "accepted"
+    )
+  }, [openTasks])
+
+  const inProgressTasks = useMemo(() => {
+    return openTasks.filter(
+      (εργασία) => String(εργασία.status).toLowerCase() === "in_progress"
+    )
+  }, [openTasks])
 
   const filteredTasks = useMemo(() => {
+    let result = openTasks.filter((εργασία) =>
+      είναιΜέσαΣεΕύροςΗμερομηνίας(εργασία, ημερομηνίαΑπό, ημερομηνίαΈως)
+    )
+
     switch (activeFilter) {
       case "today":
-        return tasks.filter((task) => isToday(task.date))
+        result = result.filter((εργασία) => είναιΣήμερα(εργασία.scheduledDate))
+        break
       case "pending":
-        return tasks.filter((task) => task.status.toLowerCase() === "pending")
-      case "in_progress":
-        return tasks.filter(
-          (task) => task.status.toLowerCase() === "in_progress"
+        result = result.filter(
+          (εργασία) => String(εργασία.status).toLowerCase() === "pending"
         )
-      case "completed":
-        return tasks.filter((task) => task.status.toLowerCase() === "completed")
-      case "cancelled":
-        return tasks.filter((task) => task.status.toLowerCase() === "cancelled")
-      case "urgent":
-        return tasks.filter((task) => isOverdueOrTodayOpenTask(task))
-      case "all":
+        break
+      case "assigned":
+        result = result.filter(
+          (εργασία) => String(εργασία.status).toLowerCase() === "assigned"
+        )
+        break
+      case "accepted":
+        result = result.filter(
+          (εργασία) => String(εργασία.status).toLowerCase() === "accepted"
+        )
+        break
+      case "in_progress":
+        result = result.filter(
+          (εργασία) => String(εργασία.status).toLowerCase() === "in_progress"
+        )
+        break
+      case "alerts":
+        result = result.filter((εργασία) => είναιΕνεργόAlert(εργασία))
+        break
+      case "all_open":
       default:
-        return tasks
+        break
     }
-  }, [activeFilter, tasks])
 
-  const recentTasks = useMemo(() => {
-    if (activeFilter === "all") return tasks.slice(0, 5)
-    return filteredTasks.slice(0, 5)
-  }, [tasks, filteredTasks, activeFilter])
+    return [...result].sort((a, b) => {
+      const aDate = new Date(a.scheduledDate).getTime()
+      const bDate = new Date(b.scheduledDate).getTime()
 
-  const recentProperties = useMemo(() => {
-    return properties.slice(0, 5)
-  }, [properties])
+      if (aDate !== bDate) return aDate - bDate
 
-  const recentPartners = useMemo(() => {
-    return partners.slice(0, 5)
-  }, [partners])
+      const aAlert = a.alertAt ? new Date(a.alertAt).getTime() : Number.MAX_SAFE_INTEGER
+      const bAlert = b.alertAt ? new Date(b.alertAt).getTime() : Number.MAX_SAFE_INTEGER
 
-  const sortedUrgentTasks = useMemo(() => {
-    return [...urgentTasks]
-      .sort((a, b) => {
-        const aDate = normalizeDateOnly(a.date)
-        const bDate = normalizeDateOnly(b.date)
-
-        if (!aDate && !bDate) return 0
-        if (!aDate) return 1
-        if (!bDate) return -1
-
-        return aDate.getTime() - bDate.getTime()
-      })
-      .slice(0, 6)
-  }, [urgentTasks])
+      return aAlert - bAlert
+    })
+  }, [openTasks, activeFilter, ημερομηνίαΑπό, ημερομηνίαΈως])
 
   if (loading) {
     return (
       <div className="space-y-8">
         <section>
-          <div className="h-8 w-56 animate-pulse rounded bg-slate-200" />
-          <div className="mt-3 h-4 w-80 animate-pulse rounded bg-slate-200" />
+          <div className="h-8 w-64 animate-pulse rounded bg-slate-200" />
+          <div className="mt-3 h-4 w-96 animate-pulse rounded bg-slate-200" />
         </section>
 
         <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -510,56 +527,24 @@ export default function DashboardPage() {
             >
               <div className="h-4 w-28 animate-pulse rounded bg-slate-200" />
               <div className="mt-4 h-8 w-20 animate-pulse rounded bg-slate-200" />
-              <div className="mt-3 h-3 w-36 animate-pulse rounded bg-slate-200" />
-            </div>
-          ))}
-        </section>
-
-        <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          {[1, 2, 3].map((item) => (
-            <div
-              key={item}
-              className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
-            >
-              <div className="h-4 w-28 animate-pulse rounded bg-slate-200" />
-              <div className="mt-4 h-8 w-20 animate-pulse rounded bg-slate-200" />
-              <div className="mt-3 h-3 w-36 animate-pulse rounded bg-slate-200" />
+              <div className="mt-3 h-3 w-40 animate-pulse rounded bg-slate-200" />
             </div>
           ))}
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="h-6 w-56 animate-pulse rounded bg-slate-200" />
-          <div className="mt-4 space-y-4">
-            {[1, 2, 3].map((item) => (
+          <div className="h-6 w-64 animate-pulse rounded bg-slate-200" />
+          <div className="mt-6 space-y-4">
+            {[1, 2, 3, 4].map((item) => (
               <div
                 key={item}
                 className="rounded-2xl border border-slate-200 p-4"
               >
-                <div className="h-4 w-48 animate-pulse rounded bg-slate-200" />
-                <div className="mt-3 h-3 w-64 animate-pulse rounded bg-slate-200" />
+                <div className="h-4 w-56 animate-pulse rounded bg-slate-200" />
+                <div className="mt-3 h-3 w-80 animate-pulse rounded bg-slate-200" />
               </div>
             ))}
           </div>
-        </section>
-
-        <section className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-          {[1, 2, 3].map((item) => (
-            <div
-              key={item}
-              className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
-            >
-              <div className="h-5 w-40 animate-pulse rounded bg-slate-200" />
-              <div className="mt-5 space-y-4">
-                {[1, 2, 3].map((row) => (
-                  <div key={row} className="space-y-2">
-                    <div className="h-4 w-full animate-pulse rounded bg-slate-200" />
-                    <div className="h-3 w-2/3 animate-pulse rounded bg-slate-200" />
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
         </section>
       </div>
     )
@@ -577,15 +562,8 @@ export default function DashboardPage() {
 
         <div className="flex flex-col gap-3 sm:flex-row">
           <Link
-            href={texts.navigationTargetProperties}
-            className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-          >
-            {texts.newProperty}
-          </Link>
-
-          <Link
-            href={texts.navigationTargetTasks}
-            className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700"
+            href="/tasks/new"
+            className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800"
           >
             {texts.newTask}
           </Link>
@@ -601,23 +579,25 @@ export default function DashboardPage() {
       <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         <button
           type="button"
-          onClick={() => setActiveFilter("all")}
-          className={`rounded-2xl border p-5 text-left shadow-sm transition ${getFilterCardClasses(
-            activeFilter === "all",
+          onClick={() => setActiveFilter("all_open")}
+          className={`rounded-2xl border p-5 text-left shadow-sm transition ${getCardClasses(
+            activeFilter === "all_open",
             "default"
           )}`}
         >
           <p className="text-sm font-medium text-slate-500">
-            {texts.totalTasks}
+            {texts.openTasks}
           </p>
-          <p className="mt-3 text-3xl font-bold text-slate-900">{totalTasks}</p>
-          <p className="mt-2 text-xs text-slate-500">{texts.totalTasksHint}</p>
+          <p className="mt-3 text-3xl font-bold text-slate-900">
+            {openTasks.length}
+          </p>
+          <p className="mt-2 text-xs text-slate-500">{texts.openTasksHint}</p>
         </button>
 
         <button
           type="button"
           onClick={() => setActiveFilter("today")}
-          className={`rounded-2xl border p-5 text-left shadow-sm transition ${getFilterCardClasses(
+          className={`rounded-2xl border p-5 text-left shadow-sm transition ${getCardClasses(
             activeFilter === "today",
             "blue"
           )}`}
@@ -625,57 +605,68 @@ export default function DashboardPage() {
           <p className="text-sm font-medium text-slate-500">
             {texts.tasksToday}
           </p>
-          <p className="mt-3 text-3xl font-bold text-slate-900">{tasksToday}</p>
+          <p className="mt-3 text-3xl font-bold text-blue-600">
+            {tasksToday.length}
+          </p>
           <p className="mt-2 text-xs text-slate-500">{texts.tasksTodayHint}</p>
         </button>
 
         <button
           type="button"
-          onClick={() => setActiveFilter("urgent")}
-          className={`rounded-2xl border p-5 text-left shadow-sm transition ${getFilterCardClasses(
-            activeFilter === "urgent",
+          onClick={() => setActiveFilter("alerts")}
+          className={`rounded-2xl border p-5 text-left shadow-sm transition ${getCardClasses(
+            activeFilter === "alerts",
             "red"
           )}`}
         >
           <p className="text-sm font-medium text-slate-500">
-            {texts.filterUrgent}
+            {texts.alertsNow}
           </p>
           <p className="mt-3 text-3xl font-bold text-red-600">
-            {urgentTasks.length}
+            {alertTasks.length}
           </p>
-          <p className="mt-2 text-xs text-slate-500">{texts.urgentAlertsHint}</p>
+          <p className="mt-2 text-xs text-slate-500">{texts.alertsNowHint}</p>
         </button>
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm">
           <p className="text-sm font-medium text-slate-500">
-            {texts.activePartners}
+            {texts.fromDate} – {texts.toDate}
           </p>
-          <p className="mt-3 text-3xl font-bold text-slate-900">
-            {activePartners}
-          </p>
-          <p className="mt-2 text-xs text-slate-500">
-            {texts.activePartnersHint}
-          </p>
+
+          <div className="mt-4 grid grid-cols-1 gap-3">
+            <input
+              type="date"
+              value={ημερομηνίαΑπό}
+              onChange={(e) => setΗμερομηνίαΑπό(e.target.value)}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
+            />
+
+            <input
+              type="date"
+              value={ημερομηνίαΈως}
+              onChange={(e) => setΗμερομηνίαΈως(e.target.value)}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
+            />
+
+            <button
+              type="button"
+              onClick={() => {
+                setΗμερομηνίαΑπό(toDateInputValue(new Date()))
+                setΗμερομηνίαΈως("")
+              }}
+              className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              {texts.clearDates}
+            </button>
+          </div>
         </div>
       </section>
 
       <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm font-medium text-slate-500">
-            {texts.totalProperties}
-          </p>
-          <p className="mt-3 text-3xl font-bold text-slate-900">
-            {totalProperties}
-          </p>
-          <p className="mt-2 text-xs text-slate-500">
-            {texts.totalPropertiesHint}
-          </p>
-        </div>
-
         <button
           type="button"
           onClick={() => setActiveFilter("pending")}
-          className={`rounded-2xl border p-5 text-left shadow-sm transition ${getFilterCardClasses(
+          className={`rounded-2xl border p-5 text-left shadow-sm transition ${getCardClasses(
             activeFilter === "pending",
             "amber"
           )}`}
@@ -684,7 +675,7 @@ export default function DashboardPage() {
             {texts.pendingTasks}
           </p>
           <p className="mt-3 text-3xl font-bold text-amber-600">
-            {pendingTasks}
+            {pendingTasks.length}
           </p>
           <p className="mt-2 text-xs text-slate-500">
             {texts.pendingTasksHint}
@@ -693,195 +684,84 @@ export default function DashboardPage() {
 
         <button
           type="button"
-          onClick={() => setActiveFilter("in_progress")}
-          className={`rounded-2xl border p-5 text-left shadow-sm transition ${getFilterCardClasses(
-            activeFilter === "in_progress",
-            "blue"
+          onClick={() => setActiveFilter("assigned")}
+          className={`rounded-2xl border p-5 text-left shadow-sm transition ${getCardClasses(
+            activeFilter === "assigned",
+            "orange"
           )}`}
         >
           <p className="text-sm font-medium text-slate-500">
-            {texts.filterInProgress}
+            {texts.assignedTasks}
           </p>
-          <p className="mt-3 text-3xl font-bold text-blue-600">
-            {inProgressTasks}
+          <p className="mt-3 text-3xl font-bold text-orange-600">
+            {assignedTasks.length}
           </p>
           <p className="mt-2 text-xs text-slate-500">
-            {texts.filterResultsHint}
+            {texts.assignedTasksHint}
           </p>
         </button>
 
         <button
           type="button"
-          onClick={() => setActiveFilter("completed")}
-          className={`rounded-2xl border p-5 text-left shadow-sm transition ${getFilterCardClasses(
-            activeFilter === "completed",
-            "green"
+          onClick={() => setActiveFilter("accepted")}
+          className={`rounded-2xl border p-5 text-left shadow-sm transition ${getCardClasses(
+            activeFilter === "accepted",
+            "sky"
           )}`}
         >
           <p className="text-sm font-medium text-slate-500">
-            {texts.completedTasks}
+            {texts.acceptedTasks}
           </p>
-          <p className="mt-3 text-3xl font-bold text-green-600">
-            {completedTasks}
+          <p className="mt-3 text-3xl font-bold text-sky-600">
+            {acceptedTasks.length}
           </p>
           <p className="mt-2 text-xs text-slate-500">
-            {texts.completedTasksHint}
+            {texts.acceptedTasksHint}
           </p>
         </button>
-      </section>
 
-      <section className="grid grid-cols-1 gap-6 xl:grid-cols-[1.2fr_1fr]">
-        <div className="rounded-2xl border border-red-200 bg-white shadow-sm">
-          <div className="flex items-center justify-between border-b border-red-100 px-6 py-4">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-900">
-                {texts.urgentAlerts}
-              </h2>
-              <p className="mt-1 text-sm text-slate-500">
-                {texts.urgentAlertsHint}
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setActiveFilter("urgent")}
-              className="inline-flex items-center justify-center rounded-xl bg-red-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-red-700"
-            >
-              {texts.filterUrgent}
-            </button>
-          </div>
-
-          <div className="p-6">
-            {sortedUrgentTasks.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center">
-                <p className="text-sm font-medium text-slate-700">
-                  {texts.noUrgentAlerts}
-                </p>
-                <p className="mt-2 text-sm text-slate-500">
-                  {texts.noUrgentAlertsHint}
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {sortedUrgentTasks.map((task) => {
-                  const taskDate = normalizeDateOnly(task.date)
-                  const today = normalizeDateOnly(new Date())
-                  const isOverdue =
-                    !!taskDate && !!today && taskDate.getTime() < today.getTime()
-
-                  return (
-                    <div
-                      key={task.id}
-                      className="rounded-2xl border border-red-100 bg-red-50/40 p-4"
-                    >
-                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="truncate text-sm font-semibold text-slate-900">
-                              {task.title}
-                            </p>
-                            <span className="inline-flex rounded-full border border-red-200 bg-red-100 px-2.5 py-1 text-[11px] font-semibold text-red-700">
-                              {texts.urgentBadge}
-                            </span>
-                          </div>
-
-                          <p className="mt-1 truncate text-sm text-slate-600">
-                            {task.property?.name || texts.withoutProperty}
-                          </p>
-
-                          <p className="mt-2 text-xs text-slate-500">
-                            {formatDate(task.date, texts.locale)}
-                          </p>
-                        </div>
-
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span
-                            className={`inline-flex rounded-full px-3 py-1 text-xs font-medium ${getTaskStatusClasses(
-                              task.status
-                            )}`}
-                          >
-                            {getTaskStatusLabel(language, task.status)}
-                          </span>
-
-                          <span className="inline-flex rounded-full border border-red-200 bg-white px-3 py-1 text-xs font-medium text-red-700">
-                            {isOverdue ? texts.overdue : texts.dueToday}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-900">
-                {texts.completionRate}
-              </h2>
-              <p className="mt-1 text-sm text-slate-500">
-                {texts.completionRateHint}
-              </p>
-            </div>
-          </div>
-
-          <div className="p-6">
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
-              <p className="text-4xl font-bold text-slate-900">
-                {completionRate}%
-              </p>
-              <div className="mt-4 h-3 overflow-hidden rounded-full bg-slate-200">
-                <div
-                  className="h-full rounded-full bg-slate-900 transition-all"
-                  style={{ width: `${completionRate}%` }}
-                />
-              </div>
-
-              <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
-                <div className="rounded-xl border border-slate-200 bg-white p-3">
-                  <div className="text-slate-500">{texts.completedTasks}</div>
-                  <div className="mt-1 font-semibold text-slate-900">
-                    {completedTasks}
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-slate-200 bg-white p-3">
-                  <div className="text-slate-500">{texts.filterCancelled}</div>
-                  <div className="mt-1 font-semibold text-slate-900">
-                    {cancelledTasks}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+        <button
+          type="button"
+          onClick={() => setActiveFilter("in_progress")}
+          className={`rounded-2xl border p-5 text-left shadow-sm transition ${getCardClasses(
+            activeFilter === "in_progress",
+            "blue"
+          )}`}
+        >
+          <p className="text-sm font-medium text-slate-500">
+            {texts.inProgressTasks}
+          </p>
+          <p className="mt-3 text-3xl font-bold text-blue-600">
+            {inProgressTasks.length}
+          </p>
+          <p className="mt-2 text-xs text-slate-500">
+            {texts.inProgressTasksHint}
+          </p>
+        </button>
       </section>
 
       <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="flex flex-col gap-4 border-b border-slate-200 px-6 py-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h2 className="text-lg font-semibold text-slate-900">
-              {texts.filterResults}
+              {texts.recentOpenTasks}
             </h2>
             <p className="mt-1 text-sm text-slate-500">
-              {texts.filterResultsHint}
+              {texts.recentOpenTasksHint}
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={() => setActiveFilter("all")}
+              onClick={() => setActiveFilter("all_open")}
               className={`rounded-xl px-3 py-2 text-sm font-medium transition ${
-                activeFilter === "all"
+                activeFilter === "all_open"
                   ? "bg-slate-950 text-white"
                   : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
               }`}
             >
-              {texts.filterAll}
+              {texts.filterAllOpen}
             </button>
 
             <button
@@ -910,6 +790,30 @@ export default function DashboardPage() {
 
             <button
               type="button"
+              onClick={() => setActiveFilter("assigned")}
+              className={`rounded-xl px-3 py-2 text-sm font-medium transition ${
+                activeFilter === "assigned"
+                  ? "bg-orange-500 text-white"
+                  : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              {texts.filterAssigned}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveFilter("accepted")}
+              className={`rounded-xl px-3 py-2 text-sm font-medium transition ${
+                activeFilter === "accepted"
+                  ? "bg-sky-600 text-white"
+                  : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+              }`}
+            >
+              {texts.filterAccepted}
+            </button>
+
+            <button
+              type="button"
               onClick={() => setActiveFilter("in_progress")}
               className={`rounded-xl px-3 py-2 text-sm font-medium transition ${
                 activeFilter === "in_progress"
@@ -922,26 +826,14 @@ export default function DashboardPage() {
 
             <button
               type="button"
-              onClick={() => setActiveFilter("completed")}
+              onClick={() => setActiveFilter("alerts")}
               className={`rounded-xl px-3 py-2 text-sm font-medium transition ${
-                activeFilter === "completed"
-                  ? "bg-green-600 text-white"
-                  : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-              }`}
-            >
-              {texts.filterCompleted}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveFilter("urgent")}
-              className={`rounded-xl px-3 py-2 text-sm font-medium transition ${
-                activeFilter === "urgent"
+                activeFilter === "alerts"
                   ? "bg-red-600 text-white"
                   : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
               }`}
             >
-              {texts.filterUrgent}
+              {texts.filterAlerts}
             </button>
           </div>
         </div>
@@ -950,237 +842,122 @@ export default function DashboardPage() {
           {filteredTasks.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center">
               <p className="text-sm font-medium text-slate-700">
-                {texts.noFilteredTasks}
+                {texts.noTasks}
               </p>
               <p className="mt-2 text-sm text-slate-500">
-                {texts.noFilteredTasksHint}
+                {texts.noTasksHint}
               </p>
             </div>
           ) : (
             <div className="space-y-4">
-              {filteredTasks.slice(0, 8).map((task) => (
+              {filteredTasks.map((εργασία) => (
                 <div
-                  key={task.id}
+                  key={εργασία.id}
                   className="rounded-2xl border border-slate-200 p-4"
                 >
-                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-slate-900">
-                        {task.title}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="truncate text-sm font-semibold text-slate-900">
+                          {εργασία.title}
+                        </p>
+
+                        <span
+                          className={`inline-flex rounded-full px-3 py-1 text-xs font-medium ${getTaskStatusClasses(
+                            εργασία.status
+                          )}`}
+                        >
+                          {getTaskStatusLabel(language, εργασία.status)}
+                        </span>
+
+                        <span
+                          className={`inline-flex rounded-full px-3 py-1 text-xs font-medium ${getPriorityClasses(
+                            εργασία.priority
+                          )}`}
+                        >
+                          {getPriorityLabel(language, εργασία.priority)}
+                        </span>
+
+                        {είναιΕνεργόAlert(εργασία) ? (
+                          <span className="inline-flex rounded-full border border-red-200 bg-red-100 px-3 py-1 text-xs font-semibold text-red-700">
+                            {texts.filterAlerts}
+                          </span>
+                        ) : null}
+                      </div>
+
+                      <p className="mt-2 truncate text-sm text-slate-500">
+                        {εργασία.property?.name || texts.withoutProperty}
                       </p>
-                      <p className="mt-1 truncate text-sm text-slate-500">
-                        {task.property?.name || texts.withoutProperty}
-                      </p>
-                      <p className="mt-2 text-xs text-slate-500">
-                        {formatDate(task.date, texts.locale)}
+
+                      <p className="mt-2 text-sm text-slate-600">
+                        {εργασία.description || texts.noDescription}
                       </p>
                     </div>
 
-                    <span
-                      className={`inline-flex w-fit rounded-full px-3 py-1 text-xs font-medium ${getTaskStatusClasses(
-                        task.status
-                      )}`}
-                    >
-                      {getTaskStatusLabel(language, task.status)}
-                    </span>
+                    <div className="flex flex-wrap gap-2">
+                      <Link
+                        href={`/tasks/${εργασία.id}`}
+                        className="inline-flex items-center rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+                      >
+                        {texts.openTask}
+                      </Link>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid gap-4 md:grid-cols-3">
+                    <InfoBox
+                      label={texts.scheduledDate}
+                      value={formatDate(εργασία.scheduledDate, texts.locale)}
+                    />
+
+                    <InfoBox
+                      label={texts.scheduledTime}
+                      value={`${εργασία.scheduledStartTime || "—"}${
+                        εργασία.scheduledEndTime ? ` - ${εργασία.scheduledEndTime}` : ""
+                      }`}
+                    />
+
+                    <InfoBox
+                      label={texts.alertTime}
+                      value={
+                        εργασία.alertEnabled && εργασία.alertAt
+                          ? formatDateTime(εργασία.alertAt, texts.locale)
+                          : texts.noAlert
+                      }
+                    />
                   </div>
                 </div>
               ))}
 
               <div className="pt-2">
                 <Link
-                  href={texts.navigationTargetTasks}
+                  href="/tasks"
                   className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
                 >
-                  {texts.openAlertsLink}
+                  {texts.openTasksPage}
                 </Link>
               </div>
             </div>
           )}
         </div>
       </section>
+    </div>
+  )
+}
 
-      <section className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-900">
-                {texts.recentTasks}
-              </h2>
-              <p className="mt-1 text-sm text-slate-500">
-                {texts.recentTasksHint}
-              </p>
-            </div>
-
-            <Link
-              href={texts.navigationTargetTasks}
-              className="text-sm font-medium text-blue-600 hover:text-blue-700"
-            >
-              {texts.viewAll}
-            </Link>
-          </div>
-
-          <div className="p-6">
-            {recentTasks.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center">
-                <p className="text-sm font-medium text-slate-700">
-                  {texts.noTasks}
-                </p>
-                <p className="mt-2 text-sm text-slate-500">
-                  {texts.noTasksHint}
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {recentTasks.map((task) => (
-                  <div
-                    key={task.id}
-                    className="rounded-2xl border border-slate-200 p-4"
-                  >
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-slate-900">
-                          {task.title}
-                        </p>
-                        <p className="mt-1 truncate text-sm text-slate-500">
-                          {task.property?.name || texts.withoutProperty}
-                        </p>
-                        <p className="mt-2 text-xs text-slate-500">
-                          {formatDate(task.date, texts.locale)}
-                        </p>
-                      </div>
-
-                      <span
-                        className={`inline-flex w-fit rounded-full px-3 py-1 text-xs font-medium ${getTaskStatusClasses(
-                          task.status
-                        )}`}
-                      >
-                        {getTaskStatusLabel(language, task.status)}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-900">
-                {texts.recentProperties}
-              </h2>
-              <p className="mt-1 text-sm text-slate-500">
-                {texts.recentPropertiesHint}
-              </p>
-            </div>
-
-            <Link
-              href={texts.navigationTargetProperties}
-              className="text-sm font-medium text-blue-600 hover:text-blue-700"
-            >
-              {texts.viewAll}
-            </Link>
-          </div>
-
-          <div className="p-6">
-            {recentProperties.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center">
-                <p className="text-sm font-medium text-slate-700">
-                  {texts.noProperties}
-                </p>
-                <p className="mt-2 text-sm text-slate-500">
-                  {texts.noPropertiesHint}
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {recentProperties.map((property) => (
-                  <div
-                    key={property.id}
-                    className="rounded-2xl border border-slate-200 p-4"
-                  >
-                    <p className="truncate text-sm font-semibold text-slate-900">
-                      {property.name}
-                    </p>
-                    <p className="mt-1 truncate text-sm text-slate-500">
-                      {property.address}
-                    </p>
-                    <p className="mt-2 text-xs text-slate-500">
-                      {texts.createdAt}: {formatDate(property.createdAt, texts.locale)}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-900">
-                {texts.recentPartners}
-              </h2>
-              <p className="mt-1 text-sm text-slate-500">
-                {texts.recentPartnersHint}
-              </p>
-            </div>
-
-            <Link
-              href={texts.navigationTargetPartners}
-              className="text-sm font-medium text-blue-600 hover:text-blue-700"
-            >
-              {texts.viewAll}
-            </Link>
-          </div>
-
-          <div className="p-6">
-            {recentPartners.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center">
-                <p className="text-sm font-medium text-slate-700">
-                  {texts.noPartners}
-                </p>
-                <p className="mt-2 text-sm text-slate-500">
-                  {texts.noPartnersHint}
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {recentPartners.map((partner) => (
-                  <div
-                    key={partner.id}
-                    className="rounded-2xl border border-slate-200 p-4"
-                  >
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-slate-900">
-                          {partner.name}
-                        </p>
-                        <p className="mt-1 truncate text-sm text-slate-500">
-                          {partner.email}
-                        </p>
-                        <p className="mt-2 text-xs text-slate-500">
-                          {partner.specialty}
-                        </p>
-                      </div>
-
-                      <span
-                        className={`inline-flex w-fit rounded-full px-3 py-1 text-xs font-medium ${getPartnerStatusClasses(
-                          partner.status
-                        )}`}
-                      >
-                        {getPartnerStatusLabel(language, partner.status)}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      </section>
+function InfoBox({
+  label,
+  value,
+}: {
+  label: string
+  value: string
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+        {label}
+      </div>
+      <div className="mt-2 text-sm font-semibold text-slate-900">{value}</div>
     </div>
   )
 }

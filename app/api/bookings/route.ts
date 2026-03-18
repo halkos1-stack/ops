@@ -5,9 +5,21 @@ import { requireApiAppAccessWithDevBypass } from "@/lib/dev-api-access"
 
 function parseDateParam(value: string | null) {
   if (!value) return null
+
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return null
+
   return date
+}
+
+function buildDerivedNeedsMapping(input: {
+  propertyId?: string | null
+  property?: { id?: string | null } | null
+}) {
+  const hasPropertyId = !!input.propertyId
+  const hasPropertyObject = !!input.property?.id
+
+  return !(hasPropertyId || hasPropertyObject)
 }
 
 export async function GET(req: NextRequest) {
@@ -26,13 +38,11 @@ export async function GET(req: NextRequest) {
     const fromCheckOut = parseDateParam(url.searchParams.get("fromCheckOut"))
     const toCheckOut = parseDateParam(url.searchParams.get("toCheckOut"))
 
-    const where = buildTenantWhere(access.auth, {
+    const baseWhere = buildTenantWhere(access.auth, {
       ...(syncStatus ? { syncStatus: syncStatus as never } : {}),
       ...(status ? { status } : {}),
       ...(propertyId ? { propertyId } : {}),
       ...(sourcePlatform ? { sourcePlatform } : {}),
-      ...(needsMapping === "true" ? { needsMapping: true } : {}),
-      ...(needsMapping === "false" ? { needsMapping: false } : {}),
       ...(hasTasks === "true" ? { tasks: { some: {} } } : {}),
       ...(hasTasks === "false" ? { tasks: { none: {} } } : {}),
       ...((fromCheckOut || toCheckOut)
@@ -44,6 +54,21 @@ export async function GET(req: NextRequest) {
           }
         : {}),
     })
+
+    const where =
+      needsMapping === "true"
+        ? {
+            ...baseWhere,
+            propertyId: null,
+          }
+        : needsMapping === "false"
+          ? {
+              ...baseWhere,
+              NOT: {
+                propertyId: null,
+              },
+            }
+          : baseWhere
 
     const bookings = await prisma.booking.findMany({
       where,
@@ -93,13 +118,34 @@ export async function GET(req: NextRequest) {
           take: 10,
         },
       },
-      orderBy: [
-        { checkOutDate: "asc" },
-        { createdAt: "desc" },
-      ],
+      orderBy: [{ checkOutDate: "asc" }, { createdAt: "desc" }],
     })
 
-    return NextResponse.json(bookings)
+    const normalizedBookings = bookings.map((booking) => {
+      const derivedNeedsMapping = buildDerivedNeedsMapping({
+        propertyId: booking.propertyId,
+        property: booking.property,
+      })
+
+      return {
+        ...booking,
+        needsMapping: derivedNeedsMapping,
+        hasTasks: booking.tasks.length > 0,
+        mappedProperty: booking.property
+          ? {
+              id: booking.property.id,
+              code: booking.property.code,
+              name: booking.property.name,
+              address: booking.property.address,
+              city: booking.property.city,
+              region: booking.property.region,
+              status: booking.property.status,
+            }
+          : null,
+      }
+    })
+
+    return NextResponse.json(normalizedBookings)
   } catch (error) {
     console.error("Bookings GET error:", error)
 

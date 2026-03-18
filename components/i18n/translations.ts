@@ -49,7 +49,7 @@ export function getDashboardShellTexts(language: AppLanguage) {
     superAdminDescription:
       "Πρόσβαση στο κεντρικό OPS από περιοχή πλατφόρμας.",
     organizationDescription:
-      "Κεντρική προβολή λειτουργίας οργανισμού, ακινήτων, εργασιών και συνεργατών.",
+      "ΚεντΑρική προβολή λειτουργίας οργανισμού, ακινήτων, εργασιών και συνεργατών.",
     organizationLabel: "Οργανισμός",
     superAdminBannerPrefix: "Βρίσκεσαι στο κεντρικό OPS ως",
     superAdminBannerRole: "SUPER ADMIN",

@@ -575,6 +575,27 @@ export async function POST(req: NextRequest) {
       body.usesCustomizedCleaningChecklist
     )
 
+    const alertEnabled = Boolean(body.alertEnabled)
+    let alertAt: Date | null = null
+
+    if (alertEnabled) {
+      if (!body.alertAt || String(body.alertAt).trim() === "") {
+        return NextResponse.json(
+          { error: "Το alert είναι ενεργό αλλά δεν έχει οριστεί ώρα alert." },
+          { status: 400 }
+        )
+      }
+
+      alertAt = new Date(String(body.alertAt))
+
+      if (Number.isNaN(alertAt.getTime())) {
+        return NextResponse.json(
+          { error: "Μη έγκυρη ώρα alert." },
+          { status: 400 }
+        )
+      }
+    }
+
     const property = await prisma.property.findFirst({
       where: {
         id: propertyId,
@@ -649,6 +670,8 @@ export async function POST(req: NextRequest) {
         sendCleaningChecklist,
         sendSuppliesChecklist,
         usesCustomizedCleaningChecklist,
+        alertEnabled,
+        alertAt,
         notes: body.notes ? String(body.notes) : null,
       },
     })

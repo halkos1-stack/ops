@@ -17,6 +17,15 @@ function toNullableText(value: unknown) {
   return text === "" ? null : text
 }
 
+function parseOptionalDateTime(value: unknown) {
+  const text = String(value ?? "").trim()
+  if (!text) return null
+
+  const date = new Date(text)
+  if (Number.isNaN(date.getTime())) return null
+  return date
+}
+
 async function resolvePrimaryCleaningTemplate(params: {
   organizationId: string
   propertyId: string
@@ -307,8 +316,23 @@ export async function POST(req: NextRequest, context: RouteContext) {
       )
     }
 
-    let primaryCleaningTemplate: { id: string; title: string; templateType: string; isPrimary: boolean; isActive: boolean } | null =
-      null
+    const alertEnabled = Boolean(body.alertEnabled)
+    const alertAt = alertEnabled ? parseOptionalDateTime(body.alertAt) : null
+
+    if (alertEnabled && !alertAt) {
+      return NextResponse.json(
+        { error: "Το alert είναι ενεργό αλλά δεν έχει οριστεί έγκυρη ώρα alert." },
+        { status: 400 }
+      )
+    }
+
+    let primaryCleaningTemplate: {
+      id: string
+      title: string
+      templateType: string
+      isPrimary: boolean
+      isActive: boolean
+    } | null = null
 
     if (sendCleaningChecklist) {
       primaryCleaningTemplate = await resolvePrimaryCleaningTemplate({
@@ -384,6 +408,8 @@ export async function POST(req: NextRequest, context: RouteContext) {
           requiresApproval: Boolean(body.requiresApproval),
           sendCleaningChecklist,
           sendSuppliesChecklist,
+          alertEnabled,
+          alertAt,
           notes: toNullableText(body.notes),
           resultNotes: toNullableText(body.resultNotes),
         },
@@ -424,6 +450,8 @@ export async function POST(req: NextRequest, context: RouteContext) {
             sendCleaningChecklist,
             sendSuppliesChecklist,
             checklistTemplateId: primaryCleaningTemplate?.id || null,
+            alertEnabled,
+            alertAt,
           },
         },
       })

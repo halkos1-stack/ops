@@ -109,6 +109,8 @@ type PropertyTask = {
   completedAt?: string | null
   requiresPhotos?: boolean
   requiresApproval?: boolean
+  alertEnabled?: boolean
+  alertAt?: string | null
   sendCleaningChecklist?: boolean
   sendSuppliesChecklist?: boolean
   notes?: string | null
@@ -166,6 +168,7 @@ type TaskFilter =
   | "without_assignment"
   | "with_cleaning"
   | "with_supplies"
+  | "alerts"
 
 type CreateTaskFormState = {
   title: string
@@ -203,14 +206,13 @@ function getTexts(language: "el" | "en") {
       backToProperty: "Back to property",
       newTask: "New task",
       closeForm: "Close form",
-      completedHistory: "Completed task history",
+      taskHistory: "Task history",
       cancelTask: "Cancel task",
       cancelling: "Cancelling...",
-      cancelTaskConfirm:
-        "Are you sure you want to cancel this task?",
+      cancelTaskConfirm: "Are you sure you want to cancel this task?",
       cancelSuccess: "Task cancelled successfully.",
       cancelError: "Task cancellation failed.",
-
+      alertBadge: "Active alert",
       status: {
         active: "Active",
         inactive: "Inactive",
@@ -223,19 +225,18 @@ function getTexts(language: "el" | "en") {
         completed: "Completed",
         cancelled: "Cancelled",
       },
-
       metrics: {
         allOpen: "Open tasks",
         pending: "New",
         assigned: "Assigned",
         accepted: "Accepted",
         inProgress: "In progress",
-        completed: "Completed",
+        history: "Task history",
         withoutAssignment: "Without assignment",
         withCleaning: "With cleaning list",
         withSupplies: "With supplies list",
+        alerts: "Alerts",
       },
-
       create: {
         title: "New property task",
         subtitle: "Create a new task linked directly to this property.",
@@ -271,8 +272,22 @@ function getTexts(language: "el" | "en") {
           "The cleaning checklist uses the property's primary list. The supplies checklist uses the property's active supplies.",
         atLeastOneSection:
           "You must select at least one task section.",
+        placeholders: {
+          title: "e.g. Cleaning before arrival",
+          description: "Task details",
+          notes: "Internal notes",
+          resultNotes: "Optional field",
+        },
+        taskTypes: {
+          cleaning: "Cleaning",
+          inspection: "Inspection",
+          repair: "Repair",
+          damage: "Damage",
+          supplies: "Supplies",
+          photos: "Photo documentation",
+          custom: "Other task",
+        },
       },
-
       list: {
         title: "Open property tasks",
         subtitle: "Operational view of tasks that still need action.",
@@ -284,12 +299,12 @@ function getTexts(language: "el" | "en") {
         result: "Result",
         cleaningSection: "Cleaning checklist",
         suppliesSection: "Supplies checklist",
+        alertSection: "Alert",
         notEnabled: "Not sent",
         submitted: "Submitted",
         notSubmitted: "Not submitted",
         autoSupplies: "Automatic from active supplies",
       },
-
       fields: {
         date: "Date",
         time: "Time",
@@ -302,11 +317,9 @@ function getTexts(language: "el" | "en") {
         createdAt: "Created",
         assignment: "Assignment",
       },
-
       loading: "Loading property tasks...",
       errorTitle: "Property tasks loading error",
       backToProperties: "Back to properties",
-
       types: {
         apartment: "Apartment",
         villa: "Villa",
@@ -314,14 +327,21 @@ function getTexts(language: "el" | "en") {
         studio: "Studio",
         maisonette: "Maisonette",
       },
-
+      taskTypes: {
+        cleaning: "Cleaning",
+        inspection: "Inspection",
+        repair: "Repair",
+        damage: "Damage",
+        supplies: "Supplies",
+        photos: "Photo documentation",
+        custom: "Other task",
+      },
       sources: {
         manual: "Manual",
         platform: "Platform",
         booking: "Booking",
         system: "System",
       },
-
       priorities: {
         low: "Low",
         normal: "Normal",
@@ -329,13 +349,20 @@ function getTexts(language: "el" | "en") {
         high: "High",
         urgent: "Urgent",
       },
-
       requirements: {
         cleaning: "Cleaning list",
         supplies: "Supplies list",
         photos: "Photos",
         approval: "Approval",
         none: "No special requirements",
+      },
+      assignmentStatus: {
+        assigned: "Assigned",
+        accepted: "Accepted",
+        rejected: "Rejected",
+        pending: "Pending",
+        waiting_acceptance: "Waiting acceptance",
+        notAssigned: "Not assigned",
       },
     }
   }
@@ -350,39 +377,38 @@ function getTexts(language: "el" | "en") {
     backToProperty: "Επιστροφή στο ακίνητο",
     newTask: "Νέα εργασία",
     closeForm: "Κλείσιμο φόρμας",
-    completedHistory: "Ιστορικό ολοκληρωμένων εργασιών",
+    taskHistory: "Ιστορικό εργασιών",
     cancelTask: "Ακύρωση εργασίας",
     cancelling: "Ακύρωση...",
     cancelTaskConfirm:
       "Είσαι σίγουρος ότι θέλεις να ακυρώσεις αυτή την εργασία;",
     cancelSuccess: "Η εργασία ακυρώθηκε επιτυχώς.",
     cancelError: "Αποτυχία ακύρωσης εργασίας.",
-
+    alertBadge: "Ενεργό alert",
     status: {
       active: "Ενεργό",
       inactive: "Ανενεργό",
       maintenance: "Σε συντήρηση",
       archived: "Αρχειοθετημένο",
       pending: "Νέα",
-      assigned: "Ανατεθειμένες",
-      accepted: "Αποδεκτές",
+      assigned: "Ανατεθειμένη",
+      accepted: "Αποδεκτή",
       in_progress: "Σε εξέλιξη",
-      completed: "Ολοκληρωμένες",
-      cancelled: "Ακυρωμένες",
+      completed: "Ολοκληρωμένη",
+      cancelled: "Ακυρωμένη",
     },
-
     metrics: {
       allOpen: "Ανοιχτές εργασίες",
       pending: "Νέες",
       assigned: "Ανατεθειμένες",
       accepted: "Αποδεκτές",
       inProgress: "Σε εξέλιξη",
-      completed: "Ολοκληρωμένες",
+      history: "Ιστορικό εργασιών",
       withoutAssignment: "Χωρίς ανάθεση",
       withCleaning: "Με λίστα καθαριότητας",
       withSupplies: "Με λίστα αναλωσίμων",
+      alerts: "Alert",
     },
-
     create: {
       title: "Νέα εργασία ακινήτου",
       subtitle:
@@ -419,8 +445,22 @@ function getTexts(language: "el" | "en") {
         "Η λίστα καθαριότητας χρησιμοποιεί αυτόματα τη βασική λίστα του ακινήτου. Η λίστα αναλωσίμων χρησιμοποιεί τα ενεργά αναλώσιμα του ακινήτου.",
       atLeastOneSection:
         "Πρέπει να επιλέξεις τουλάχιστον μία ενότητα εργασίας.",
+      placeholders: {
+        title: "π.χ. Καθαρισμός πριν άφιξη",
+        description: "Λεπτομέρειες για την εργασία",
+        notes: "Εσωτερικές σημειώσεις",
+        resultNotes: "Προαιρετικό πεδίο",
+      },
+      taskTypes: {
+        cleaning: "Καθαρισμός",
+        inspection: "Επιθεώρηση",
+        repair: "Βλάβη / Επισκευή",
+        damage: "Ζημιά",
+        supplies: "Αναλώσιμα",
+        photos: "Φωτογραφική τεκμηρίωση",
+        custom: "Άλλη εργασία",
+      },
     },
-
     list: {
       title: "Ανοιχτές εργασίες ακινήτου",
       subtitle:
@@ -433,12 +473,12 @@ function getTexts(language: "el" | "en") {
       result: "Αποτέλεσμα",
       cleaningSection: "Λίστα καθαριότητας",
       suppliesSection: "Λίστα αναλωσίμων",
+      alertSection: "Alert",
       notEnabled: "Δεν στάλθηκε",
       submitted: "Υποβλήθηκε",
       notSubmitted: "Δεν υποβλήθηκε",
       autoSupplies: "Αυτόματα από τα ενεργά αναλώσιμα",
     },
-
     fields: {
       date: "Ημερομηνία",
       time: "Ώρα",
@@ -451,11 +491,9 @@ function getTexts(language: "el" | "en") {
       createdAt: "Δημιουργία",
       assignment: "Ανάθεση",
     },
-
     loading: "Φόρτωση εργασιών ακινήτου...",
     errorTitle: "Σφάλμα φόρτωσης εργασιών ακινήτου",
     backToProperties: "Επιστροφή στα ακίνητα",
-
     types: {
       apartment: "Διαμέρισμα",
       villa: "Βίλα",
@@ -463,14 +501,21 @@ function getTexts(language: "el" | "en") {
       studio: "Στούντιο",
       maisonette: "Μεζονέτα",
     },
-
+    taskTypes: {
+      cleaning: "Καθαρισμός",
+      inspection: "Επιθεώρηση",
+      repair: "Βλάβη / Επισκευή",
+      damage: "Ζημιά",
+      supplies: "Αναλώσιμα",
+      photos: "Φωτογραφική τεκμηρίωση",
+      custom: "Άλλη εργασία",
+    },
     sources: {
       manual: "Χειροκίνητη",
       platform: "Από πλατφόρμα",
       booking: "Από κράτηση",
       system: "Συστήματος",
     },
-
     priorities: {
       low: "Χαμηλή",
       normal: "Κανονική",
@@ -478,7 +523,6 @@ function getTexts(language: "el" | "en") {
       high: "Υψηλή",
       urgent: "Επείγουσα",
     },
-
     requirements: {
       cleaning: "Λίστα καθαριότητας",
       supplies: "Λίστα αναλωσίμων",
@@ -486,12 +530,19 @@ function getTexts(language: "el" | "en") {
       approval: "Έγκριση",
       none: "Καμία ειδική απαίτηση",
     },
+    assignmentStatus: {
+      assigned: "Ανατέθηκε",
+      accepted: "Αποδεκτή",
+      rejected: "Απορρίφθηκε",
+      pending: "Σε αναμονή",
+      waiting_acceptance: "Αναμονή αποδοχής",
+      notAssigned: "Δεν έχει ανατεθεί",
+    },
   }
 }
 
 function formatDate(value?: string | null, locale = "el-GR") {
   if (!value) return "—"
-
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return "—"
 
@@ -504,7 +555,6 @@ function formatDate(value?: string | null, locale = "el-GR") {
 
 function formatDateTime(value?: string | null, locale = "el-GR") {
   if (!value) return "—"
-
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return "—"
 
@@ -537,6 +587,22 @@ function taskStatusLabel(
   return texts?.status[key] || status || "—"
 }
 
+function assignmentStatusLabel(
+  status?: string | null,
+  texts?: ReturnType<typeof getTexts>
+) {
+  const key = (status || "").toLowerCase() as keyof ReturnType<
+    typeof getTexts
+  >["assignmentStatus"]
+
+  return (
+    texts?.assignmentStatus[key] ||
+    status ||
+    texts?.assignmentStatus.notAssigned ||
+    "—"
+  )
+}
+
 function checklistStatusLabel(
   status?: string | null,
   texts?: ReturnType<typeof getTexts>
@@ -558,12 +624,15 @@ function checklistStatusLabel(
   return status || "—"
 }
 
-function typeLabel(value?: string | null) {
-  if (!value) return "—"
+function taskTypeLabel(
+  value?: string | null,
+  texts?: ReturnType<typeof getTexts>
+) {
+  const key = (value || "").toLowerCase() as keyof ReturnType<
+    typeof getTexts
+  >["taskTypes"]
 
-  return value
-    .replaceAll("_", " ")
-    .replace(/\b\w/g, (char) => char.toUpperCase())
+  return texts?.taskTypes[key] || value || "—"
 }
 
 function propertyTypeLabel(
@@ -696,6 +765,22 @@ function isOpenTask(task: PropertyTask) {
   return ["pending", "assigned", "accepted", "in_progress"].includes(
     String(task.status || "").toLowerCase()
   )
+}
+
+function isTaskAlertActive(task: PropertyTask) {
+  const status = String(task.status || "").toLowerCase()
+
+  if (!["pending", "assigned", "accepted", "in_progress"].includes(status)) {
+    return false
+  }
+
+  if (!task.alertEnabled) return false
+  if (!task.alertAt) return false
+
+  const alertDate = new Date(task.alertAt)
+  if (Number.isNaN(alertDate.getTime())) return false
+
+  return alertDate.getTime() <= Date.now()
 }
 
 function canCancelTask(task: PropertyTask) {
@@ -953,18 +1038,24 @@ export default function PropertyTasksPage({ params }: PageProps) {
     return tasks.filter(isOpenTask)
   }, [tasks])
 
+  const historyCount = useMemo(() => {
+    return tasks.filter((task) =>
+      ["completed", "cancelled"].includes(String(task.status || "").toLowerCase())
+    ).length
+  }, [tasks])
+
   const metrics = useMemo(() => {
     const allOpen = openTasks.length
     const pending = openTasks.filter((task) => task.status === "pending").length
     const assigned = openTasks.filter((task) => task.status === "assigned").length
     const accepted = openTasks.filter((task) => task.status === "accepted").length
     const inProgress = openTasks.filter((task) => task.status === "in_progress").length
-    const completed = tasks.filter((task) => task.status === "completed").length
     const withoutAssignment = openTasks.filter(
       (task) => !getLatestAssignment(task)?.partner?.id
     ).length
     const withCleaning = openTasks.filter((task) => Boolean(task.sendCleaningChecklist)).length
     const withSupplies = openTasks.filter((task) => Boolean(task.sendSuppliesChecklist)).length
+    const alerts = openTasks.filter((task) => isTaskAlertActive(task)).length
 
     return {
       allOpen,
@@ -972,12 +1063,12 @@ export default function PropertyTasksPage({ params }: PageProps) {
       assigned,
       accepted,
       inProgress,
-      completed,
       withoutAssignment,
       withCleaning,
       withSupplies,
+      alerts,
     }
-  }, [openTasks, tasks])
+  }, [openTasks])
 
   const filteredTasks = useMemo(() => {
     let result = [...openTasks]
@@ -1010,7 +1101,15 @@ export default function PropertyTasksPage({ params }: PageProps) {
       result = result.filter((task) => Boolean(task.sendSuppliesChecklist))
     }
 
+    if (activeFilter === "alerts") {
+      result = result.filter((task) => isTaskAlertActive(task))
+    }
+
     return result.sort((a, b) => {
+      const aAlert = isTaskAlertActive(a) ? 1 : 0
+      const bAlert = isTaskAlertActive(b) ? 1 : 0
+      if (aAlert !== bAlert) return bAlert - aAlert
+
       const aDate = new Date(a.scheduledDate).getTime()
       const bDate = new Date(b.scheduledDate).getTime()
       return aDate - bDate
@@ -1249,7 +1348,7 @@ export default function PropertyTasksPage({ params }: PageProps) {
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-9">
         <button
           type="button"
           onClick={() => setActiveFilter("all_open")}
@@ -1315,13 +1414,26 @@ export default function PropertyTasksPage({ params }: PageProps) {
           <div className="mt-2 text-3xl font-bold text-blue-700">{metrics.inProgress}</div>
         </button>
 
+        <button
+          type="button"
+          onClick={() => setActiveFilter("alerts")}
+          className={`rounded-2xl border p-5 shadow-sm text-left transition ${
+            activeFilter === "alerts"
+              ? "border-red-300 bg-red-50"
+              : "border-slate-200 bg-white hover:bg-slate-50"
+          }`}
+        >
+          <div className="text-sm text-slate-500">{texts.metrics.alerts}</div>
+          <div className="mt-2 text-3xl font-bold text-red-700">{metrics.alerts}</div>
+        </button>
+
         <Link
           href={`/properties/${property.id}/tasks/history`}
           className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm text-left transition hover:bg-slate-50"
         >
-          <div className="text-sm text-slate-500">{texts.metrics.completed}</div>
-          <div className="mt-2 text-3xl font-bold text-emerald-700">{metrics.completed}</div>
-          <div className="mt-2 text-xs text-slate-500">{texts.completedHistory}</div>
+          <div className="text-sm text-slate-500">{texts.metrics.history}</div>
+          <div className="mt-2 text-3xl font-bold text-emerald-700">{historyCount}</div>
+          <div className="mt-2 text-xs text-slate-500">{texts.taskHistory}</div>
         </Link>
 
         <button
@@ -1367,7 +1479,7 @@ export default function PropertyTasksPage({ params }: PageProps) {
       </div>
 
       {showCreateForm ? (
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="mb-5">
             <h2 className="text-lg font-semibold text-slate-900">{texts.create.title}</h2>
             <p className="mt-1 text-sm text-slate-500">{texts.create.subtitle}</p>
@@ -1386,7 +1498,7 @@ export default function PropertyTasksPage({ params }: PageProps) {
                     setForm((prev) => ({ ...prev, title: e.target.value }))
                   }
                   className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
-                  placeholder="π.χ. Καθαρισμός πριν άφιξη"
+                  placeholder={texts.create.placeholders.title}
                   required
                 />
               </div>
@@ -1402,13 +1514,13 @@ export default function PropertyTasksPage({ params }: PageProps) {
                   }
                   className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
                 >
-                  <option value="cleaning">Καθαρισμός</option>
-                  <option value="inspection">Επιθεώρηση</option>
-                  <option value="repair">Βλάβη / Επισκευή</option>
-                  <option value="damage">Ζημιά</option>
-                  <option value="supplies">Αναλώσιμα</option>
-                  <option value="photos">Φωτογραφική τεκμηρίωση</option>
-                  <option value="custom">Άλλη εργασία</option>
+                  <option value="cleaning">{texts.create.taskTypes.cleaning}</option>
+                  <option value="inspection">{texts.create.taskTypes.inspection}</option>
+                  <option value="repair">{texts.create.taskTypes.repair}</option>
+                  <option value="damage">{texts.create.taskTypes.damage}</option>
+                  <option value="supplies">{texts.create.taskTypes.supplies}</option>
+                  <option value="photos">{texts.create.taskTypes.photos}</option>
+                  <option value="custom">{texts.create.taskTypes.custom}</option>
                 </select>
               </div>
 
@@ -1567,7 +1679,7 @@ export default function PropertyTasksPage({ params }: PageProps) {
                   }
                   rows={3}
                   className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
-                  placeholder="Λεπτομέρειες για την εργασία"
+                  placeholder={texts.create.placeholders.description}
                 />
               </div>
             </div>
@@ -1687,7 +1799,7 @@ export default function PropertyTasksPage({ params }: PageProps) {
                   }
                   rows={3}
                   className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
-                  placeholder="Εσωτερικές σημειώσεις"
+                  placeholder={texts.create.placeholders.notes}
                 />
               </div>
 
@@ -1702,7 +1814,7 @@ export default function PropertyTasksPage({ params }: PageProps) {
                   }
                   rows={3}
                   className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
-                  placeholder="Προαιρετικό πεδίο"
+                  placeholder={texts.create.placeholders.resultNotes}
                 />
               </div>
             </div>
@@ -1748,7 +1860,7 @@ export default function PropertyTasksPage({ params }: PageProps) {
         </div>
       ) : null}
 
-      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      <div className="rounded-3xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         <div className="border-b border-slate-200 px-5 py-4">
           <h2 className="text-lg font-semibold text-slate-900">{texts.list.title}</h2>
           <p className="mt-1 text-sm text-slate-500">{texts.list.subtitle}</p>
@@ -1757,13 +1869,14 @@ export default function PropertyTasksPage({ params }: PageProps) {
         {filteredTasks.length === 0 ? (
           <div className="p-5 text-sm text-slate-500">{texts.list.noTasks}</div>
         ) : (
-          <div className="divide-y divide-slate-100">
+          <div className="space-y-5 p-5">
             {filteredTasks.map((task) => {
               const latestAssignment = getLatestAssignment(task)
               const taskGuide = getTaskActionGuide(task, texts)
 
               const cleaningEnabled = Boolean(task.sendCleaningChecklist)
               const suppliesEnabled = Boolean(task.sendSuppliesChecklist)
+              const taskAlertActive = isTaskAlertActive(task)
 
               const cleaningRun = getCleaningRun(task)
               const suppliesRun = getSuppliesRun(task)
@@ -1775,8 +1888,15 @@ export default function PropertyTasksPage({ params }: PageProps) {
               const isCancelling = cancellingTaskId === task.id
 
               return (
-                <div key={task.id} className="p-5">
-                  <div className="flex flex-col gap-4">
+                <div
+                  key={task.id}
+                  className={`rounded-3xl border bg-white p-5 shadow-sm ${
+                    taskAlertActive
+                      ? "border-red-200 ring-1 ring-red-100"
+                      : "border-slate-200"
+                  }`}
+                >
+                  <div className="flex flex-col gap-5">
                     <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
@@ -1799,16 +1919,24 @@ export default function PropertyTasksPage({ params }: PageProps) {
                           </span>
 
                           <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200">
-                            {typeLabel(task.taskType)}
+                            {taskTypeLabel(task.taskType, texts)}
                           </span>
 
                           <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200">
                             {sourceLabel(task.source, texts)}
                           </span>
+
+                          {taskAlertActive ? (
+                            <span className="inline-flex rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 ring-1 ring-red-200">
+                              {texts.alertBadge}
+                            </span>
+                          ) : null}
                         </div>
 
                         {task.description ? (
-                          <div className="mt-2 text-sm text-slate-700">{task.description}</div>
+                          <div className="mt-3 text-sm leading-6 text-slate-700">
+                            {task.description}
+                          </div>
                         ) : null}
                       </div>
 
@@ -1899,7 +2027,7 @@ export default function PropertyTasksPage({ params }: PageProps) {
                       />
                     </div>
 
-                    <div className="grid gap-4 md:grid-cols-2">
+                    <div className="grid gap-4 md:grid-cols-3">
                       <div className="rounded-2xl border border-slate-200 bg-white p-4">
                         <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                           {texts.list.cleaningSection}
@@ -1933,6 +2061,20 @@ export default function PropertyTasksPage({ params }: PageProps) {
                             : ""}
                         </div>
                       </div>
+
+                      <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          {texts.list.alertSection}
+                        </div>
+                        <div className="mt-2 text-sm font-semibold text-slate-900">
+                          {taskAlertActive
+                            ? formatDateTime(task.alertAt, texts.locale)
+                            : "—"}
+                        </div>
+                        <div className="mt-2 text-sm text-slate-600">
+                          {taskAlertActive ? texts.alertBadge : " "}
+                        </div>
+                      </div>
                     </div>
 
                     <div className="grid gap-4 md:grid-cols-2">
@@ -1950,19 +2092,19 @@ export default function PropertyTasksPage({ params }: PageProps) {
                           {texts.fields.assignment}
                         </div>
                         <div className="mt-2 text-sm text-slate-900">
-                          {latestAssignment?.status || texts.list.notAssigned}
+                          {assignmentStatusLabel(latestAssignment?.status, texts)}
                         </div>
                       </div>
                     </div>
 
                     {task.notes ? (
-                      <div className="text-sm text-slate-600">
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
                         {texts.list.notes}: {task.notes}
                       </div>
                     ) : null}
 
                     {task.resultNotes ? (
-                      <div className="text-sm text-slate-600">
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
                         {texts.list.result}: {task.resultNotes}
                       </div>
                     ) : null}
