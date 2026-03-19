@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
-import { Prisma } from "@prisma/client"
+import { Prisma, BookingSyncStatus } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
-import { buildTenantWhere } from "@/lib/route-access"
 import { requireApiAppAccessWithDevBypass } from "@/lib/dev-api-access"
 import { createBookingSyncEvent } from "@/lib/bookings/booking-logging"
 import { resolveBookingPropertyMatch } from "@/lib/bookings/booking-matching"
@@ -34,10 +33,38 @@ function toDateValue(value: unknown, fieldName: string) {
   return date
 }
 
+function toNullableDateValue(value: unknown, fieldName: string) {
+  if (value === undefined || value === null || value === "") return null
+  return toDateValue(value, fieldName)
+}
+
 function toNumberValue(value: unknown, fallback: number) {
   if (value === undefined || value === null || value === "") return fallback
   const num = Number(value)
   return Number.isFinite(num) ? num : fallback
+}
+
+function buildBookingWhere(
+  auth: {
+    systemRole?: "SUPER_ADMIN" | "USER"
+    organizationId?: string | null
+  },
+  bookingId: string
+): Prisma.BookingWhereInput {
+  if (auth.systemRole === "SUPER_ADMIN") {
+    return { id: bookingId }
+  }
+
+  if (!auth.organizationId) {
+    return {
+      id: "__no_results__",
+    }
+  }
+
+  return {
+    id: bookingId,
+    organizationId: auth.organizationId,
+  }
 }
 
 export async function GET(req: NextRequest, context: RouteContext) {
@@ -48,7 +75,7 @@ export async function GET(req: NextRequest, context: RouteContext) {
     const { id } = await context.params
 
     const booking = await prisma.booking.findFirst({
-      where: buildTenantWhere(access.auth, { id }),
+      where: buildBookingWhere(access.auth, id),
       include: {
         property: {
           select: {
@@ -66,6 +93,14 @@ export async function GET(req: NextRequest, context: RouteContext) {
         },
         tasks: {
           include: {
+            property: {
+              select: {
+                id: true,
+                code: true,
+                name: true,
+                address: true,
+              },
+            },
             assignments: {
               select: {
                 id: true,
@@ -129,7 +164,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     const body = (await req.json()) as Record<string, unknown>
 
     const current = await prisma.booking.findFirst({
-      where: buildTenantWhere(access.auth, { id }),
+      where: buildBookingWhere(access.auth, id),
     })
 
     if (!current) {
@@ -166,12 +201,21 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       externalListingId,
     })
 
-    const syncStatus =
+    const syncStatus: BookingSyncStatus =
       status === "cancelled"
-        ? "CANCELLED"
+        ? BookingSyncStatus.CANCELLED
         : match.matched
-          ? "READY_FOR_ACTION"
-          : "PENDING_MATCH"
+          ? BookingSyncStatus.READY_FOR_ACTION
+          : BookingSyncStatus.PENDING_MATCH
+
+    const rawPayloadValue: Prisma.InputJsonValue | typeof Prisma.JsonNull | undefined =
+  hasOwn(body, "rawPayload")
+    ? body.rawPayload === null
+      ? Prisma.JsonNull
+      : body.rawPayload === undefined
+        ? undefined
+        : (body.rawPayload as Prisma.InputJsonValue)
+    : undefined
 
     const updated = await prisma.booking.update({
       where: {
@@ -219,15 +263,9 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
         syncStatus,
         needsMapping: !match.matched,
         sourceUpdatedAt: hasOwn(body, "sourceUpdatedAt")
-          ? body.sourceUpdatedAt
-            ? toDateValue(body.sourceUpdatedAt, "sourceUpdatedAt")
-            : null
+          ? toNullableDateValue(body.sourceUpdatedAt, "sourceUpdatedAt")
           : current.sourceUpdatedAt,
-        rawPayload: hasOwn(body, "rawPayload")
-          ? body.rawPayload === undefined
-            ? Prisma.JsonNull
-            : (body.rawPayload as Prisma.InputJsonValue)
-          : current.rawPayload,
+        rawPayload: rawPayloadValue,
         lastProcessedAt: new Date(),
         lastError: null,
         notes: hasOwn(body, "notes")
@@ -279,7 +317,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
     }
 
     const booking = await prisma.booking.findFirst({
-      where: buildTenantWhere(access.auth, { id }),
+      where: buildBookingWhere(access.auth, id),
       select: { id: true },
     })
 

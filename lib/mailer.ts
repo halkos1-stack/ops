@@ -38,6 +38,7 @@ export async function sendMailSafe(args: SendMailArgs) {
       console.log("SUBJECT:", args.subject)
       console.log("TEXT:", args.text || "")
       console.log("HTML:", args.html)
+
       return {
         sent: false,
         reason: "SMTP_NOT_CONFIGURED",

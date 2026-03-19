@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
 import { useAppLanguage } from "@/components/i18n/LanguageProvider"
-import { getBookingsModuleTexts } from "../../../translations"
+import { getBookingsModuleTexts } from "@/lib/i18n/translations"
 
 type BookingTask = {
   id: string

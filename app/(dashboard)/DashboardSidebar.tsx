@@ -25,6 +25,7 @@ export default function DashboardSidebar() {
     language === "en"
       ? [
           { label: "Dashboard", href: "/dashboard" },
+          { label: "AI assistant", href: "/ai-assistant" },
           { label: "Properties", href: "/properties" },
           { label: "Bookings", href: "/bookings" },
           { label: "Tasks", href: "/tasks" },
@@ -37,6 +38,7 @@ export default function DashboardSidebar() {
         ]
       : [
           { label: "Πίνακας ελέγχου", href: "/dashboard" },
+          { label: "AI βοηθός", href: "/ai-assistant" },
           { label: "Ακίνητα", href: "/properties" },
           { label: "Κρατήσεις", href: "/bookings" },
           { label: "Εργασίες", href: "/tasks" },
