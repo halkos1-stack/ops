@@ -58,7 +58,12 @@ function formatDate(
 ) {
   const normalized = normalizeDateOnly(dateValue)
   if (!normalized) return "—"
-  return normalized.toLocaleDateString(locale)
+
+  return new Intl.DateTimeFormat(locale, {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(normalized)
 }
 
 function formatDateTime(
@@ -80,7 +85,9 @@ function formatDateTime(
 }
 
 function toDateInputValue(dateValue: Date) {
-  const local = new Date(dateValue.getTime() - dateValue.getTimezoneOffset() * 60000)
+  const local = new Date(
+    dateValue.getTime() - dateValue.getTimezoneOffset() * 60000
+  )
   return local.toISOString().slice(0, 10)
 }
 
@@ -290,7 +297,8 @@ function getDashboardTexts(language: "el" | "en") {
     assignedTasksHint: "Εργασίες που έχουν ανατεθεί και περιμένουν αποδοχή",
 
     acceptedTasks: "Αποδεκτές",
-    acceptedTasksHint: "Εργασίες που έχουν αποδεχτεί και είναι έτοιμες για εκτέλεση",
+    acceptedTasksHint:
+      "Εργασίες που έχουν αποδεχτεί και είναι έτοιμες για εκτέλεση",
 
     inProgressTasks: "Σε εξέλιξη",
     inProgressTasksHint: "Εργασίες που εκτελούνται τώρα",
@@ -376,6 +384,43 @@ function getPriorityLabel(language: "el" | "en", priority?: string | null) {
   }
 }
 
+function normalizeTaskDescription(
+  description: string | null | undefined,
+  language: "el" | "en"
+) {
+  if (!description || !description.trim()) {
+    return null
+  }
+
+  let text = description.trim()
+
+  if (language === "en") {
+    text = text
+      .replace(
+        /Εργασία που δημιουργήθηκε χειροκίνητα από κράτηση\./gi,
+        "Task created manually from booking."
+      )
+      .replace(/Πηγή:/gi, "Source:")
+      .replace(/Κωδικός κράτησης:/gi, "Booking code:")
+      .replace(/Επισκέπτης:/gi, "Guest:")
+      .replace(/Άφιξη:/gi, "Check-in:")
+      .replace(/Αναχώρηση:/gi, "Check-out:")
+  } else {
+    text = text
+      .replace(
+        /Task created manually from booking\./gi,
+        "Εργασία που δημιουργήθηκε χειροκίνητα από κράτηση."
+      )
+      .replace(/\bSource:/gi, "Πηγή:")
+      .replace(/\bBooking code:/gi, "Κωδικός κράτησης:")
+      .replace(/\bGuest:/gi, "Επισκέπτης:")
+      .replace(/\bCheck-in:/gi, "Άφιξη:")
+      .replace(/\bCheck-out:/gi, "Αναχώρηση:")
+  }
+
+  return text
+}
+
 export default function DashboardPage() {
   const { language } = useAppLanguage()
   const texts = getDashboardTexts(language)
@@ -423,7 +468,7 @@ export default function DashboardPage() {
   useEffect(() => {
     loadDashboardData()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ημερομηνίαΑπό, ημερομηνίαΈως])
+  }, [ημερομηνίαΑπό, ημερομηνίαΈως, language])
 
   const openTasks = useMemo(() => {
     return εργασίες.filter((εργασία) => είναιΑνοιχτήΕργασία(εργασία))
@@ -504,8 +549,12 @@ export default function DashboardPage() {
 
       if (aDate !== bDate) return aDate - bDate
 
-      const aAlert = a.alertAt ? new Date(a.alertAt).getTime() : Number.MAX_SAFE_INTEGER
-      const bAlert = b.alertAt ? new Date(b.alertAt).getTime() : Number.MAX_SAFE_INTEGER
+      const aAlert = a.alertAt
+        ? new Date(a.alertAt).getTime()
+        : Number.MAX_SAFE_INTEGER
+      const bAlert = b.alertAt
+        ? new Date(b.alertAt).getTime()
+        : Number.MAX_SAFE_INTEGER
 
       return aAlert - bAlert
     })
@@ -850,84 +899,93 @@ export default function DashboardPage() {
             </div>
           ) : (
             <div className="space-y-4">
-              {filteredTasks.map((εργασία) => (
-                <div
-                  key={εργασία.id}
-                  className="rounded-2xl border border-slate-200 p-4"
-                >
-                  <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="truncate text-sm font-semibold text-slate-900">
-                          {εργασία.title}
+              {filteredTasks.map((εργασία) => {
+                const normalizedDescription = normalizeTaskDescription(
+                  εργασία.description,
+                  language
+                )
+
+                return (
+                  <div
+                    key={εργασία.id}
+                    className="rounded-2xl border border-slate-200 p-4"
+                  >
+                    <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="truncate text-sm font-semibold text-slate-900">
+                            {εργασία.title}
+                          </p>
+
+                          <span
+                            className={`inline-flex rounded-full px-3 py-1 text-xs font-medium ${getTaskStatusClasses(
+                              εργασία.status
+                            )}`}
+                          >
+                            {getTaskStatusLabel(language, εργασία.status)}
+                          </span>
+
+                          <span
+                            className={`inline-flex rounded-full px-3 py-1 text-xs font-medium ${getPriorityClasses(
+                              εργασία.priority
+                            )}`}
+                          >
+                            {getPriorityLabel(language, εργασία.priority)}
+                          </span>
+
+                          {είναιΕνεργόAlert(εργασία) ? (
+                            <span className="inline-flex rounded-full border border-red-200 bg-red-100 px-3 py-1 text-xs font-semibold text-red-700">
+                              {texts.filterAlerts}
+                            </span>
+                          ) : null}
+                        </div>
+
+                        <p className="mt-2 truncate text-sm text-slate-500">
+                          {εργασία.property?.name || texts.withoutProperty}
                         </p>
 
-                        <span
-                          className={`inline-flex rounded-full px-3 py-1 text-xs font-medium ${getTaskStatusClasses(
-                            εργασία.status
-                          )}`}
-                        >
-                          {getTaskStatusLabel(language, εργασία.status)}
-                        </span>
-
-                        <span
-                          className={`inline-flex rounded-full px-3 py-1 text-xs font-medium ${getPriorityClasses(
-                            εργασία.priority
-                          )}`}
-                        >
-                          {getPriorityLabel(language, εργασία.priority)}
-                        </span>
-
-                        {είναιΕνεργόAlert(εργασία) ? (
-                          <span className="inline-flex rounded-full border border-red-200 bg-red-100 px-3 py-1 text-xs font-semibold text-red-700">
-                            {texts.filterAlerts}
-                          </span>
-                        ) : null}
+                        <p className="mt-2 whitespace-pre-line text-sm text-slate-600">
+                          {normalizedDescription || texts.noDescription}
+                        </p>
                       </div>
 
-                      <p className="mt-2 truncate text-sm text-slate-500">
-                        {εργασία.property?.name || texts.withoutProperty}
-                      </p>
-
-                      <p className="mt-2 text-sm text-slate-600">
-                        {εργασία.description || texts.noDescription}
-                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        <Link
+                          href={`/tasks/${εργασία.id}`}
+                          className="inline-flex items-center rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+                        >
+                          {texts.openTask}
+                        </Link>
+                      </div>
                     </div>
 
-                    <div className="flex flex-wrap gap-2">
-                      <Link
-                        href={`/tasks/${εργασία.id}`}
-                        className="inline-flex items-center rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
-                      >
-                        {texts.openTask}
-                      </Link>
+                    <div className="mt-4 grid gap-4 md:grid-cols-3">
+                      <InfoBox
+                        label={texts.scheduledDate}
+                        value={formatDate(εργασία.scheduledDate, texts.locale)}
+                      />
+
+                      <InfoBox
+                        label={texts.scheduledTime}
+                        value={`${εργασία.scheduledStartTime || "—"}${
+                          εργασία.scheduledEndTime
+                            ? ` - ${εργασία.scheduledEndTime}`
+                            : ""
+                        }`}
+                      />
+
+                      <InfoBox
+                        label={texts.alertTime}
+                        value={
+                          εργασία.alertEnabled && εργασία.alertAt
+                            ? formatDateTime(εργασία.alertAt, texts.locale)
+                            : texts.noAlert
+                        }
+                      />
                     </div>
                   </div>
-
-                  <div className="mt-4 grid gap-4 md:grid-cols-3">
-                    <InfoBox
-                      label={texts.scheduledDate}
-                      value={formatDate(εργασία.scheduledDate, texts.locale)}
-                    />
-
-                    <InfoBox
-                      label={texts.scheduledTime}
-                      value={`${εργασία.scheduledStartTime || "—"}${
-                        εργασία.scheduledEndTime ? ` - ${εργασία.scheduledEndTime}` : ""
-                      }`}
-                    />
-
-                    <InfoBox
-                      label={texts.alertTime}
-                      value={
-                        εργασία.alertEnabled && εργασία.alertAt
-                          ? formatDateTime(εργασία.alertAt, texts.locale)
-                          : texts.noAlert
-                      }
-                    />
-                  </div>
-                </div>
-              ))}
+                )
+              })}
 
               <div className="pt-2">
                 <Link

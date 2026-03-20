@@ -185,7 +185,13 @@ type PropertyDetail = {
   }>
 }
 
-type ModalKey = null | "property" | "partner" | "cleaningChecklist" | "supplies" | "issues"
+type ModalKey =
+  | null
+  | "property"
+  | "partner"
+  | "cleaningChecklist"
+  | "supplies"
+  | "issues"
 
 type PropertyEditForm = {
   code: string
@@ -811,7 +817,9 @@ function getSupplyStateThree(
   const safeTarget =
     typeof target === "number" && Number.isFinite(target) ? target : null
   const safeThreshold =
-    typeof threshold === "number" && Number.isFinite(threshold) ? threshold : null
+    typeof threshold === "number" && Number.isFinite(threshold)
+      ? threshold
+      : null
 
   if (safeTarget !== null && safeTarget > 0 && current >= safeTarget) {
     return "full"
@@ -849,7 +857,9 @@ function supplyStateBadgeClass(state: "missing" | "medium" | "full") {
   return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
 }
 
-function getLatestAssignment(task: NonNullable<PropertyDetail["tasks"]>[number]) {
+function getLatestAssignment(
+  task: NonNullable<PropertyDetail["tasks"]>[number]
+) {
   return safeArray(task.assignments)[0] || null
 }
 
@@ -876,7 +886,9 @@ function parseDateAndTime(dateValue?: string | null, timeValue?: string | null) 
 
   const datePart = String(dateValue).slice(0, 10)
   const timePart =
-    timeValue && /^\d{2}:\d{2}/.test(timeValue) ? String(timeValue).slice(0, 5) : "12:00"
+    timeValue && /^\d{2}:\d{2}/.test(timeValue)
+      ? String(timeValue).slice(0, 5)
+      : "12:00"
 
   const composed = new Date(`${datePart}T${timePart}:00`)
   if (Number.isNaN(composed.getTime())) return null
@@ -908,7 +920,10 @@ function isTaskBorderline(task: NonNullable<PropertyDetail["tasks"]>[number]) {
   }
 
   const now = new Date()
-  const scheduled = parseDateAndTime(task.scheduledDate, task.scheduledStartTime || null)
+  const scheduled = parseDateAndTime(
+    task.scheduledDate,
+    task.scheduledStartTime || null
+  )
   const due = task.dueDate ? new Date(task.dueDate) : null
   const candidates = [scheduled, due].filter(
     (row): row is Date => Boolean(row && !Number.isNaN(row.getTime()))
@@ -961,12 +976,75 @@ function getChecklistSectionStateLabel(
   return language === "en" ? "Not submitted" : "Δεν υποβλήθηκε"
 }
 
+function normalizeTaskTitle(
+  title: string | null | undefined,
+  language: "el" | "en"
+) {
+  if (!title || !title.trim()) return "—"
+
+  let text = title.trim()
+
+  if (language === "en") {
+    text = text
+      .replace(/^Καθαρισμός μετά από check-out\s*-\s*/i, "Cleaning after check-out - ")
+      .replace(/^Επιθεώρηση μετά από check-out\s*-\s*/i, "Inspection after check-out - ")
+      .replace(/^Συντήρηση μετά από check-out\s*-\s*/i, "Maintenance after check-out - ")
+  } else {
+    text = text
+      .replace(/^Cleaning after check-out\s*-\s*/i, "Καθαρισμός μετά από check-out - ")
+      .replace(/^Inspection after check-out\s*-\s*/i, "Επιθεώρηση μετά από check-out - ")
+      .replace(/^Maintenance after check-out\s*-\s*/i, "Συντήρηση μετά από check-out - ")
+  }
+
+  return text
+}
+
+function normalizeTaskDescription(
+  description: string | null | undefined,
+  language: "el" | "en"
+) {
+  if (!description || !description.trim()) {
+    return null
+  }
+
+  let text = description.trim()
+
+  if (language === "en") {
+    text = text
+      .replace(
+        /Εργασία που δημιουργήθηκε χειροκίνητα από κράτηση\./gi,
+        "Task created manually from booking."
+      )
+      .replace(/Πηγή:/gi, "Source:")
+      .replace(/Κωδικός κράτησης:/gi, "Booking code:")
+      .replace(/Επισκέπτης:/gi, "Guest:")
+      .replace(/Άφιξη:/gi, "Check-in:")
+      .replace(/Αναχώρηση:/gi, "Check-out:")
+  } else {
+    text = text
+      .replace(
+        /Task created manually from booking\./gi,
+        "Εργασία που δημιουργήθηκε χειροκίνητα από κράτηση."
+      )
+      .replace(/\bSource:/gi, "Πηγή:")
+      .replace(/\bBooking code:/gi, "Κωδικός κράτησης:")
+      .replace(/\bGuest:/gi, "Επισκέπτης:")
+      .replace(/\bCheck-in:/gi, "Άφιξη:")
+      .replace(/\bCheck-out:/gi, "Αναχώρηση:")
+  }
+
+  return text
+}
+
 function getReadinessState(property: PropertyDetail | null, language: "el" | "en") {
   if (!property) {
     return {
       label: language === "en" ? "Unknown" : "Άγνωστη",
       tone: "bg-slate-100 text-slate-700 ring-1 ring-slate-200",
-      details: language === "en" ? "No data available." : "Δεν υπάρχουν διαθέσιμα δεδομένα.",
+      details:
+        language === "en"
+          ? "No data available."
+          : "Δεν υπάρχουν διαθέσιμα δεδομένα.",
     }
   }
 
@@ -990,7 +1068,8 @@ function getReadinessState(property: PropertyDetail | null, language: "el" | "en
   const notFullSupplies = safeArray(property.propertySupplies).filter((supply) => {
     const current = Number(supply.currentStock || 0)
     const target = supply.targetStock ?? null
-    const threshold = supply.reorderThreshold ?? supply.supplyItem?.minimumStock ?? null
+    const threshold =
+      supply.reorderThreshold ?? supply.supplyItem?.minimumStock ?? null
     return getSupplyStateThree(current, target, threshold) !== "full"
   })
 
@@ -1054,8 +1133,12 @@ function Modal({
       <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:rounded-3xl">
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-4 py-4 sm:px-6">
           <div className="min-w-0">
-            <h2 className="text-lg font-semibold text-slate-900 sm:text-xl">{title}</h2>
-            {description ? <p className="mt-1 text-sm text-slate-500">{description}</p> : null}
+            <h2 className="text-lg font-semibold text-slate-900 sm:text-xl">
+              {title}
+            </h2>
+            {description ? (
+              <p className="mt-1 text-sm text-slate-500">{description}</p>
+            ) : null}
           </div>
 
           <button
@@ -1067,7 +1150,9 @@ function Modal({
           </button>
         </div>
 
-        <div className="overflow-y-auto px-4 py-4 sm:px-6 sm:py-6">{children}</div>
+        <div className="overflow-y-auto px-4 py-4 sm:px-6 sm:py-6">
+          {children}
+        </div>
       </div>
     </div>
   )
@@ -1149,7 +1234,8 @@ export default function PropertyDetailPage() {
   const [partnerSaving, setPartnerSaving] = useState(false)
   const [partnerFormMessage, setPartnerFormMessage] = useState<string | null>(null)
 
-  const [openTaskFilter, setOpenTaskFilter] = useState<OpenTaskFilter>("all_open")
+  const [openTaskFilter, setOpenTaskFilter] =
+    useState<OpenTaskFilter>("all_open")
   const [supplyFilter, setSupplyFilter] = useState<SupplyFilter>("all")
 
   async function loadPage() {
@@ -1171,7 +1257,8 @@ export default function PropertyDetailPage() {
         throw new Error(propertyJson?.error || texts.loadError)
       }
 
-      const normalizedProperty = propertyJson?.property ?? propertyJson?.data ?? propertyJson
+      const normalizedProperty =
+        propertyJson?.property ?? propertyJson?.data ?? propertyJson
       const normalizedPartners = Array.isArray(partnersJson)
         ? partnersJson
         : Array.isArray(partnersJson?.partners)
@@ -1183,7 +1270,9 @@ export default function PropertyDetailPage() {
       setProperty(normalizedProperty as PropertyDetail)
       setPartners(normalizedPartners as PartnerOption[])
       setPropertyForm(buildPropertyEditForm(normalizedProperty as PropertyDetail))
-      setSelectedPartnerId(String((normalizedProperty as PropertyDetail)?.defaultPartnerId || ""))
+      setSelectedPartnerId(
+        String((normalizedProperty as PropertyDetail)?.defaultPartnerId || "")
+      )
     } catch (err) {
       console.error("Load property detail error:", err)
       setError(err instanceof Error ? err.message : texts.loadError)
@@ -1209,7 +1298,9 @@ export default function PropertyDetailPage() {
   }, [tasks])
 
   const completedCount = useMemo(() => {
-    return tasks.filter((task) => String(task.status || "").toLowerCase() === "completed").length
+    return tasks.filter(
+      (task) => String(task.status || "").toLowerCase() === "completed"
+    ).length
   }, [tasks])
 
   const alertCount = useMemo(() => {
@@ -1219,10 +1310,18 @@ export default function PropertyDetailPage() {
   const openTaskCounts = useMemo(() => {
     return {
       all_open: openTasksBase.length,
-      pending: openTasksBase.filter((task) => String(task.status || "").toLowerCase() === "pending").length,
-      assigned: openTasksBase.filter((task) => String(task.status || "").toLowerCase() === "assigned").length,
-      accepted: openTasksBase.filter((task) => String(task.status || "").toLowerCase() === "accepted").length,
-      in_progress: openTasksBase.filter((task) => String(task.status || "").toLowerCase() === "in_progress").length,
+      pending: openTasksBase.filter(
+        (task) => String(task.status || "").toLowerCase() === "pending"
+      ).length,
+      assigned: openTasksBase.filter(
+        (task) => String(task.status || "").toLowerCase() === "assigned"
+      ).length,
+      accepted: openTasksBase.filter(
+        (task) => String(task.status || "").toLowerCase() === "accepted"
+      ).length,
+      in_progress: openTasksBase.filter(
+        (task) => String(task.status || "").toLowerCase() === "in_progress"
+      ).length,
       alerts: openTasksBase.filter((task) => isTaskAlertActive(task)).length,
     }
   }, [openTasksBase])
@@ -1270,7 +1369,8 @@ export default function PropertyDetailPage() {
     return safeArray(property?.propertySupplies).map((supply) => {
       const current = Number(supply.currentStock || 0)
       const target = supply.targetStock ?? null
-      const threshold = supply.reorderThreshold ?? supply.supplyItem?.minimumStock ?? null
+      const threshold =
+        supply.reorderThreshold ?? supply.supplyItem?.minimumStock ?? null
       const derivedState = getSupplyStateThree(current, target, threshold)
 
       return {
@@ -1299,7 +1399,10 @@ export default function PropertyDetailPage() {
     return getPrimaryCleaningChecklist(property)
   }, [property])
 
-  const readiness = useMemo(() => getReadinessState(property, language), [property, language])
+  const readiness = useMemo(
+    () => getReadinessState(property, language),
+    [property, language]
+  )
 
   async function savePropertyChanges(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -1375,11 +1478,15 @@ export default function PropertyDetailPage() {
 
       const updatedProperty = json?.property ?? json?.data ?? property
       setProperty(updatedProperty as PropertyDetail)
-      setSelectedPartnerId(String((updatedProperty as PropertyDetail)?.defaultPartnerId || ""))
+      setSelectedPartnerId(
+        String((updatedProperty as PropertyDetail)?.defaultPartnerId || "")
+      )
       setPartnerFormMessage(texts.partnerSaveSuccess)
     } catch (err) {
       console.error("Save default partner error:", err)
-      setPartnerFormMessage(err instanceof Error ? err.message : texts.partnerSaveError)
+      setPartnerFormMessage(
+        err instanceof Error ? err.message : texts.partnerSaveError
+      )
     } finally {
       setPartnerSaving(false)
     }
@@ -1397,7 +1504,9 @@ export default function PropertyDetailPage() {
     return (
       <div className="rounded-2xl border border-red-200 bg-white p-6 shadow-sm">
         <h1 className="text-lg font-semibold text-slate-900">{texts.loadError}</h1>
-        <p className="mt-2 text-sm text-red-600">{error || texts.noPropertyData}</p>
+        <p className="mt-2 text-sm text-red-600">
+          {error || texts.noPropertyData}
+        </p>
         <div className="mt-4">
           <Link
             href="/properties"
@@ -1417,7 +1526,10 @@ export default function PropertyDetailPage() {
           <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2 text-sm">
-                <Link href="/properties" className="font-medium text-slate-500 hover:text-slate-900">
+                <Link
+                  href="/properties"
+                  className="font-medium text-slate-500 hover:text-slate-900"
+                >
                   {texts.back}
                 </Link>
                 <span className="text-slate-300">/</span>
@@ -1455,11 +1567,13 @@ export default function PropertyDetailPage() {
               </div>
 
               <p className="mt-3 text-sm leading-6 text-slate-600">
-                {property.address}, {property.city}, {property.region}, {property.postalCode},{" "}
-                {property.country}
+                {property.address}, {property.city}, {property.region},{" "}
+                {property.postalCode}, {property.country}
               </p>
 
-              <p className="mt-2 text-sm leading-6 text-slate-500">{readiness.details}</p>
+              <p className="mt-2 text-sm leading-6 text-slate-500">
+                {readiness.details}
+              </p>
             </div>
 
             <div className="flex flex-wrap gap-2">
@@ -1487,14 +1601,18 @@ export default function PropertyDetailPage() {
 
         <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex flex-col gap-2">
-            <h2 className="text-xl font-semibold text-slate-900">{texts.overviewTitle}</h2>
+            <h2 className="text-xl font-semibold text-slate-900">
+              {texts.overviewTitle}
+            </h2>
             <p className="text-sm text-slate-500">{texts.overviewSubtitle}</p>
           </div>
 
           <div className="mt-5 grid gap-6 xl:grid-cols-[1.35fr_1fr]">
             <div>
               <div className="mb-3 text-sm font-semibold text-slate-800">
-                {language === "en" ? "Open task states" : "Καταστάσεις ανοιχτών εργασιών"}
+                {language === "en"
+                  ? "Open task states"
+                  : "Καταστάσεις ανοιχτών εργασιών"}
               </div>
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 <CounterButton
@@ -1592,8 +1710,12 @@ export default function PropertyDetailPage() {
         <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <h2 className="text-xl font-semibold text-slate-900">{texts.openTasksTitle}</h2>
-              <p className="mt-1 text-sm text-slate-500">{texts.openTasksSubtitle}</p>
+              <h2 className="text-xl font-semibold text-slate-900">
+                {texts.openTasksTitle}
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                {texts.openTasksSubtitle}
+              </p>
             </div>
 
             <Link
@@ -1622,10 +1744,18 @@ export default function PropertyDetailPage() {
                   const cleaningSubmitted = isRunSubmitted(cleaningRun)
                   const suppliesSubmitted = isRunSubmitted(suppliesRun)
 
+                  const normalizedTaskTitle = normalizeTaskTitle(task.title, language)
+                  const normalizedTaskDescription = normalizeTaskDescription(
+                    task.description,
+                    language
+                  )
+
                   const showNormalBadge =
                     !borderline &&
                     !activeAlert &&
-                    ["accepted", "in_progress"].includes(String(task.status || "").toLowerCase())
+                    ["accepted", "in_progress"].includes(
+                      String(task.status || "").toLowerCase()
+                    )
 
                   const partnerValue =
                     String(task.status || "").toLowerCase() === "accepted"
@@ -1648,7 +1778,9 @@ export default function PropertyDetailPage() {
                       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
-                            <div className="font-semibold text-slate-900">{task.title}</div>
+                            <div className="font-semibold text-slate-900">
+                              {normalizedTaskTitle}
+                            </div>
 
                             <span
                               className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${badgeClasses(
@@ -1691,8 +1823,10 @@ export default function PropertyDetailPage() {
                             {getTaskStatusHelp(language, task.status)}
                           </div>
 
-                          {task.description ? (
-                            <div className="mt-2 text-sm text-slate-600">{task.description}</div>
+                          {normalizedTaskDescription ? (
+                            <div className="mt-2 whitespace-pre-line text-sm text-slate-600">
+                              {normalizedTaskDescription}
+                            </div>
                           ) : null}
                         </div>
 
@@ -1761,8 +1895,12 @@ export default function PropertyDetailPage() {
         <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
-              <h3 className="text-base font-semibold text-slate-900">{texts.suppliesTitle}</h3>
-              <p className="mt-1 text-sm text-slate-500">{texts.suppliesSubtitle}</p>
+              <h3 className="text-base font-semibold text-slate-900">
+                {texts.suppliesTitle}
+              </h3>
+              <p className="mt-1 text-sm text-slate-500">
+                {texts.suppliesSubtitle}
+              </p>
             </div>
 
             <button
@@ -1778,10 +1916,7 @@ export default function PropertyDetailPage() {
             {visibleSupplies.length > 0 ? (
               <div className="space-y-2">
                 {visibleSupplies.slice(0, 3).map((supply) => (
-                  <div
-                    key={supply.id}
-                    className="rounded-xl bg-slate-50 px-3 py-3"
-                  >
+                  <div key={supply.id} className="rounded-xl bg-slate-50 px-3 py-3">
                     <div className="flex items-center justify-between gap-3">
                       <span className="text-sm font-medium text-slate-900">
                         {supply.supplyItem?.name || "—"}
@@ -1796,7 +1931,8 @@ export default function PropertyDetailPage() {
                     </div>
 
                     <div className="mt-2 text-xs text-slate-500">
-                      {texts.lastUpdate}: {formatDateTime(supply.lastSeenUpdate, texts.locale)}
+                      {texts.lastUpdate}:{" "}
+                      {formatDateTime(supply.lastSeenUpdate, texts.locale)}
                     </div>
                   </div>
                 ))}
@@ -1813,8 +1949,12 @@ export default function PropertyDetailPage() {
           <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
-                <h3 className="text-base font-semibold text-slate-900">{texts.issuesTitle}</h3>
-                <p className="mt-1 text-sm text-slate-500">{texts.issuesSubtitle}</p>
+                <h3 className="text-base font-semibold text-slate-900">
+                  {texts.issuesTitle}
+                </h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  {texts.issuesSubtitle}
+                </p>
               </div>
 
               <button
@@ -1834,7 +1974,9 @@ export default function PropertyDetailPage() {
                       key={issue.id}
                       className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2"
                     >
-                      <span className="min-w-0 truncate text-sm text-slate-900">{issue.title}</span>
+                      <span className="min-w-0 truncate text-sm text-slate-900">
+                        {issue.title}
+                      </span>
                       <span
                         className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${badgeClasses(
                           issue.severity
@@ -1857,8 +1999,12 @@ export default function PropertyDetailPage() {
             <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">
-                  <h3 className="text-base font-semibold text-slate-900">{texts.defaultPartnerTitle}</h3>
-                  <p className="mt-1 text-sm text-slate-500">{texts.defaultPartnerSubtitle}</p>
+                  <h3 className="text-base font-semibold text-slate-900">
+                    {texts.defaultPartnerTitle}
+                  </h3>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {texts.defaultPartnerSubtitle}
+                  </p>
                 </div>
 
                 <button
@@ -1878,7 +2024,10 @@ export default function PropertyDetailPage() {
                 {property.defaultPartner ? (
                   <div className="grid gap-2 md:grid-cols-2">
                     <InfoChip label={texts.name} value={property.defaultPartner.name} />
-                    <InfoChip label={texts.email} value={property.defaultPartner.email || "—"} />
+                    <InfoChip
+                      label={texts.email}
+                      value={property.defaultPartner.email || "—"}
+                    />
                   </div>
                 ) : (
                   <div className="rounded-xl bg-slate-50 p-3 text-sm text-slate-500">
@@ -1891,8 +2040,12 @@ export default function PropertyDetailPage() {
             <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">
-                  <h3 className="text-base font-semibold text-slate-900">{texts.cleaningChecklistTitle}</h3>
-                  <p className="mt-1 text-sm text-slate-500">{texts.cleaningChecklistSubtitle}</p>
+                  <h3 className="text-base font-semibold text-slate-900">
+                    {texts.cleaningChecklistTitle}
+                  </h3>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {texts.cleaningChecklistSubtitle}
+                  </p>
                 </div>
 
                 <button
@@ -1950,11 +2103,15 @@ export default function PropertyDetailPage() {
 
           <div className="grid gap-4 md:grid-cols-2">
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">{texts.code}</label>
+              <label className="mb-1 block text-sm font-medium text-slate-700">
+                {texts.code}
+              </label>
               <input
                 value={propertyForm.code}
                 onChange={(e) =>
-                  setPropertyForm((prev) => (prev ? { ...prev, code: e.target.value } : prev))
+                  setPropertyForm((prev) =>
+                    prev ? { ...prev, code: e.target.value } : prev
+                  )
                 }
                 className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
                 required
@@ -1962,11 +2119,15 @@ export default function PropertyDetailPage() {
             </div>
 
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">{texts.name}</label>
+              <label className="mb-1 block text-sm font-medium text-slate-700">
+                {texts.name}
+              </label>
               <input
                 value={propertyForm.name}
                 onChange={(e) =>
-                  setPropertyForm((prev) => (prev ? { ...prev, name: e.target.value } : prev))
+                  setPropertyForm((prev) =>
+                    prev ? { ...prev, name: e.target.value } : prev
+                  )
                 }
                 className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
                 required
@@ -1974,11 +2135,15 @@ export default function PropertyDetailPage() {
             </div>
 
             <div className="md:col-span-2">
-              <label className="mb-1 block text-sm font-medium text-slate-700">{texts.address}</label>
+              <label className="mb-1 block text-sm font-medium text-slate-700">
+                {texts.address}
+              </label>
               <input
                 value={propertyForm.address}
                 onChange={(e) =>
-                  setPropertyForm((prev) => (prev ? { ...prev, address: e.target.value } : prev))
+                  setPropertyForm((prev) =>
+                    prev ? { ...prev, address: e.target.value } : prev
+                  )
                 }
                 className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
                 required
@@ -1986,11 +2151,15 @@ export default function PropertyDetailPage() {
             </div>
 
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">{texts.city}</label>
+              <label className="mb-1 block text-sm font-medium text-slate-700">
+                {texts.city}
+              </label>
               <input
                 value={propertyForm.city}
                 onChange={(e) =>
-                  setPropertyForm((prev) => (prev ? { ...prev, city: e.target.value } : prev))
+                  setPropertyForm((prev) =>
+                    prev ? { ...prev, city: e.target.value } : prev
+                  )
                 }
                 className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
                 required
@@ -1998,11 +2167,15 @@ export default function PropertyDetailPage() {
             </div>
 
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">{texts.region}</label>
+              <label className="mb-1 block text-sm font-medium text-slate-700">
+                {texts.region}
+              </label>
               <input
                 value={propertyForm.region}
                 onChange={(e) =>
-                  setPropertyForm((prev) => (prev ? { ...prev, region: e.target.value } : prev))
+                  setPropertyForm((prev) =>
+                    prev ? { ...prev, region: e.target.value } : prev
+                  )
                 }
                 className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
                 required
@@ -2010,11 +2183,15 @@ export default function PropertyDetailPage() {
             </div>
 
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">{texts.postalCode}</label>
+              <label className="mb-1 block text-sm font-medium text-slate-700">
+                {texts.postalCode}
+              </label>
               <input
                 value={propertyForm.postalCode}
                 onChange={(e) =>
-                  setPropertyForm((prev) => (prev ? { ...prev, postalCode: e.target.value } : prev))
+                  setPropertyForm((prev) =>
+                    prev ? { ...prev, postalCode: e.target.value } : prev
+                  )
                 }
                 className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
                 required
@@ -2022,11 +2199,15 @@ export default function PropertyDetailPage() {
             </div>
 
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">{texts.country}</label>
+              <label className="mb-1 block text-sm font-medium text-slate-700">
+                {texts.country}
+              </label>
               <input
                 value={propertyForm.country}
                 onChange={(e) =>
-                  setPropertyForm((prev) => (prev ? { ...prev, country: e.target.value } : prev))
+                  setPropertyForm((prev) =>
+                    prev ? { ...prev, country: e.target.value } : prev
+                  )
                 }
                 className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
                 required
@@ -2034,22 +2215,30 @@ export default function PropertyDetailPage() {
             </div>
 
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">{texts.type}</label>
+              <label className="mb-1 block text-sm font-medium text-slate-700">
+                {texts.type}
+              </label>
               <input
                 value={propertyForm.type}
                 onChange={(e) =>
-                  setPropertyForm((prev) => (prev ? { ...prev, type: e.target.value } : prev))
+                  setPropertyForm((prev) =>
+                    prev ? { ...prev, type: e.target.value } : prev
+                  )
                 }
                 className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
               />
             </div>
 
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">{texts.propertyStatus}</label>
+              <label className="mb-1 block text-sm font-medium text-slate-700">
+                {texts.propertyStatus}
+              </label>
               <select
                 value={propertyForm.status}
                 onChange={(e) =>
-                  setPropertyForm((prev) => (prev ? { ...prev, status: e.target.value } : prev))
+                  setPropertyForm((prev) =>
+                    prev ? { ...prev, status: e.target.value } : prev
+                  )
                 }
                 className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
               >
@@ -2061,50 +2250,66 @@ export default function PropertyDetailPage() {
             </div>
 
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">{texts.bedrooms}</label>
+              <label className="mb-1 block text-sm font-medium text-slate-700">
+                {texts.bedrooms}
+              </label>
               <input
                 type="number"
                 min="0"
                 value={propertyForm.bedrooms}
                 onChange={(e) =>
-                  setPropertyForm((prev) => (prev ? { ...prev, bedrooms: e.target.value } : prev))
+                  setPropertyForm((prev) =>
+                    prev ? { ...prev, bedrooms: e.target.value } : prev
+                  )
                 }
                 className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
               />
             </div>
 
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">{texts.bathrooms}</label>
+              <label className="mb-1 block text-sm font-medium text-slate-700">
+                {texts.bathrooms}
+              </label>
               <input
                 type="number"
                 min="0"
                 value={propertyForm.bathrooms}
                 onChange={(e) =>
-                  setPropertyForm((prev) => (prev ? { ...prev, bathrooms: e.target.value } : prev))
+                  setPropertyForm((prev) =>
+                    prev ? { ...prev, bathrooms: e.target.value } : prev
+                  )
                 }
                 className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
               />
             </div>
 
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">{texts.maxGuests}</label>
+              <label className="mb-1 block text-sm font-medium text-slate-700">
+                {texts.maxGuests}
+              </label>
               <input
                 type="number"
                 min="0"
                 value={propertyForm.maxGuests}
                 onChange={(e) =>
-                  setPropertyForm((prev) => (prev ? { ...prev, maxGuests: e.target.value } : prev))
+                  setPropertyForm((prev) =>
+                    prev ? { ...prev, maxGuests: e.target.value } : prev
+                  )
                 }
                 className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
               />
             </div>
 
             <div className="md:col-span-2">
-              <label className="mb-1 block text-sm font-medium text-slate-700">{texts.notes}</label>
+              <label className="mb-1 block text-sm font-medium text-slate-700">
+                {texts.notes}
+              </label>
               <textarea
                 value={propertyForm.notes}
                 onChange={(e) =>
-                  setPropertyForm((prev) => (prev ? { ...prev, notes: e.target.value } : prev))
+                  setPropertyForm((prev) =>
+                    prev ? { ...prev, notes: e.target.value } : prev
+                  )
                 }
                 rows={4}
                 className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
@@ -2154,7 +2359,9 @@ export default function PropertyDetailPage() {
           ) : null}
 
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">{texts.choosePartner}</label>
+            <label className="mb-1 block text-sm font-medium text-slate-700">
+              {texts.choosePartner}
+            </label>
             <select
               value={selectedPartnerId}
               onChange={(e) => setSelectedPartnerId(e.target.value)}
@@ -2356,7 +2563,9 @@ export default function PropertyDetailPage() {
                     </div>
 
                     {issue.description ? (
-                      <div className="mt-2 text-sm text-slate-700">{issue.description}</div>
+                      <div className="mt-2 text-sm text-slate-700">
+                        {issue.description}
+                      </div>
                     ) : null}
                   </div>
 

@@ -291,6 +291,7 @@ export default function BookingsPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          language,
           taskType,
           title: title.trim() || undefined,
           description: description.trim() || undefined,

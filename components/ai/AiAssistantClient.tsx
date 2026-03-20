@@ -235,7 +235,10 @@ function renderMessageContent(content: string, isUser: boolean) {
             isUser ? "text-white" : "text-slate-700"
           }`}
         >
-          <InlineMarkdown text={trimmed.replace(/^[-*]\s+/, "")} isUser={isUser} />
+          <InlineMarkdown
+            text={trimmed.replace(/^[-*]\s+/, "")}
+            isUser={isUser}
+          />
         </li>
       )
     }
@@ -248,7 +251,10 @@ function renderMessageContent(content: string, isUser: boolean) {
             isUser ? "text-white" : "text-slate-700"
           }`}
         >
-          <InlineMarkdown text={trimmed.replace(/^\d+\.\s+/, "")} isUser={isUser} />
+          <InlineMarkdown
+            text={trimmed.replace(/^\d+\.\s+/, "")}
+            isUser={isUser}
+          />
         </li>
       )
     }
@@ -261,7 +267,10 @@ function renderMessageContent(content: string, isUser: boolean) {
             isUser ? "text-white" : "text-slate-900"
           }`}
         >
-          <InlineMarkdown text={trimmed.replace(/^#{1,6}\s+/, "")} isUser={isUser} />
+          <InlineMarkdown
+            text={trimmed.replace(/^#{1,6}\s+/, "")}
+            isUser={isUser}
+          />
         </h3>
       )
     }
@@ -428,82 +437,90 @@ export default function AiAssistantClient({ scope }: Props) {
       </div>
 
       <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-        <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_320px]">
-          <section className="min-w-0 xl:border-r xl:border-slate-100">
+        <div className="grid grid-cols-1 items-start xl:grid-cols-[minmax(0,1fr)_320px]">
+          <section className="min-w-0 self-start xl:border-r xl:border-slate-100">
             <div className="border-b border-slate-100 px-5 py-4">
               <h2 className="text-sm font-semibold text-slate-900">
                 {t.chatTitle}
               </h2>
             </div>
 
-            <div className="max-h-[62vh] overflow-y-auto px-4 py-4 md:px-5">
-              {messages.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5">
-                  <p className="text-sm leading-6 text-slate-600">
-                    {t.emptyState}
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {messages.map((message) => {
-                    const isUser = message.role === "user"
-
-                    return (
-                      <div
-                        key={message.id}
-                        className={
-                          isUser
-                            ? "ml-auto max-w-[94%] rounded-2xl bg-slate-900 px-4 py-3 text-white md:max-w-[82%]"
-                            : "mr-auto max-w-[94%] rounded-2xl bg-slate-50 px-4 py-3 ring-1 ring-slate-200 md:max-w-[82%]"
-                        }
-                      >
-                        <div className="mb-2 flex items-center justify-between gap-3">
-                          <span
-                            className={
-                              isUser
-                                ? "text-xs font-semibold uppercase tracking-wide text-slate-300"
-                                : "text-xs font-semibold uppercase tracking-wide text-slate-500"
-                            }
-                          >
-                            {isUser ? t.you : t.assistant}
-                          </span>
-
-                          <span
-                            className={
-                              isUser
-                                ? "text-[11px] text-slate-300"
-                                : "text-[11px] text-slate-500"
-                            }
-                          >
-                            {new Date(message.createdAt).toLocaleString(
-                              uiLanguage === "en" ? "en-GB" : "el-GR",
-                              {
-                                dateStyle: "short",
-                                timeStyle: "short",
-                              }
-                            )}
-                          </span>
-                        </div>
-
-                        <div className="space-y-2">
-                          {renderMessageContent(message.content, isUser)}
-                        </div>
-                      </div>
-                    )
-                  })}
-
-                  {isLoading ? (
-                    <div className="mr-auto max-w-[94%] rounded-2xl bg-slate-50 px-4 py-3 ring-1 ring-slate-200 md:max-w-[82%]">
-                      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            <div className="px-4 py-4 md:px-5">
+              <div className="max-h-[42vh] min-h-[220px] overflow-y-auto space-y-4 pr-1 md:max-h-[46vh]">
+                {messages.length === 0 ? (
+                  <div className="mr-auto max-w-[94%] rounded-2xl bg-slate-50 px-4 py-3 ring-1 ring-slate-200 md:max-w-[82%]">
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                         {t.assistant}
-                      </div>
-                      <p className="text-sm text-slate-600">{t.thinking}</p>
+                      </span>
                     </div>
-                  ) : null}
 
-                  <div ref={bottomRef} />
-                </div>
-              )}
+                    <div className="space-y-2">
+                      <p className="text-sm leading-6 text-slate-700">
+                        {t.emptyState}
+                      </p>
+                    </div>
+                  </div>
+                ) : null}
+
+                {messages.map((message) => {
+                  const isUser = message.role === "user"
+
+                  return (
+                    <div
+                      key={message.id}
+                      className={
+                        isUser
+                          ? "ml-auto max-w-[94%] rounded-2xl bg-slate-900 px-4 py-3 text-white md:max-w-[82%]"
+                          : "mr-auto max-w-[94%] rounded-2xl bg-slate-50 px-4 py-3 ring-1 ring-slate-200 md:max-w-[82%]"
+                      }
+                    >
+                      <div className="mb-2 flex items-center justify-between gap-3">
+                        <span
+                          className={
+                            isUser
+                              ? "text-xs font-semibold uppercase tracking-wide text-slate-300"
+                              : "text-xs font-semibold uppercase tracking-wide text-slate-500"
+                          }
+                        >
+                          {isUser ? t.you : t.assistant}
+                        </span>
+
+                        <span
+                          className={
+                            isUser
+                              ? "text-[11px] text-slate-300"
+                              : "text-[11px] text-slate-500"
+                          }
+                        >
+                          {new Date(message.createdAt).toLocaleString(
+                            uiLanguage === "en" ? "en-GB" : "el-GR",
+                            {
+                              dateStyle: "short",
+                              timeStyle: "short",
+                            }
+                          )}
+                        </span>
+                      </div>
+
+                      <div className="space-y-2">
+                        {renderMessageContent(message.content, isUser)}
+                      </div>
+                    </div>
+                  )
+                })}
+
+                {isLoading ? (
+                  <div className="mr-auto max-w-[94%] rounded-2xl bg-slate-50 px-4 py-3 ring-1 ring-slate-200 md:max-w-[82%]">
+                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      {t.assistant}
+                    </div>
+                    <p className="text-sm text-slate-600">{t.thinking}</p>
+                  </div>
+                ) : null}
+
+                <div ref={bottomRef} />
+              </div>
             </div>
 
             <div className="border-t border-slate-100 p-4 md:p-5">
@@ -511,9 +528,9 @@ export default function AiAssistantClient({ scope }: Props) {
                 <textarea
                   value={question}
                   onChange={(e) => setQuestion(e.target.value)}
-                  rows={4}
+                  rows={3}
                   placeholder={t.placeholder}
-                  className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-400"
+                  className="w-full resize-none rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-400"
                 />
 
                 {error ? (
@@ -546,14 +563,14 @@ export default function AiAssistantClient({ scope }: Props) {
             </div>
           </section>
 
-          <aside className="border-t border-slate-100 bg-slate-50/60 xl:border-t-0">
+          <aside className="self-start border-t border-slate-100 bg-slate-50/60 xl:border-t-0">
             <div className="border-b border-slate-100 px-5 py-4">
               <h2 className="text-sm font-semibold text-slate-900">
                 {t.promptsTitle}
               </h2>
             </div>
 
-            <div className="space-y-4 p-4 md:p-5">
+            <div className="max-h-[70vh] overflow-y-auto space-y-4 p-4 md:p-5">
               {t.promptGroups.map((group) => (
                 <div key={group.title} className="space-y-2">
                   <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">

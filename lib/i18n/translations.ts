@@ -29,13 +29,14 @@ export function getDashboardShellTexts(language: AppLanguage) {
     return {
       brand: "OPS SAAS",
       title: "Control panel",
-      superAdminDescription: "Access to the central OPS platform area.",
+      superAdminDescription:
+        "Central access to the OPS core and organization management area.",
       organizationDescription:
         "Central operational view for organization, properties, tasks and partners.",
       organizationLabel: "Organization",
-      superAdminBannerPrefix: "You are currently inside the central OPS as",
+      superAdminBannerPrefix: "You are currently in the OPS core as",
       superAdminBannerRole: "SUPER ADMIN",
-      superAdminBannerSuffix: ". You can return at any time to",
+      superAdminBannerSuffix: "You can return at any time to",
       superAdminBannerManagement: "organization management",
       dashboardHrefLabel: "Go to dashboard",
     }
@@ -44,13 +45,14 @@ export function getDashboardShellTexts(language: AppLanguage) {
   return {
     brand: "OPS SAAS",
     title: "Πίνακας ελέγχου",
-    superAdminDescription: "Πρόσβαση στο κεντρικό OPS από περιοχή πλατφόρμας.",
+    superAdminDescription:
+      "Κεντρική πρόσβαση στον πυρήνα του OPS και στην περιοχή διαχείρισης οργανισμών.",
     organizationDescription:
-      "Κεντρική προβολή λειτουργίας οργανισμού, ακινήτων, εργασιών και συνεργατών.",
+      "Κεντρική λειτουργική προβολή οργανισμού, ακινήτων, εργασιών και συνεργατών.",
     organizationLabel: "Οργανισμός",
-    superAdminBannerPrefix: "Βρίσκεσαι στο κεντρικό OPS ως",
+    superAdminBannerPrefix: "Βρίσκεσαι στον πυρήνα του OPS ως",
     superAdminBannerRole: "SUPER ADMIN",
-    superAdminBannerSuffix: ". Μπορείς να επιστρέψεις οποιαδήποτε στιγμή στη",
+    superAdminBannerSuffix: "Μπορείς να επιστρέψεις οποιαδήποτε στιγμή στη",
     superAdminBannerManagement: "διαχείριση οργανισμών",
     dashboardHrefLabel: "Μετάβαση στον πίνακα ελέγχου",
   }
