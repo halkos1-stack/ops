@@ -239,26 +239,62 @@ export async function POST(req: NextRequest, context: RouteContext) {
         }
       }
 
+      const now = new Date()
+
       await tx.taskChecklistRun.update({
         where: {
           id: runId,
         },
         data: {
           status: "completed",
-          startedAt: body.startedAt ? new Date(body.startedAt) : new Date(),
-          completedAt: body.completedAt ? new Date(body.completedAt) : new Date(),
+          startedAt: body.startedAt ? new Date(body.startedAt) : now,
+          completedAt: body.completedAt ? new Date(body.completedAt) : now,
         },
       })
 
-      await tx.task.update({
-        where: {
-          id: existingRun.task.id,
-        },
-        data: {
-          status: "completed",
-          completedAt: new Date(),
+      const refreshedTask = await tx.task.findUnique({
+        where: { id: existingRun.task.id },
+        include: {
+          checklistRun: true,
+          supplyRun: true,
         },
       })
+
+      const suppliesCompleted =
+        !refreshedTask?.supplyRun ||
+        refreshedTask.supplyRun.status === "completed"
+
+      if (suppliesCompleted) {
+        await tx.task.update({
+          where: { id: existingRun.task.id },
+          data: {
+            status: "completed",
+            completedAt: now,
+          },
+        })
+
+        const latestAssignment = await tx.taskAssignment.findFirst({
+          where: {
+            partnerId: auth.partnerId,
+            taskId: existingRun.task.id,
+          },
+          orderBy: [
+            { assignedAt: "desc" },
+            { createdAt: "desc" },
+          ],
+          select: { id: true },
+        })
+
+        if (latestAssignment) {
+          await tx.taskAssignment.update({
+            where: { id: latestAssignment.id },
+            data: {
+              status: "completed",
+              completedAt: now,
+            },
+          })
+        }
+      }
 
       return tx.taskChecklistRun.findUnique({
         where: { id: runId },
