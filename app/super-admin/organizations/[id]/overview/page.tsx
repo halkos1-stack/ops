@@ -1,6 +1,15 @@
 import Link from "next/link"
 import { prisma } from "@/lib/prisma"
 import { requireSuperAdmin } from "@/lib/auth"
+import {
+  getAssignmentStatusLabel,
+  getIssuePriorityLabel,
+  getIssueStatusLabel,
+  getPartnerStatusLabel,
+  getPropertyStatusLabel,
+  getTaskStatusLabel,
+  getTaskTypeLabel,
+} from "@/lib/i18n/labels"
 
 type PageProps = {
   params: Promise<{
@@ -21,30 +30,6 @@ function formatDate(value: Date | string | null) {
   }
 }
 
-function getTaskStatusLabel(status: string | null | undefined) {
-  if (!status) return "—"
-
-  switch (String(status).toUpperCase()) {
-    case "PENDING":
-      return "Σε αναμονή"
-    case "ASSIGNED":
-      return "Ανατέθηκε"
-    case "WAITING_ACCEPTANCE":
-      return "Αναμονή αποδοχής"
-    case "ACCEPTED":
-      return "Αποδεκτή"
-    case "REJECTED":
-      return "Απορρίφθηκε"
-    case "IN_PROGRESS":
-      return "Σε εξέλιξη"
-    case "COMPLETED":
-      return "Ολοκληρωμένη"
-    case "CANCELLED":
-      return "Ακυρωμένη"
-    default:
-      return status
-  }
-}
 
 function getMembershipRoleLabel(role: string | null | undefined) {
   switch (String(role ?? "").toUpperCase()) {
@@ -489,7 +474,7 @@ export default async function SuperAdminOrganizationOverviewPage({
                     </div>
 
                     <span className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
-                      {property.status ?? "—"}
+                      {property.status != null ? getPropertyStatusLabel("el", property.status) : "—"}
                     </span>
                   </div>
                 </div>
@@ -538,7 +523,7 @@ export default async function SuperAdminOrganizationOverviewPage({
                     </div>
 
                     <span className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
-                      {partner.status ?? "—"}
+                      {partner.status != null ? getPartnerStatusLabel("el", partner.status) : "—"}
                     </span>
                   </div>
                 </div>
@@ -574,8 +559,8 @@ export default async function SuperAdminOrganizationOverviewPage({
                     {issue.property?.code ?? "—"}
                   </p>
                   <p className="mt-1 text-xs text-slate-500">
-                    Κατάσταση: {issue.status ?? "—"} • Σοβαρότητα:{" "}
-                    {issue.severity ?? "—"}
+                    Κατάσταση: {issue.status != null ? getIssueStatusLabel("el", issue.status) : "—"} • Σοβαρότητα:{" "}
+                    {issue.severity != null ? getIssuePriorityLabel("el", issue.severity) : "—"}
                   </p>
                 </div>
               ))}
@@ -634,7 +619,7 @@ export default async function SuperAdminOrganizationOverviewPage({
                     <div className="min-w-0">
                       <p className="font-semibold text-slate-900">{task.title}</p>
                       <p className="mt-1 text-xs text-slate-500">
-                        Τύπος: {task.taskType ?? "—"}
+                        Τύπος: {task.taskType != null ? getTaskTypeLabel("el", task.taskType) : "—"}
                       </p>
                       <p className="mt-1 text-xs text-slate-500">
                         Ακίνητο: {task.property?.name ?? "—"} /{" "}
@@ -654,7 +639,7 @@ export default async function SuperAdminOrganizationOverviewPage({
                           Κατάσταση εργασίας
                         </p>
                         <p className="mt-1 text-sm font-semibold text-slate-900">
-                          {getTaskStatusLabel(task.status)}
+                          {task.status != null ? getTaskStatusLabel("el", task.status) : "—"}
                         </p>
                       </div>
 
@@ -666,7 +651,7 @@ export default async function SuperAdminOrganizationOverviewPage({
                           {latestAssignment?.partner?.name ?? "—"}
                         </p>
                         <p className="mt-1 text-xs text-slate-500">
-                          {latestAssignment?.status ?? "—"}
+                          {latestAssignment?.status != null ? getAssignmentStatusLabel("el", latestAssignment.status) : "—"}
                         </p>
                       </div>
                     </div>
