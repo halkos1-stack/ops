@@ -84,6 +84,15 @@ export type NormalizedIssuePriority =
   | "URGENT"
   | "UNKNOWN"
 
+export type NormalizedIssueType =
+  | "DAMAGE"
+  | "REPAIR"
+  | "SUPPLIES"
+  | "INSPECTION"
+  | "CLEANING"
+  | "GENERAL"
+  | "UNKNOWN"
+
 export type NormalizedPropertyStatus =
   | "ACTIVE"
   | "INACTIVE"
@@ -701,6 +710,37 @@ export function normalizeIssuePriority(
   value: unknown
 ): NormalizedIssuePriority {
   return normalizePriority(value)
+}
+
+export function normalizeIssueType(value: unknown): NormalizedIssueType {
+  const raw = normalizeRaw(value)
+  const loose = normalizeLoose(value)
+
+  if (raw === "DAMAGE" || loose === "damage" || loose === "ζημιά" || loose === "ζημια") {
+    return "DAMAGE"
+  }
+
+  if (raw === "REPAIR" || loose === "repair" || loose === "βλάβη" || loose === "βλαβη") {
+    return "REPAIR"
+  }
+
+  if (raw === "SUPPLIES" || loose === "supplies" || loose === "αναλώσιμα" || loose === "αναλωσιμα") {
+    return "SUPPLIES"
+  }
+
+  if (raw === "INSPECTION" || loose === "inspection" || loose === "επιθεώρηση" || loose === "επιθεωρηση") {
+    return "INSPECTION"
+  }
+
+  if (raw === "CLEANING" || loose === "cleaning" || loose === "καθαριότητα" || loose === "καθαριοτητα") {
+    return "CLEANING"
+  }
+
+  if (raw === "GENERAL" || loose === "general" || loose === "γενικό" || loose === "γενικο") {
+    return "GENERAL"
+  }
+
+  return "UNKNOWN"
 }
 
 export function normalizePropertyStatus(

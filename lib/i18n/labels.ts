@@ -8,6 +8,7 @@ import {
   NormalizedChecklistStatus,
   NormalizedIssuePriority,
   NormalizedIssueStatus,
+  NormalizedIssueType,
   NormalizedPartnerStatus,
   NormalizedPriority,
   NormalizedPropertyStatus,
@@ -23,6 +24,7 @@ import {
   normalizeChecklistTitle,
   normalizeIssuePriority,
   normalizeIssueStatus,
+  normalizeIssueType,
   normalizePartnerStatus,
   normalizePriority,
   normalizePropertyStatus,
@@ -302,6 +304,33 @@ export function getIssuePriorityLabel(language: AppLanguage, value: unknown) {
           HIGH: "Υψηλή",
           URGENT: "Επείγουσα",
           UNKNOWN: "Άγνωστη προτεραιότητα",
+        }
+
+  return labels[normalized]
+}
+
+export function getIssueTypeLabel(language: AppLanguage, value: unknown) {
+  const normalized = normalizeIssueType(value)
+
+  const labels: Record<NormalizedIssueType, string> =
+    language === "en"
+      ? {
+          DAMAGE: "Damage",
+          REPAIR: "Repair",
+          SUPPLIES: "Supplies",
+          INSPECTION: "Inspection",
+          CLEANING: "Cleaning",
+          GENERAL: "General",
+          UNKNOWN: "Unknown issue type",
+        }
+      : {
+          DAMAGE: "Ζημιά",
+          REPAIR: "Βλάβη",
+          SUPPLIES: "Αναλώσιμα",
+          INSPECTION: "Επιθεώρηση",
+          CLEANING: "Καθαριότητα",
+          GENERAL: "Γενικό",
+          UNKNOWN: "Άγνωστος τύπος",
         }
 
   return labels[normalized]

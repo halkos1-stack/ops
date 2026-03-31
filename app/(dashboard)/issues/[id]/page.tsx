@@ -4,6 +4,15 @@ import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
 import { useParams } from "next/navigation"
 import { useAppLanguage } from "@/components/i18n/LanguageProvider"
+import {
+  getBookingStatusLabel,
+  getIssuePriorityLabel,
+  getIssueStatusLabel,
+  getIssueTypeLabel,
+  getPropertyStatusLabel,
+  getTaskStatusLabel,
+  getTaskTypeLabel,
+} from "@/lib/i18n/labels"
 
 type IssueDetail = {
   id: string
@@ -180,213 +189,6 @@ function getTexts(language: "el" | "en") {
   }
 }
 
-function issueTypeLabel(value?: string | null, language: "el" | "en" = "el") {
-  const normalized = (value || "").trim().toLowerCase()
-
-  if (language === "en") {
-    switch (normalized) {
-      case "damage":
-        return "Damage"
-      case "repair":
-        return "Repair"
-      case "supplies":
-        return "Supplies"
-      case "inspection":
-        return "Inspection"
-      case "cleaning":
-        return "Cleaning"
-      case "general":
-        return "General"
-      default:
-        return value || "—"
-    }
-  }
-
-  switch (normalized) {
-    case "damage":
-      return "Ζημιά"
-    case "repair":
-      return "Βλάβη"
-    case "supplies":
-      return "Αναλώσιμα"
-    case "inspection":
-      return "Επιθεώρηση"
-    case "cleaning":
-      return "Καθαριότητα"
-    case "general":
-      return "Γενικό"
-    default:
-      return value || "—"
-  }
-}
-
-function severityLabel(value?: string | null, language: "el" | "en" = "el") {
-  const normalized = (value || "").trim().toLowerCase()
-
-  if (language === "en") {
-    switch (normalized) {
-      case "low":
-        return "Low"
-      case "medium":
-        return "Medium"
-      case "high":
-        return "High"
-      case "critical":
-        return "Critical"
-      default:
-        return value || "—"
-    }
-  }
-
-  switch (normalized) {
-    case "low":
-      return "Χαμηλή"
-    case "medium":
-      return "Μεσαία"
-    case "high":
-      return "Υψηλή"
-    case "critical":
-      return "Κρίσιμη"
-    default:
-      return value || "—"
-  }
-}
-
-function statusLabel(value?: string | null, language: "el" | "en" = "el") {
-  const normalized = (value || "").trim().toLowerCase()
-
-  if (language === "en") {
-    switch (normalized) {
-      case "open":
-        return "Open"
-      case "in_progress":
-        return "In progress"
-      case "resolved":
-        return "Resolved"
-      case "closed":
-        return "Closed"
-      default:
-        return value || "—"
-    }
-  }
-
-  switch (normalized) {
-    case "open":
-      return "Ανοιχτό"
-    case "in_progress":
-      return "Σε εξέλιξη"
-    case "resolved":
-      return "Επιλυμένο"
-    case "closed":
-      return "Κλειστό"
-    default:
-      return value || "—"
-  }
-}
-
-function propertyStatusLabel(value?: string | null, language: "el" | "en" = "el") {
-  const normalized = (value || "").trim().toLowerCase()
-
-  if (language === "en") {
-    switch (normalized) {
-      case "active":
-        return "Active"
-      case "inactive":
-        return "Inactive"
-      case "maintenance":
-        return "Maintenance"
-      case "archived":
-        return "Archived"
-      default:
-        return value || "—"
-    }
-  }
-
-  switch (normalized) {
-    case "active":
-      return "Ενεργό"
-    case "inactive":
-      return "Ανενεργό"
-    case "maintenance":
-      return "Σε συντήρηση"
-    case "archived":
-      return "Αρχειοθετημένο"
-    default:
-      return value || "—"
-  }
-}
-
-function taskStatusLabel(value?: string | null, language: "el" | "en" = "el") {
-  const normalized = (value || "").trim().toLowerCase()
-
-  if (language === "en") {
-    switch (normalized) {
-      case "pending":
-        return "Pending"
-      case "assigned":
-        return "Assigned"
-      case "accepted":
-        return "Accepted"
-      case "in_progress":
-        return "In progress"
-      case "completed":
-        return "Completed"
-      case "cancelled":
-        return "Cancelled"
-      default:
-        return value || "—"
-    }
-  }
-
-  switch (normalized) {
-    case "pending":
-      return "Εκκρεμεί"
-    case "assigned":
-      return "Ανατέθηκε"
-    case "accepted":
-      return "Αποδεκτή"
-    case "in_progress":
-      return "Σε εξέλιξη"
-    case "completed":
-      return "Ολοκληρωμένη"
-    case "cancelled":
-      return "Ακυρωμένη"
-    default:
-      return value || "—"
-  }
-}
-
-function bookingStatusLabel(value?: string | null, language: "el" | "en" = "el") {
-  const normalized = (value || "").trim().toLowerCase()
-
-  if (language === "en") {
-    switch (normalized) {
-      case "confirmed":
-        return "Confirmed"
-      case "pending":
-        return "Pending"
-      case "cancelled":
-        return "Cancelled"
-      case "completed":
-        return "Completed"
-      default:
-        return value || "—"
-    }
-  }
-
-  switch (normalized) {
-    case "confirmed":
-      return "Επιβεβαιωμένη"
-    case "pending":
-      return "Σε αναμονή"
-    case "cancelled":
-      return "Ακυρωμένη"
-    case "completed":
-      return "Ολοκληρωμένη"
-    default:
-      return value || "—"
-  }
-}
 
 function badgeClasses(value?: string | null) {
   switch ((value || "").toLowerCase()) {
@@ -543,7 +345,7 @@ export default function IssueDetailPage() {
                 issue.status
               )}`}
             >
-              {statusLabel(issue.status, language)}
+              {getIssueStatusLabel(language, issue.status)}
             </span>
 
             <span
@@ -551,11 +353,11 @@ export default function IssueDetailPage() {
                 issue.severity
               )}`}
             >
-              {severityLabel(issue.severity, language)}
+              {getIssuePriorityLabel(language, issue.severity)}
             </span>
 
             <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200">
-              {issueTypeLabel(issue.issueType, language)}
+              {getIssueTypeLabel(language, issue.issueType)}
             </span>
 
             {isChecklistGenerated ? (
@@ -574,15 +376,15 @@ export default function IssueDetailPage() {
           <InfoField label={texts.fields.title} value={issue.title} />
           <InfoField
             label={texts.issueType}
-            value={issueTypeLabel(issue.issueType, language)}
+            value={getIssueTypeLabel(language, issue.issueType)}
           />
           <InfoField
             label={texts.severity}
-            value={severityLabel(issue.severity, language)}
+            value={getIssuePriorityLabel(language, issue.severity)}
           />
           <InfoField
             label={texts.status}
-            value={statusLabel(issue.status, language)}
+            value={getIssueStatusLabel(language, issue.status)}
           />
           <InfoField label={texts.reportedBy} value={issue.reportedBy || "—"} />
           <InfoField
@@ -649,7 +451,9 @@ export default function IssueDetailPage() {
             />
             <InfoField
               label={texts.fields.propertyStatus}
-              value={propertyStatusLabel(issue.property?.status, language)}
+              value={issue.property?.status != null
+                ? getPropertyStatusLabel(language, issue.property.status)
+                : "—"}
             />
 
             {issue.property ? (
@@ -670,11 +474,15 @@ export default function IssueDetailPage() {
             <InfoField label={texts.fields.title} value={issue.task?.title || "—"} />
             <InfoField
               label={texts.fields.taskStatus}
-              value={taskStatusLabel(issue.task?.status, language)}
+              value={issue.task?.status != null
+                ? getTaskStatusLabel(language, issue.task.status)
+                : "—"}
             />
             <InfoField
               label={texts.issueType}
-              value={issue.task?.taskType || "—"}
+              value={issue.task?.taskType != null
+                ? getTaskTypeLabel(language, issue.task.taskType)
+                : "—"}
             />
             <InfoField
               label={texts.createdAt}
@@ -699,7 +507,9 @@ export default function IssueDetailPage() {
             <InfoField label={texts.fields.title} value={issue.booking?.guestName || "—"} />
             <InfoField
               label={texts.fields.bookingStatus}
-              value={bookingStatusLabel(issue.booking?.status, language)}
+              value={issue.booking?.status != null
+                ? getBookingStatusLabel(language, issue.booking.status)
+                : "—"}
             />
             <InfoField
               label={texts.fields.source}
