@@ -1,6 +1,12 @@
 import Link from "next/link"
 import { prisma } from "@/lib/prisma"
 import { requireSuperAdmin } from "@/lib/auth"
+import {
+  getPartnerStatusLabel,
+  getPropertyStatusLabel,
+  getTaskStatusLabel,
+  getTaskTypeLabel,
+} from "@/lib/i18n/labels"
 
 type PageProps = {
   params: Promise<{
@@ -21,38 +27,6 @@ function formatDate(value: Date | string | null) {
   }
 }
 
-function getTaskStatusLabel(status: string | null | undefined) {
-  if (!status) return "—"
-
-  switch (status) {
-    case "PENDING":
-    case "pending":
-      return "Σε αναμονή"
-    case "ASSIGNED":
-    case "assigned":
-      return "Ανατέθηκε"
-    case "WAITING_ACCEPTANCE":
-    case "waiting_acceptance":
-      return "Αναμονή αποδοχής"
-    case "ACCEPTED":
-    case "accepted":
-      return "Αποδεκτή"
-    case "REJECTED":
-    case "rejected":
-      return "Απορρίφθηκε"
-    case "IN_PROGRESS":
-    case "in_progress":
-      return "Σε εξέλιξη"
-    case "COMPLETED":
-    case "completed":
-      return "Ολοκληρωμένη"
-    case "CANCELLED":
-    case "cancelled":
-      return "Ακυρωμένη"
-    default:
-      return status
-  }
-}
 
 export default async function SuperAdminOrganizationDetailPage({
   params,
@@ -275,7 +249,7 @@ export default async function SuperAdminOrganizationDetailPage({
                     </div>
 
                     <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
-                      {property.status ?? "—"}
+                      {property.status != null ? getPropertyStatusLabel("el", property.status) : "—"}
                     </span>
                   </div>
                 </div>
@@ -322,7 +296,7 @@ export default async function SuperAdminOrganizationDetailPage({
                     </div>
 
                     <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
-                      {partner.status ?? "—"}
+                      {partner.status != null ? getPartnerStatusLabel("el", partner.status) : "—"}
                     </span>
                   </div>
                 </div>
@@ -385,7 +359,7 @@ export default async function SuperAdminOrganizationDetailPage({
                       </td>
 
                       <td className="px-4 py-4 align-top text-slate-700">
-                        {task.taskType ?? "—"}
+                        {task.taskType != null ? getTaskTypeLabel("el", task.taskType) : "—"}
                       </td>
 
                       <td className="px-4 py-4 align-top">
@@ -400,7 +374,7 @@ export default async function SuperAdminOrganizationDetailPage({
                       </td>
 
                       <td className="px-4 py-4 align-top text-slate-700">
-                        {getTaskStatusLabel(task.status)}
+                        {task.status != null ? getTaskStatusLabel("el", task.status) : "—"}
                       </td>
 
                       <td className="px-4 py-4 align-top text-slate-600">
