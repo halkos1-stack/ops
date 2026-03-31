@@ -17,6 +17,52 @@ function toStringValue(value: unknown, fallback = "") {
   return value.trim()
 }
 
+function normalizeEventType(value: unknown) {
+  const text = String(value ?? "").trim().toLowerCase()
+
+  if (!text) return "general"
+
+  if (
+    [
+      "general",
+      "task",
+      "issue",
+      "property",
+      "system",
+      "alert",
+      "booking",
+      "dispatch",
+    ].includes(text)
+  ) {
+    return text
+  }
+
+  return "general"
+}
+
+function normalizeEventStatus(value: unknown) {
+  const text = String(value ?? "").trim().toLowerCase()
+
+  if (!text) return "open"
+
+  if (
+    [
+      "open",
+      "in_progress",
+      "resolved",
+      "closed",
+      "cancelled",
+      "completed",
+      "active",
+      "pending",
+    ].includes(text)
+  ) {
+    return text
+  }
+
+  return "open"
+}
+
 export async function GET() {
   try {
     const access = await requireApiAppAccess()
@@ -62,8 +108,8 @@ export async function POST(req: NextRequest) {
 
     const title = toStringValue(body.title)
     const description = toNullableString(body.description)
-    const type = toNullableString(body.type)
-    const status = toNullableString(body.status)
+    const type = normalizeEventType(body.type)
+    const status = normalizeEventStatus(body.status)
     const propertyId = toNullableString(body.propertyId)
     const taskId = toNullableString(body.taskId)
     const issueId = toNullableString(body.issueId)

@@ -24,6 +24,7 @@ export async function requireApiAppAccessWithDevBypass(
   const systemRoleHeader = req.headers.get("x-system-role")
   const organizationIdHeader = req.headers.get("x-organization-id")
   const emailHeader = req.headers.get("x-dev-email")
+  const nameHeader = req.headers.get("x-dev-name")
 
   if (!systemRoleHeader) {
     return realAccess
@@ -34,6 +35,7 @@ export async function requireApiAppAccessWithDevBypass(
 
   const auth: RouteAccessContext = {
     userId: "dev-local-user",
+    name: nameHeader || null,
     email: emailHeader || "dev@local.test",
     systemRole,
     organizationId: organizationIdHeader || null,

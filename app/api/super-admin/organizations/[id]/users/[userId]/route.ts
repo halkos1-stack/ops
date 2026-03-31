@@ -13,7 +13,9 @@ type RouteContext = {
 type OrganizationRole = "ORG_ADMIN" | "MANAGER" | "PARTNER"
 
 function toNullableString(value: unknown) {
-  if (value === undefined || value === null) return null
+  if (value === undefined || value === null) {
+    return null
+  }
 
   const text = String(value).trim()
   return text === "" ? null : text
@@ -58,6 +60,8 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
             name: true,
             systemRole: true,
             isActive: true,
+            createdAt: true,
+            updatedAt: true,
           },
         },
       },
@@ -137,10 +141,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     }
 
     if (membership.isPrimaryOrgAdmin) {
-      if (
-        requestedRole !== undefined &&
-        requestedRole !== membership.role
-      ) {
+      if (requestedRole !== undefined && requestedRole !== membership.role) {
         return NextResponse.json(
           {
             error:
@@ -234,7 +235,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         },
       })
 
-      const refreshed = await tx.membership.findUnique({
+      return tx.membership.findUnique({
         where: {
           id: membership.id,
         },
@@ -252,31 +253,35 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
           },
         },
       })
-
-      return refreshed
     })
 
+    if (!updated) {
+      return NextResponse.json(
+        { error: "Αποτυχία ανάγνωσης του ενημερωμένου χρήστη." },
+        { status: 500 }
+      )
+    }
+
     return NextResponse.json({
-      message: membership.isPrimaryOrgAdmin
+      message: updated.isPrimaryOrgAdmin
         ? "Ο βασικός διαχειριστής οργανισμού ενημερώθηκε επιτυχώς."
         : "Ο χρήστης ενημερώθηκε επιτυχώς.",
-      user: updated
-        ? {
-            membershipId: updated.id,
-            userId: updated.user.id,
-            name: updated.user.name,
-            email: updated.user.email,
-            systemRole: updated.user.systemRole,
-            userIsActive: updated.user.isActive,
-            membershipIsActive: updated.isActive,
-            isActive: updated.user.isActive && updated.isActive,
-            organizationRole: updated.role,
-            isPrimaryOrgAdmin: updated.isPrimaryOrgAdmin,
-            createdAt: updated.createdAt,
-            updatedAt: updated.updatedAt,
-            userCreatedAt: updated.user.createdAt,
-          }
-        : null,
+      user: {
+        membershipId: updated.id,
+        userId: updated.user.id,
+        name: updated.user.name,
+        email: updated.user.email,
+        systemRole: updated.user.systemRole,
+        userIsActive: updated.user.isActive,
+        membershipIsActive: updated.isActive,
+        isActive: updated.user.isActive && updated.isActive,
+        organizationRole: updated.role,
+        isPrimaryOrgAdmin: updated.isPrimaryOrgAdmin,
+        createdAt: updated.createdAt,
+        updatedAt: updated.updatedAt,
+        userCreatedAt: updated.user.createdAt,
+        userUpdatedAt: updated.user.updatedAt,
+      },
     })
   } catch (error) {
     console.error(

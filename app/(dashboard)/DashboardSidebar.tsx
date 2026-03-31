@@ -45,7 +45,7 @@ export default function DashboardSidebar() {
           { label: "Συνεργάτες", href: "/partners" },
           { label: "Χρήστες οργανισμού", href: "/users" },
           { label: "Ημερολόγιο", href: "/calendar" },
-          { label: "Checklists", href: "/checklists" },
+          { label: "Λίστες ελέγχου", href: "/checklists" },
           { label: "Ο λογαριασμός μου", href: "/account" },
           { label: "Ρυθμίσεις", href: "/settings" },
         ]

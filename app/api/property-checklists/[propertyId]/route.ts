@@ -21,6 +21,12 @@ type ChecklistItemInput = {
   requiresPhoto?: unknown
   opensIssueOnFail?: unknown
   optionsText?: unknown
+  issueTypeOnFail?: unknown
+  issueSeverityOnFail?: unknown
+  failureValuesText?: unknown
+  linkedSupplyItemId?: unknown
+  supplyUpdateMode?: unknown
+  supplyQuantity?: unknown
 }
 
 function toNullableString(value: unknown) {
@@ -51,6 +57,12 @@ function toNumberValue(value: unknown, fallback = 0) {
   return Number.isFinite(num) ? num : fallback
 }
 
+function toNullableNumber(value: unknown) {
+  if (value === undefined || value === null || value === "") return null
+  const num = Number(value)
+  return Number.isFinite(num) ? num : null
+}
+
 function normalizeItemType(value: unknown) {
   const normalized = toStringValue(value, "boolean").toLowerCase()
 
@@ -70,10 +82,73 @@ function normalizeItemType(value: unknown) {
       "image",
     ].includes(normalized)
   ) {
+    if (normalized === "yes_no" || normalized === "pass_fail" || normalized === "checkbox") {
+      return "boolean"
+    }
+    if (normalized === "numeric") {
+      return "number"
+    }
+    if (normalized === "dropdown") {
+      return "select"
+    }
+    if (normalized === "image") {
+      return "photo"
+    }
     return normalized
   }
 
   return "boolean"
+}
+
+function normalizeIssueType(value: unknown, fallbackCategory?: string | null) {
+  const normalized = toStringValue(value).toLowerCase()
+
+  if (
+    ["damage", "repair", "supplies", "inspection", "cleaning", "general"].includes(
+      normalized
+    )
+  ) {
+    return normalized
+  }
+
+  const category = String(fallbackCategory || "").toLowerCase()
+
+  if (
+    category.includes("supply") ||
+    category.includes("stock") ||
+    category.includes("inventory") ||
+    category.includes("αναλω")
+  ) {
+    return "supplies"
+  }
+
+  if (category.includes("damage") || category.includes("ζημι")) return "damage"
+  if (category.includes("repair") || category.includes("βλαβ")) return "repair"
+  if (category.includes("clean") || category.includes("καθαρ")) return "cleaning"
+  if (category.includes("inspection") || category.includes("επιθε")) return "inspection"
+  if (category.includes("issue_report")) return "repair"
+
+  return "general"
+}
+
+function normalizeIssueSeverity(value: unknown) {
+  const normalized = toStringValue(value, "medium").toLowerCase()
+
+  if (["low", "medium", "high", "critical"].includes(normalized)) {
+    return normalized
+  }
+
+  return "medium"
+}
+
+function normalizeSupplyUpdateMode(value: unknown) {
+  const normalized = toStringValue(value, "none").toLowerCase()
+
+  if (["none", "set_stock", "consume", "flag_low", "status_map"].includes(normalized)) {
+    return normalized
+  }
+
+  return "none"
 }
 
 function normalizeItems(items: unknown): Array<{
@@ -102,21 +177,44 @@ function normalizeItems(items: unknown): Array<{
 
       if (!label) return null
 
+      const category = toNullableString(input.category) ?? "inspection"
+      const linkedSupplyItemId = toNullableString(input.linkedSupplyItemId)
+      const supplyUpdateMode = normalizeSupplyUpdateMode(input.supplyUpdateMode)
+      const supplyQuantity = toNullableNumber(input.supplyQuantity)
+
+      if (linkedSupplyItemId) {
+        return {
+          label,
+          description: toNullableString(input.description),
+          itemType: "select",
+          isRequired: toBoolean(input.isRequired, true),
+          sortOrder: toNumberValue(input.sortOrder, index + 1),
+          category: "supplies",
+          requiresPhoto: toBoolean(input.requiresPhoto, false),
+          opensIssueOnFail: false,
+          optionsText: "missing\nmedium\nfull",
+          issueTypeOnFail: null,
+          issueSeverityOnFail: null,
+          failureValuesText: null,
+          linkedSupplyItemId,
+          supplyUpdateMode: supplyUpdateMode === "none" ? "status_map" : supplyUpdateMode,
+          supplyQuantity,
+        }
+      }
+
       return {
         label,
         description: toNullableString(input.description),
         itemType: normalizeItemType(input.itemType),
         isRequired: toBoolean(input.isRequired, true),
         sortOrder: toNumberValue(input.sortOrder, index + 1),
-        category: toNullableString(input.category) ?? "inspection",
+        category,
         requiresPhoto: toBoolean(input.requiresPhoto, false),
         opensIssueOnFail: toBoolean(input.opensIssueOnFail, false),
         optionsText: toNullableString(input.optionsText),
-
-        issueTypeOnFail: "general",
-        issueSeverityOnFail: "medium",
-        failureValuesText: null,
-
+        issueTypeOnFail: normalizeIssueType(input.issueTypeOnFail, category),
+        issueSeverityOnFail: normalizeIssueSeverity(input.issueSeverityOnFail),
+        failureValuesText: toNullableString(input.failureValuesText),
         linkedSupplyItemId: null,
         supplyUpdateMode: "none",
         supplyQuantity: null,
@@ -157,8 +255,8 @@ function isSupplyLikeTemplate(template: {
     const mode = String(item.supplyUpdateMode || "").toLowerCase()
 
     return (
-      !!item.linkedSupplyItemId ||
-      mode !== "none" ||
+      Boolean(item.linkedSupplyItemId) ||
+      (mode !== "" && mode !== "none") ||
       category.includes("supply") ||
       category.includes("stock") ||
       category.includes("inventory") ||

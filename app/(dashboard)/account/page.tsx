@@ -1,6 +1,8 @@
 "use client"
 
 import { useState } from "react"
+import { useAppLanguage } from "@/components/i18n/LanguageProvider"
+import { getAccountPageTexts } from "@/lib/i18n/translations"
 
 type PasswordFormState = {
   currentPassword: string
@@ -15,6 +17,9 @@ const initialFormState: PasswordFormState = {
 }
 
 export default function AccountPage() {
+  const { language } = useAppLanguage()
+  const texts = getAccountPageTexts(language)
+
   const [form, setForm] = useState<PasswordFormState>(initialFormState)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -39,14 +44,14 @@ export default function AccountPage() {
       const data = await res.json()
 
       if (!res.ok) {
-        throw new Error(data?.error || "Αποτυχία αλλαγής κωδικού.")
+        throw new Error(data?.error || texts.apiChangeFailed)
       }
 
       setForm(initialFormState)
-      setSuccess("Ο κωδικός άλλαξε επιτυχώς.")
+      setSuccess(texts.successMessage)
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : "Άγνωστο σφάλμα αλλαγής κωδικού."
+        err instanceof Error ? err.message : texts.apiUnknownError
       setError(message)
     } finally {
       setSaving(false)
@@ -58,14 +63,13 @@ export default function AccountPage() {
       <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
         <div>
           <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">
-            Λογαριασμός
+            {texts.pageEyebrow}
           </p>
           <h1 className="mt-2 text-3xl font-bold text-slate-900">
-            Ο λογαριασμός μου
+            {texts.pageTitle}
           </h1>
           <p className="mt-2 max-w-2xl text-sm text-slate-600">
-            Από εδώ μπορείς να αλλάξεις τον προσωπικό σου κωδικό πρόσβασης με
-            ασφαλή τρόπο, χρησιμοποιώντας τον τρέχοντα κωδικό σου.
+            {texts.pageDescription}
           </p>
         </div>
       </section>
@@ -73,17 +77,18 @@ export default function AccountPage() {
       <section className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,720px)_minmax(280px,1fr)]">
         <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <div>
-            <h2 className="text-xl font-bold text-slate-900">Αλλαγή κωδικού</h2>
+            <h2 className="text-xl font-bold text-slate-900">
+              {texts.formTitle}
+            </h2>
             <p className="mt-2 text-sm text-slate-600">
-              Ο νέος κωδικός πρέπει να έχει τουλάχιστον 8 χαρακτήρες και να
-              περιέχει τουλάχιστον ένα γράμμα και έναν αριθμό.
+              {texts.formDescription}
             </p>
           </div>
 
           <form onSubmit={handleSubmit} className="mt-6 space-y-4">
             <div>
               <label className="mb-2 block text-sm font-medium text-slate-700">
-                Τρέχων κωδικός
+                {texts.currentPassword}
               </label>
               <input
                 type="password"
@@ -95,14 +100,14 @@ export default function AccountPage() {
                   }))
                 }
                 className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-slate-900"
-                placeholder="Εισαγωγή τρέχοντος κωδικού"
+                placeholder={texts.currentPasswordPlaceholder}
                 required
               />
             </div>
 
             <div>
               <label className="mb-2 block text-sm font-medium text-slate-700">
-                Νέος κωδικός
+                {texts.newPassword}
               </label>
               <input
                 type="password"
@@ -114,14 +119,14 @@ export default function AccountPage() {
                   }))
                 }
                 className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-slate-900"
-                placeholder="Εισαγωγή νέου κωδικού"
+                placeholder={texts.newPasswordPlaceholder}
                 required
               />
             </div>
 
             <div>
               <label className="mb-2 block text-sm font-medium text-slate-700">
-                Επιβεβαίωση νέου κωδικού
+                {texts.confirmPassword}
               </label>
               <input
                 type="password"
@@ -133,7 +138,7 @@ export default function AccountPage() {
                   }))
                 }
                 className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-slate-900"
-                placeholder="Επανάληψη νέου κωδικού"
+                placeholder={texts.confirmPasswordPlaceholder}
                 required
               />
             </div>
@@ -155,26 +160,19 @@ export default function AccountPage() {
               disabled={saving}
               className="w-full rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {saving ? "Αποθήκευση..." : "Αλλαγή κωδικού"}
+              {saving ? texts.saving : texts.submit}
             </button>
           </form>
         </div>
 
         <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-xl font-bold text-slate-900">Οδηγίες ασφάλειας</h2>
+          <h2 className="text-xl font-bold text-slate-900">
+            {texts.securityTitle}
+          </h2>
           <div className="mt-4 space-y-3 text-sm text-slate-600">
-            <p>
-              Χρησιμοποίησε διαφορετικό κωδικό από άλλες υπηρεσίες ή λογαριασμούς.
-            </p>
-            <p>
-              Απόφυγε απλές λέξεις, ονόματα ή προβλέψιμους συνδυασμούς.
-            </p>
-            <p>
-              Προτίμησε κωδικό με γράμματα, αριθμούς και μεγαλύτερο μήκος.
-            </p>
-            <p>
-              Μετά την αλλαγή, χρησιμοποίησε μόνο τον νέο κωδικό στις επόμενες συνδέσεις.
-            </p>
+            {texts.securityTips.map((tip) => (
+              <p key={tip}>{tip}</p>
+            ))}
           </div>
         </div>
       </section>

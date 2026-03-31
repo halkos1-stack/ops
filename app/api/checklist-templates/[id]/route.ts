@@ -7,79 +7,158 @@ type RouteContext = {
   }>
 }
 
+function toText(value: unknown) {
+  return String(value ?? "").trim()
+}
+
+function toNullableText(value: unknown) {
+  const text = String(value ?? "").trim()
+  return text === "" ? null : text
+}
+
+function toBooleanValue(value: unknown, fallback = true) {
+  if (typeof value === "boolean") return value
+  return fallback
+}
+
+function normalizeTemplateType(value: unknown): "main" | "support" {
+  const text = String(value ?? "").trim().toLowerCase()
+
+  if (
+    text === "main" ||
+    text === "primary" ||
+    text === "base" ||
+    text === "cleaning" ||
+    text === "cleaning_checklist"
+  ) {
+    return "main"
+  }
+
+  return "support"
+}
+
+function normalizeItemType(value: unknown) {
+  const text = String(value ?? "").trim().toLowerCase()
+
+  if (
+    text === "boolean" ||
+    text === "text" ||
+    text === "number" ||
+    text === "choice" ||
+    text === "photo" ||
+    text === "select"
+  ) {
+    return text === "select" ? "choice" : text
+  }
+
+  return "boolean"
+}
+
 export async function PATCH(req: NextRequest, context: RouteContext) {
   try {
     const { id } = await context.params
     const body = await req.json()
 
-    const name = body.name?.trim()
-    const taskType = body.taskType?.trim()
-    const description = body.description?.trim() || null
-    const isActive =
-      typeof body.isActive === "boolean" ? body.isActive : true
+    const title = toText(body.title || body.name)
+    const description = toNullableText(body.description)
+    const isActive = toBooleanValue(body.isActive, true)
+    const isPrimary = typeof body.isPrimary === "boolean" ? body.isPrimary : undefined
+    const templateType = normalizeTemplateType(body.templateType || body.taskType)
     const items = Array.isArray(body.items) ? body.items : []
 
-    const existingTemplate = await prisma.checklistTemplate.findUnique({
+    const existingTemplate = await prisma.propertyChecklistTemplate.findUnique({
       where: { id },
       include: {
-        property: true,
+        property: {
+          select: {
+            id: true,
+            organizationId: true,
+          },
+        },
         items: true,
       },
     })
 
     if (!existingTemplate) {
       return NextResponse.json(
-        { error: "Η checklist δεν βρέθηκε." },
+        { error: "Η λίστα δεν βρέθηκε." },
         { status: 404 }
       )
     }
 
-    if (!name || !taskType) {
+    if (!title) {
       return NextResponse.json(
-        { error: "Όνομα checklist και τύπος εργασίας είναι υποχρεωτικά." },
+        { error: "Το όνομα της λίστας είναι υποχρεωτικό." },
         { status: 400 }
       )
     }
 
     if (items.length === 0) {
       return NextResponse.json(
-        { error: "Η checklist πρέπει να έχει τουλάχιστον ένα βήμα." },
+        { error: "Η λίστα πρέπει να έχει τουλάχιστον ένα στοιχείο." },
         { status: 400 }
       )
     }
 
-    await prisma.checklistTemplateItem.deleteMany({
+    if (isPrimary === true) {
+      await prisma.propertyChecklistTemplate.updateMany({
+        where: {
+          propertyId: existingTemplate.propertyId,
+          isPrimary: true,
+          NOT: { id },
+        },
+        data: {
+          isPrimary: false,
+        },
+      })
+    }
+
+    await prisma.propertyChecklistTemplateItem.deleteMany({
       where: {
         templateId: id,
       },
     })
 
-    const updatedTemplate = await prisma.checklistTemplate.update({
+    const updatedTemplate = await prisma.propertyChecklistTemplate.update({
       where: { id },
       data: {
-        name,
-        taskType,
+        title,
         description,
         isActive,
+        templateType,
+        ...(typeof isPrimary === "boolean" ? { isPrimary } : {}),
         items: {
-          create: items.map(
-            (
-              item: {
-                label?: string
-                description?: string
-                itemType?: string
-                isRequired?: boolean
-              },
-              index: number
-            ) => ({
-              label: item.label?.trim() || `Βήμα ${index + 1}`,
-              description: item.description?.trim() || null,
-              itemType: item.itemType?.trim() || "boolean",
+          create: items.map((item: unknown, index: number) => {
+            const row = item as {
+              label?: string
+              description?: string
+              itemType?: string
+              isRequired?: boolean
+              category?: string
+              requiresPhoto?: boolean
+              opensIssueOnFail?: boolean
+              optionsText?: string
+            }
+
+            return {
+              label: toText(row.label) || `Βήμα ${index + 1}`,
+              description: toNullableText(row.description),
+              itemType: normalizeItemType(row.itemType),
               isRequired:
-                typeof item.isRequired === "boolean" ? item.isRequired : true,
+                typeof row.isRequired === "boolean" ? row.isRequired : true,
               sortOrder: index + 1,
-            })
-          ),
+              category: toNullableText(row.category) || "inspection",
+              requiresPhoto:
+                typeof row.requiresPhoto === "boolean"
+                  ? row.requiresPhoto
+                  : false,
+              opensIssueOnFail:
+                typeof row.opensIssueOnFail === "boolean"
+                  ? row.opensIssueOnFail
+                  : false,
+              optionsText: toNullableText(row.optionsText),
+            }
+          }),
         },
       },
       include: {
@@ -94,15 +173,18 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
 
     await prisma.activityLog.create({
       data: {
+        organizationId: existingTemplate.property.organizationId,
         propertyId: existingTemplate.propertyId,
         entityType: "checklist_template",
         entityId: updatedTemplate.id,
         action: "updated",
-        message: `Ενημερώθηκε checklist "${updatedTemplate.name}"`,
+        message: `Ενημερώθηκε λίστα "${updatedTemplate.title}"`,
         actorType: "admin",
         actorName: "System Admin",
         metadata: {
           templateId: updatedTemplate.id,
+          templateType: updatedTemplate.templateType,
+          isPrimary: updatedTemplate.isPrimary,
         },
       },
     })
@@ -125,32 +207,43 @@ export async function DELETE(
   try {
     const { id } = await context.params
 
-    const existingTemplate = await prisma.checklistTemplate.findUnique({
+    const existingTemplate = await prisma.propertyChecklistTemplate.findUnique({
       where: { id },
+      include: {
+        property: {
+          select: {
+            id: true,
+            organizationId: true,
+          },
+        },
+      },
     })
 
     if (!existingTemplate) {
       return NextResponse.json(
-        { error: "Η checklist δεν βρέθηκε." },
+        { error: "Η λίστα δεν βρέθηκε." },
         { status: 404 }
       )
     }
 
-    await prisma.checklistTemplate.delete({
+    await prisma.propertyChecklistTemplate.delete({
       where: { id },
     })
 
     await prisma.activityLog.create({
       data: {
+        organizationId: existingTemplate.property.organizationId,
         propertyId: existingTemplate.propertyId,
         entityType: "checklist_template",
         entityId: existingTemplate.id,
         action: "deleted",
-        message: `Διαγράφηκε checklist`,
+        message: `Διαγράφηκε λίστα "${existingTemplate.title}"`,
         actorType: "admin",
         actorName: "System Admin",
         metadata: {
           templateId: existingTemplate.id,
+          templateType: existingTemplate.templateType,
+          isPrimary: existingTemplate.isPrimary,
         },
       },
     })

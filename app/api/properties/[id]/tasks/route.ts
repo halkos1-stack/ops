@@ -8,6 +8,168 @@ type RouteContext = {
   }>
 }
 
+type PropertyTaskRecord = {
+  id: string
+  organizationId: string
+  propertyId: string
+  bookingId: string | null
+  title: string
+  description: string | null
+  taskType: string
+  source: string
+  priority: string
+  status: string
+  scheduledDate: Date
+  scheduledStartTime: string | null
+  scheduledEndTime: string | null
+  dueDate: Date | null
+  completedAt: Date | null
+  requiresPhotos: boolean
+  requiresChecklist: boolean
+  requiresApproval: boolean
+  sendCleaningChecklist: boolean
+  sendSuppliesChecklist: boolean
+  usesCustomizedCleaningChecklist: boolean
+  alertEnabled: boolean
+  alertAt: Date | null
+  notes: string | null
+  resultNotes: string | null
+  createdAt: Date
+  updatedAt: Date
+  booking: {
+    id: string
+    guestName: string | null
+    checkInDate: Date
+    checkOutDate: Date
+    status: string
+  } | null
+  assignments: Array<{
+    id: string
+    taskId: string
+    partnerId: string
+    assignedAt: Date
+    acceptedAt: Date | null
+    rejectedAt: Date | null
+    startedAt: Date | null
+    completedAt: Date | null
+    status: string
+    rejectionReason: string | null
+    notes: string | null
+    responseToken: string | null
+    responseTokenExpiresAt: Date | null
+    checklistToken: string | null
+    checklistTokenExpiresAt: Date | null
+    assignmentEmailSentAt: Date | null
+    checklistEmailSentAt: Date | null
+    createdAt: Date
+    updatedAt: Date
+    partner: {
+      id: string
+      code: string
+      name: string
+      email: string
+      phone: string | null
+      specialty: string
+      status: string
+    }
+  }>
+  checklistRun: {
+    id: string
+    taskId: string
+    templateId: string
+    status: string
+    startedAt: Date | null
+    completedAt: Date | null
+    createdAt: Date
+    updatedAt: Date
+    template: {
+      id: string
+      title: string
+      description: string | null
+      templateType: string
+      isPrimary: boolean
+      isActive: boolean
+    }
+    answers: Array<{
+      id: string
+      issueCreated: boolean
+      createdAt: Date
+    }>
+  } | null
+  supplyRun: {
+    id: string
+    taskId: string
+    status: string
+    startedAt: Date | null
+    completedAt: Date | null
+    createdAt: Date
+    updatedAt: Date
+    answers: Array<{
+      id: string
+      taskSupplyRunId: string
+      propertySupplyId: string
+      fillLevel: string
+      notes: string | null
+      createdAt: Date
+      updatedAt: Date
+      propertySupply: {
+        id: string
+        propertyId: string
+        supplyItemId: string
+        isActive: boolean
+        fillLevel: string
+        currentStock: number
+        targetStock: number | null
+        reorderThreshold: number | null
+        lastUpdatedAt: Date
+        notes: string | null
+        createdAt: Date
+        updatedAt: Date
+        supplyItem: {
+          id: string
+          code: string
+          name: string
+          category: string
+          unit: string
+        }
+      }
+    }>
+  } | null
+  issues: Array<{
+    id: string
+    issueType: string
+    title: string
+    description: string | null
+    severity: string
+    status: string
+    reportedBy: string | null
+    resolutionNotes: string | null
+    resolvedAt: Date | null
+    createdAt: Date
+    updatedAt: Date
+    task: {
+      id: string
+      title: string
+      status: string
+    } | null
+  }>
+  taskPhotos: Array<{
+    id: string
+    category: string
+    fileUrl: string
+    fileName: string | null
+    uploadedAt: Date
+  }>
+  activityLogs: Array<{
+    id: string
+    action: string
+    message: string | null
+    actorType: string | null
+    actorName: string | null
+    createdAt: Date
+  }>
+}
+
 function toText(value: unknown) {
   return String(value ?? "").trim()
 }
@@ -40,9 +202,28 @@ async function resolvePrimaryCleaningTemplate(params: {
     select: {
       id: true,
       title: true,
+      description: true,
       templateType: true,
       isPrimary: true,
       isActive: true,
+      updatedAt: true,
+      items: {
+        orderBy: {
+          sortOrder: "asc",
+        },
+        select: {
+          id: true,
+          label: true,
+          description: true,
+          itemType: true,
+          isRequired: true,
+          sortOrder: true,
+          category: true,
+          requiresPhoto: true,
+          opensIssueOnFail: true,
+          optionsText: true,
+        },
+      },
     },
     orderBy: [{ isPrimary: "desc" }, { updatedAt: "desc" }],
   })
@@ -57,10 +238,38 @@ async function countActivePropertySupplies(propertyId: string) {
   })
 }
 
+function normalizeTaskForUi(task: PropertyTaskRecord) {
+  return {
+    ...task,
+    cleaningChecklistRun: task.checklistRun ?? null,
+    suppliesChecklistRun: task.supplyRun ?? null,
+    checklistRun: task.checklistRun ?? null,
+    supplyRun: task.supplyRun ?? null,
+  }
+}
+
 async function getPropertyTasksPayload(propertyId: string) {
-  const property = await prisma.property.findUnique({
+  const propertyBase = await prisma.property.findUnique({
     where: { id: propertyId },
-    include: {
+    select: {
+      id: true,
+      organizationId: true,
+      code: true,
+      name: true,
+      address: true,
+      city: true,
+      region: true,
+      postalCode: true,
+      country: true,
+      type: true,
+      status: true,
+      bedrooms: true,
+      bathrooms: true,
+      maxGuests: true,
+      notes: true,
+      defaultPartnerId: true,
+      createdAt: true,
+      updatedAt: true,
       defaultPartner: {
         select: {
           id: true,
@@ -70,12 +279,13 @@ async function getPropertyTasksPayload(propertyId: string) {
           phone: true,
           specialty: true,
           status: true,
+          notes: true,
         },
       },
     },
   })
 
-  if (!property) return null
+  if (!propertyBase) return null
 
   const checklistTemplates = await prisma.propertyChecklistTemplate.findMany({
     where: {
@@ -84,6 +294,67 @@ async function getPropertyTasksPayload(propertyId: string) {
       templateType: "main",
     },
     orderBy: [{ isPrimary: "desc" }, { updatedAt: "desc" }],
+    include: {
+      items: {
+        orderBy: {
+          sortOrder: "asc",
+        },
+        select: {
+          id: true,
+          label: true,
+          description: true,
+          itemType: true,
+          isRequired: true,
+          sortOrder: true,
+          category: true,
+          requiresPhoto: true,
+          opensIssueOnFail: true,
+          optionsText: true,
+        },
+      },
+    },
+  })
+
+  const propertySupplies = await prisma.propertySupply.findMany({
+    where: {
+      propertyId,
+      isActive: true,
+    },
+    orderBy: {
+      updatedAt: "desc",
+    },
+    include: {
+      supplyItem: {
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          category: true,
+          unit: true,
+          minimumStock: true,
+          isActive: true,
+        },
+      },
+    },
+  })
+
+  const issues = await prisma.issue.findMany({
+    where: {
+      propertyId,
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+    include: {
+      task: {
+        select: {
+          id: true,
+          title: true,
+          status: true,
+        },
+      },
+    },
+    take: 50,
   })
 
   const bookings = await prisma.booking.findMany({
@@ -93,15 +364,24 @@ async function getPropertyTasksPayload(propertyId: string) {
     orderBy: {
       checkInDate: "desc",
     },
+    take: 50,
   })
 
-  const tasks = await prisma.task.findMany({
+  const rawTasks: PropertyTaskRecord[] = await prisma.task.findMany({
     where: {
       propertyId,
     },
     orderBy: [{ scheduledDate: "asc" }, { createdAt: "desc" }],
     include: {
-      booking: true,
+      booking: {
+        select: {
+          id: true,
+          guestName: true,
+          checkInDate: true,
+          checkOutDate: true,
+          status: true,
+        },
+      },
       assignments: {
         orderBy: {
           assignedAt: "desc",
@@ -167,9 +447,21 @@ async function getPropertyTasksPayload(propertyId: string) {
           id: true,
           issueType: true,
           title: true,
+          description: true,
           severity: true,
           status: true,
+          reportedBy: true,
+          resolutionNotes: true,
+          resolvedAt: true,
           createdAt: true,
+          updatedAt: true,
+          task: {
+            select: {
+              id: true,
+              title: true,
+              status: true,
+            },
+          },
         },
       },
       taskPhotos: {
@@ -198,9 +490,21 @@ async function getPropertyTasksPayload(propertyId: string) {
     },
   })
 
+  const tasks = rawTasks.map(normalizeTaskForUi)
+
+  const property = {
+    ...propertyBase,
+    checklistTemplates,
+    propertySupplies,
+    issues,
+    tasks,
+  }
+
   return {
     property,
     checklistTemplates,
+    propertySupplies,
+    issues,
     bookings,
     tasks,
   }
@@ -237,6 +541,14 @@ export async function GET(_req: NextRequest, context: RouteContext) {
     }
 
     const payload = await getPropertyTasksPayload(id)
+
+    if (!payload) {
+      return NextResponse.json(
+        { error: "Το ακίνητο δεν βρέθηκε." },
+        { status: 404 }
+      )
+    }
+
     return NextResponse.json(payload)
   } catch (error) {
     console.error("GET /api/properties/[id]/tasks error:", error)
@@ -326,13 +638,29 @@ export async function POST(req: NextRequest, context: RouteContext) {
       )
     }
 
-    let primaryCleaningTemplate: {
-      id: string
-      title: string
-      templateType: string
-      isPrimary: boolean
-      isActive: boolean
-    } | null = null
+    let primaryCleaningTemplate:
+      | {
+          id: string
+          title: string
+          description: string | null
+          templateType: string
+          isPrimary: boolean
+          isActive: boolean
+          updatedAt: Date
+          items: Array<{
+            id: string
+            label: string
+            description: string | null
+            itemType: string
+            isRequired: boolean
+            sortOrder: number
+            category: string | null
+            requiresPhoto: boolean
+            opensIssueOnFail: boolean
+            optionsText: string | null
+          }>
+        }
+      | null = null
 
     if (sendCleaningChecklist) {
       primaryCleaningTemplate = await resolvePrimaryCleaningTemplate({

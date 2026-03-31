@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
-import { requireApiAppAccess, canAccessOrganization } from "@/lib/route-access"
+import {
+  requireApiAppAccess,
+  canAccessOrganization,
+} from "@/lib/route-access"
 import { createExpiryDate, createSecureToken } from "@/lib/tokens"
 import { sendMailSafe } from "@/lib/mailer"
 
@@ -44,6 +47,51 @@ function formatDateForGreek(value?: Date | string | null) {
     month: "2-digit",
     year: "numeric",
   }).format(date)
+}
+
+function normalizeSystemTaskTitleForLog(rawTitle: unknown) {
+  const title = String(rawTitle ?? "").trim()
+  if (!title) return "Task"
+
+  let match = title.match(/^Καθαρισμός μετά από check-out\s*-\s*(.+)$/i)
+  if (match?.[1]) {
+    return `Cleaning after check-out - ${match[1]}`
+  }
+
+  match = title.match(/^Cleaning after check-out\s*-\s*(.+)$/i)
+  if (match?.[1]) {
+    return `Cleaning after check-out - ${match[1]}`
+  }
+
+  match = title.match(/^Επιθεώρηση πριν από check-in\s*-\s*(.+)$/i)
+  if (match?.[1]) {
+    return `Inspection before check-in - ${match[1]}`
+  }
+
+  match = title.match(/^Inspection before check-in\s*-\s*(.+)$/i)
+  if (match?.[1]) {
+    return `Inspection before check-in - ${match[1]}`
+  }
+
+  match = title.match(/^Αναπλήρωση αναλωσίμων\s*-\s*(.+)$/i)
+  if (match?.[1]) {
+    return `Supplies refill - ${match[1]}`
+  }
+
+  match = title.match(/^Supplies refill\s*-\s*(.+)$/i)
+  if (match?.[1]) {
+    return `Supplies refill - ${match[1]}`
+  }
+
+  return title
+}
+
+function buildTaskAssignedMessage(partnerName: string, taskTitle: string) {
+  return `Task "${taskTitle}" was assigned to partner ${partnerName}.`
+}
+
+function buildSupersededAssignmentMessage() {
+  return "Previous pending assignment was replaced by a newer assignment before acceptance."
 }
 
 async function findPrimaryChecklistTemplate(
@@ -200,6 +248,25 @@ async function ensureTaskSupplyRun(params: {
   })
 }
 
+async function getLatestPortalAccessForPartner(partnerId: string) {
+  return prisma.partnerPortalAccessToken.findFirst({
+    where: {
+      partnerId,
+      isActive: true,
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+    select: {
+      id: true,
+      token: true,
+      isActive: true,
+      expiresAt: true,
+      createdAt: true,
+    },
+  })
+}
+
 export async function GET(request: NextRequest) {
   try {
     const access = await requireApiAppAccess()
@@ -214,6 +281,7 @@ export async function GET(request: NextRequest) {
     const taskId = searchParams.get("taskId")
     const partnerId = searchParams.get("partnerId")
     const status = searchParams.get("status")
+    const appBaseUrl = getAppBaseUrl(request)
 
     const where: {
       taskId?: string
@@ -294,7 +362,67 @@ export async function GET(request: NextRequest) {
       ],
     })
 
-    return NextResponse.json(assignments)
+    const partnerIds = Array.from(
+      new Set(
+        assignments
+          .map((assignment) => assignment.partnerId)
+          .filter((value): value is string => Boolean(value))
+      )
+    )
+
+    const portalAccesses = partnerIds.length
+      ? await prisma.partnerPortalAccessToken.findMany({
+          where: {
+            partnerId: {
+              in: partnerIds,
+            },
+            isActive: true,
+          },
+          orderBy: {
+            createdAt: "desc",
+          },
+          select: {
+            partnerId: true,
+            token: true,
+            expiresAt: true,
+            createdAt: true,
+          },
+        })
+      : []
+
+    const latestPortalByPartnerId = new Map<
+      string,
+      {
+        token: string
+        expiresAt: Date | null
+      }
+    >()
+
+    for (const portalAccess of portalAccesses) {
+      if (!latestPortalByPartnerId.has(portalAccess.partnerId)) {
+        latestPortalByPartnerId.set(portalAccess.partnerId, {
+          token: portalAccess.token,
+          expiresAt: portalAccess.expiresAt ?? null,
+        })
+      }
+    }
+
+    const enrichedAssignments = assignments.map((assignment) => {
+      const portalAccess = latestPortalByPartnerId.get(assignment.partnerId)
+      const portalToken = portalAccess?.token ?? null
+      const portalUrl = portalToken ? `${appBaseUrl}/partner/${portalToken}` : null
+
+      return {
+        ...assignment,
+        responseToken: assignment.responseToken ?? null,
+        responseTokenExpiresAt: assignment.responseTokenExpiresAt ?? null,
+        portalToken,
+        portalUrl,
+        portalTokenExpiresAt: portalAccess?.expiresAt ?? null,
+      }
+    })
+
+    return NextResponse.json(enrichedAssignments)
   } catch (error) {
     console.error("GET /api/task-assignments error:", error)
 
@@ -488,68 +616,41 @@ export async function POST(request: NextRequest) {
     const responseTokenExpiresAt = createExpiryDate(72)
     const appBaseUrl = getAppBaseUrl(request)
 
-    const existingPortalAccess = await prisma.partnerPortalAccessToken.findFirst({
-      where: {
-        partnerId: partner.id,
-        isActive: true,
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
-      select: {
-        id: true,
-        token: true,
-        isActive: true,
-        expiresAt: true,
-      },
-    })
+    let portalAccess = await getLatestPortalAccessForPartner(partner.id)
 
-    let portalToken = existingPortalAccess?.token || null
-
-    if (!portalToken) {
-      const portalAccess = await prisma.partnerPortalAccessToken.create({
+    if (!portalAccess) {
+      const createdPortalAccess = await prisma.partnerPortalAccessToken.create({
         data: {
           partnerId: partner.id,
           token: createSecureToken(32),
           isActive: true,
         },
         select: {
+          id: true,
           token: true,
+          isActive: true,
+          expiresAt: true,
+          createdAt: true,
         },
       })
 
-      portalToken = portalAccess.token
+      portalAccess = createdPortalAccess
     }
 
+    const portalToken = portalAccess.token
     const portalLink = `${appBaseUrl}/partner/${portalToken}`
 
     const result = await prisma.$transaction(async (tx) => {
-      const openAssignments = await tx.taskAssignment.findMany({
+      const previousAssignedAssignments = await tx.taskAssignment.findMany({
         where: {
           taskId,
-          status: {
-            in: ["assigned"],
-          },
+          status: "assigned",
         },
         select: {
           id: true,
+          partnerId: true,
         },
       })
-
-      if (openAssignments.length > 0) {
-        await tx.taskAssignment.updateMany({
-          where: {
-            taskId,
-            status: {
-              in: ["assigned"],
-            },
-          },
-          data: {
-            status: "cancelled",
-            notes: "Ακυρώθηκε λόγω νέας ανάθεσης πριν την αποδοχή.",
-          },
-        })
-      }
 
       if (task.sendCleaningChecklist) {
         await ensureTaskChecklistRun({
@@ -643,6 +744,27 @@ export async function POST(request: NextRequest) {
         })
       }
 
+      for (const previousAssignment of previousAssignedAssignments) {
+        await tx.activityLog.create({
+          data: {
+            organizationId: task.organizationId,
+            propertyId: task.propertyId,
+            taskId: task.id,
+            partnerId: previousAssignment.partnerId,
+            entityType: "TASK_ASSIGNMENT",
+            entityId: previousAssignment.id,
+            action: "TASK_ASSIGNMENT_SUPERSEDED",
+            message: buildSupersededAssignmentMessage(),
+            actorType: "MANAGER",
+            actorName: "Manager",
+            metadata: {
+              supersededByAssignmentId: assignment.id,
+              canonicalMessageFormat: "task-assignment-superseded-v1",
+            },
+          },
+        })
+      }
+
       await tx.activityLog.create({
         data: {
           organizationId: task.organizationId,
@@ -652,19 +774,24 @@ export async function POST(request: NextRequest) {
           entityType: "TASK_ASSIGNMENT",
           entityId: assignment.id,
           action: "TASK_ASSIGNED",
-          message: `Η εργασία "${task.title}" ανατέθηκε στον συνεργάτη ${partner.name}.`,
-          actorType: "manager",
-          actorName: "Διαχειριστής",
+          message: buildTaskAssignedMessage(
+            partner.name,
+            normalizeSystemTaskTitleForLog(task.title)
+          ),
+          actorType: "MANAGER",
+          actorName: "Manager",
           metadata: {
             assignmentStatus: "assigned",
             partnerId: partner.id,
             partnerName: partner.name,
             responseToken,
+            responseTokenExpiresAt,
             portalToken,
             portalLink,
             sendCleaningChecklist: task.sendCleaningChecklist,
             sendSuppliesChecklist: task.sendSuppliesChecklist,
             saveAsDefaultPartner,
+            canonicalMessageFormat: "task-assigned-partner-v1",
           },
         },
       })
@@ -717,7 +844,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         success: true,
-        assignment: result,
+        assignment: {
+          ...result,
+          responseToken,
+          responseTokenExpiresAt,
+          portalToken,
+          portalUrl: portalLink,
+        },
+        responseToken,
+        responseTokenExpiresAt,
+        portalToken,
         portalLink,
         assignmentEmailSent: mailResult.sent,
         assignmentEmailSendReason: mailResult.sent

@@ -14,8 +14,10 @@ export async function GET() {
 
     const assignments = await prisma.taskAssignment.findMany({
       where: {
-        organizationId: auth.organizationId,
         partnerId: auth.partnerId,
+        task: {
+          organizationId: auth.organizationId,
+        },
       },
       orderBy: {
         createdAt: "desc",
@@ -24,6 +26,27 @@ export async function GET() {
         task: {
           include: {
             property: true,
+            booking: true,
+            checklistRun: {
+              include: {
+                template: true,
+                answers: true,
+              },
+            },
+            supplyRun: {
+              include: {
+                answers: {
+                  include: {
+                    propertySupply: {
+                      include: {
+                        supplyItem: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            issues: true,
           },
         },
         partner: true,

@@ -161,6 +161,43 @@ export function isBuiltInSupplyCode(code?: string | null) {
   return Boolean(getSupplyPresetByCode(code))
 }
 
+export function getSupplyDisplayName(
+  language: "el" | "en",
+  params: {
+    code?: string | null
+    fallbackName?: string | null
+  }
+) {
+  const preset = getSupplyPresetByCode(params.code)
+
+  if (preset) {
+    return language === "en" ? preset.nameEn : preset.nameEl
+  }
+
+  const fallback = String(params.fallbackName || "").trim()
+  return fallback || "—"
+}
+
+export function getSupplyChecklistLabel(
+  language: "el" | "en",
+  params: {
+    code?: string | null
+    fallbackName?: string | null
+  }
+) {
+  const preset = getSupplyPresetByCode(params.code)
+
+  if (preset) {
+    return language === "en" ? preset.checklistLabelEn : preset.checklistLabelEl
+  }
+
+  const fallback = String(params.fallbackName || "").trim()
+
+  if (!fallback) return language === "en" ? "Supply level" : "Επάρκεια αναλωσίμου"
+
+  return language === "en" ? `${fallback} level` : `Επάρκεια ${fallback}`
+}
+
 export function buildCustomSupplyCode(name: string) {
   const slug = String(name || "")
     .trim()

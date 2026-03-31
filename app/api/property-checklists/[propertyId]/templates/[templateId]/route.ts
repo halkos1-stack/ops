@@ -89,15 +89,16 @@ function normalizeIssueType(value: unknown, fallbackCategory?: string | null) {
   if (
     category.includes("supply") ||
     category.includes("stock") ||
-    category.includes("inventory")
+    category.includes("inventory") ||
+    category.includes("αναλω")
   ) {
     return "supplies"
   }
 
-  if (category.includes("damage")) return "damage"
-  if (category.includes("repair")) return "repair"
-  if (category.includes("clean")) return "cleaning"
-  if (category.includes("inspection")) return "inspection"
+  if (category.includes("damage") || category.includes("ζημι")) return "damage"
+  if (category.includes("repair") || category.includes("βλαβ")) return "repair"
+  if (category.includes("clean") || category.includes("καθαρ")) return "cleaning"
+  if (category.includes("inspection") || category.includes("επιθε")) return "inspection"
   if (category.includes("issue_report")) return "repair"
 
   return "general"
@@ -126,7 +127,34 @@ function normalizeSupplyUpdateMode(value: unknown) {
 function normalizeItemType(value: unknown) {
   const normalized = toStringValue(value, "boolean").toLowerCase()
 
-  if (["boolean", "text", "number", "choice", "select", "photo"].includes(normalized)) {
+  if (
+    [
+      "boolean",
+      "yes_no",
+      "pass_fail",
+      "checkbox",
+      "text",
+      "number",
+      "numeric",
+      "choice",
+      "select",
+      "dropdown",
+      "photo",
+      "image",
+    ].includes(normalized)
+  ) {
+    if (normalized === "yes_no" || normalized === "pass_fail" || normalized === "checkbox") {
+      return "boolean"
+    }
+    if (normalized === "numeric") {
+      return "number"
+    }
+    if (normalized === "dropdown") {
+      return "select"
+    }
+    if (normalized === "image") {
+      return "photo"
+    }
     return normalized
   }
 
@@ -165,24 +193,26 @@ function normalizeItems(items: unknown): Array<{
 
       const category = toNullableString(input.category) ?? "inspection"
       const linkedSupplyItemId = toNullableString(input.linkedSupplyItemId)
+      const supplyUpdateMode = normalizeSupplyUpdateMode(input.supplyUpdateMode)
+      const supplyQuantity = toNullableNumber(input.supplyQuantity)
 
       if (linkedSupplyItemId) {
         return {
           label,
           description: toNullableString(input.description),
           itemType: "select",
-          isRequired: true,
+          isRequired: toBoolean(input.isRequired, true),
           sortOrder: toNumberValue(input.sortOrder, index + 1),
           category: "supplies",
-          requiresPhoto: false,
+          requiresPhoto: toBoolean(input.requiresPhoto, false),
           opensIssueOnFail: false,
           optionsText: "missing\nmedium\nfull",
           issueTypeOnFail: null,
           issueSeverityOnFail: null,
           failureValuesText: null,
           linkedSupplyItemId,
-          supplyUpdateMode: "status_map",
-          supplyQuantity: null,
+          supplyUpdateMode: supplyUpdateMode === "none" ? "status_map" : supplyUpdateMode,
+          supplyQuantity,
         }
       }
 
@@ -231,6 +261,7 @@ async function getActiveSuppliesForProperty(propertyId: string) {
   const rows = await prisma.propertySupply.findMany({
     where: {
       propertyId,
+      isActive: true,
       supplyItem: {
         isActive: true,
       },
@@ -276,13 +307,16 @@ async function validateLinkedSupplyItems(
   propertyId: string,
   items: Array<{ linkedSupplyItemId: string | null }>
 ) {
-  const ids = [...new Set(items.map((item) => item.linkedSupplyItemId).filter(Boolean))] as string[]
+  const ids = [
+    ...new Set(items.map((item) => item.linkedSupplyItemId).filter(Boolean)),
+  ] as string[]
 
   if (ids.length === 0) return
 
   const found = await prisma.propertySupply.findMany({
     where: {
       propertyId,
+      isActive: true,
       supplyItemId: {
         in: ids,
       },
@@ -300,7 +334,7 @@ async function validateLinkedSupplyItems(
   for (const id of ids) {
     if (!foundIds.has(id)) {
       throw new Error(
-        "Υπάρχει item checklist με μη έγκυρο συνδεδεμένο αναλώσιμο για αυτό το ακίνητο."
+        "Υπάρχει στοιχείο λίστας με μη έγκυρο συνδεδεμένο αναλώσιμο για αυτό το ακίνητο."
       )
     }
   }
@@ -361,14 +395,14 @@ export async function GET(_req: NextRequest, context: RouteContext) {
 
     if (!template) {
       return NextResponse.json(
-        { error: "Το πρότυπο checklist δεν βρέθηκε." },
+        { error: "Το πρότυπο λίστας δεν βρέθηκε." },
         { status: 404 }
       )
     }
 
     if (!canAccessOrganization(auth, template.organizationId)) {
       return NextResponse.json(
-        { error: "Δεν έχετε πρόσβαση σε αυτό το πρότυπο checklist." },
+        { error: "Δεν έχετε πρόσβαση σε αυτό το πρότυπο λίστας." },
         { status: 403 }
       )
     }
@@ -382,7 +416,7 @@ export async function GET(_req: NextRequest, context: RouteContext) {
     console.error("Checklist template GET by id error:", error)
 
     return NextResponse.json(
-      { error: "Αποτυχία φόρτωσης προτύπου checklist." },
+      { error: "Αποτυχία φόρτωσης προτύπου λίστας." },
       { status: 500 }
     )
   }
@@ -411,14 +445,14 @@ export async function PUT(req: NextRequest, context: RouteContext) {
 
     if (!existingTemplate || existingTemplate.propertyId !== propertyId) {
       return NextResponse.json(
-        { error: "Το πρότυπο checklist δεν βρέθηκε." },
+        { error: "Το πρότυπο λίστας δεν βρέθηκε." },
         { status: 404 }
       )
     }
 
     if (!canAccessOrganization(auth, existingTemplate.organizationId)) {
       return NextResponse.json(
-        { error: "Δεν έχετε πρόσβαση σε αυτό το πρότυπο checklist." },
+        { error: "Δεν έχετε πρόσβαση σε αυτό το πρότυπο λίστας." },
         { status: 403 }
       )
     }
@@ -517,7 +551,7 @@ export async function PUT(req: NextRequest, context: RouteContext) {
     const message =
       error instanceof Error
         ? error.message
-        : "Αποτυχία ενημέρωσης προτύπου checklist."
+        : "Αποτυχία ενημέρωσης προτύπου λίστας."
 
     return NextResponse.json({ error: message }, { status: 500 })
   }
@@ -546,14 +580,14 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
 
     if (!existingTemplate || existingTemplate.propertyId !== propertyId) {
       return NextResponse.json(
-        { error: "Το πρότυπο checklist δεν βρέθηκε." },
+        { error: "Το πρότυπο λίστας δεν βρέθηκε." },
         { status: 404 }
       )
     }
 
     if (!canAccessOrganization(auth, existingTemplate.organizationId)) {
       return NextResponse.json(
-        { error: "Δεν έχετε πρόσβαση σε αυτό το πρότυπο checklist." },
+        { error: "Δεν έχετε πρόσβαση σε αυτό το πρότυπο λίστας." },
         { status: 403 }
       )
     }
@@ -674,7 +708,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     const message =
       error instanceof Error
         ? error.message
-        : "Αποτυχία μερικής ενημέρωσης προτύπου checklist."
+        : "Αποτυχία μερικής ενημέρωσης προτύπου λίστας."
 
     return NextResponse.json({ error: message }, { status: 500 })
   }

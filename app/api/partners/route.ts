@@ -22,7 +22,12 @@ function buildPartnerCodeFromNumber(nextNumber: number) {
   return `PRT-${String(nextNumber).padStart(4, "0")}`
 }
 
-async function generateNextPartnerCode(tx: typeof prisma, organizationId: string) {
+type TransactionClient = Omit<typeof prisma, "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends">
+
+async function generateNextPartnerCode(
+  tx: TransactionClient,
+  organizationId: string
+) {
   const existingPartners = await tx.partner.findMany({
     where: {
       organizationId,
@@ -143,7 +148,7 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    if (auth.organizationId && !canAccessOrganization(auth, organizationId)) {
+    if (!canAccessOrganization(auth, organizationId)) {
       return NextResponse.json(
         { error: "Δεν έχετε πρόσβαση σε αυτόν τον οργανισμό." },
         { status: 403 }
@@ -196,7 +201,7 @@ export async function POST(req: NextRequest) {
     }
 
     const partner = await prisma.$transaction(async (tx) => {
-      const code = await generateNextPartnerCode(tx, organizationId!)
+      const code = await generateNextPartnerCode(tx as TransactionClient, organizationId!)
 
       return tx.partner.create({
         data: {

@@ -2,8 +2,8 @@
 
 import Link from "next/link"
 import { use, useEffect, useMemo, useState } from "react"
-
-type Language = "el" | "en"
+import { useAppLanguage } from "@/components/i18n/LanguageProvider"
+import { getPropertyChecklistManagementTexts } from "@/lib/i18n/translations"
 
 type PageParams = Promise<{
   propertyId: string
@@ -20,6 +20,12 @@ type TemplateItem = {
   requiresPhoto: boolean
   opensIssueOnFail: boolean
   optionsText: string | null
+  issueTypeOnFail?: string | null
+  issueSeverityOnFail?: string | null
+  failureValuesText?: string | null
+  linkedSupplyItemId?: string | null
+  supplyUpdateMode?: string | null
+  supplyQuantity?: number | null
 }
 
 type ChecklistTemplate = {
@@ -49,10 +55,13 @@ type PropertyChecklistResponse = {
 
 type PropertySupply = {
   id: string
+  propertySupplyId?: string | null
   name: string
   code?: string | null
   isActive: boolean
   fillLevel?: string | null
+  category?: string | null
+  unit?: string | null
 }
 
 type PropertySuppliesResponse = {
@@ -68,217 +77,16 @@ type NewItemDraft = {
   requiresPhoto: boolean
   opensIssueOnFail: boolean
   options: string[]
+  issueTypeOnFail: string
+  issueSeverityOnFail: string
+  failureValuesText: string
+  linkedSupplyItemId: string | null
+  supplyUpdateMode: string
+  supplyQuantity: string
 }
-
-const texts = {
-  el: {
-    pageEyebrow: "Διαχείριση λιστών ακινήτου",
-    pageTitleFallback: "Λίστες ακινήτου",
-    pageSubtitle:
-      "Για κάθε ακίνητο υπάρχουν μόνο δύο λίστες: μία βασική λίστα εργασιών καθαριότητας και μία λίστα αναλωσίμων που χτίζεται αυτόματα από τα ενεργά αναλώσιμα του ακινήτου.",
-
-    backToProperty: "Επιστροφή στο ακίνητο",
-    backToChecklists: "Επιστροφή στα checklists",
-
-    loading: "Φόρτωση...",
-    loadError: "Αποτυχία φόρτωσης λιστών ακινήτου.",
-    saveError: "Αποτυχία δημιουργίας λίστας καθαριότητας.",
-    createdSuccess: "Η βασική λίστα καθαριότητας δημιουργήθηκε επιτυχώς.",
-
-    propertyCode: "Κωδικός",
-    propertyAddress: "Διεύθυνση",
-
-    summaryTitle: "Σύνοψη",
-    cleaningSummary: "Λίστα καθαριότητας",
-    suppliesSummary: "Λίστα αναλωσίμων",
-    configured: "Ρυθμισμένη",
-    missing: "Δεν έχει οριστεί",
-    activeSupplies: "Ενεργά αναλώσιμα",
-
-    cleaningSectionTitle: "Βασική λίστα εργασιών καθαριότητας",
-    cleaningSectionSubtitle:
-      "Αυτή είναι η μοναδική βασική λίστα καθαριότητας του ακινήτου και χρησιμοποιείται αυτόματα στις εργασίες όταν επιλέγεται αποστολή λίστας καθαριότητας.",
-    noCleaningTitle: "Δεν έχει οριστεί ακόμη βασική λίστα καθαριότητας",
-    noCleaningSubtitle:
-      "Δημιούργησε τώρα τη μοναδική βασική λίστα καθαριότητας του ακινήτου.",
-    createCleaningChecklist: "Δημιουργία βασικής λίστας",
-    hideCreateForm: "Απόκρυψη φόρμας",
-    editCleaningChecklist: "Προβολή / επεξεργασία λίστας",
-    cleaningItemsCount: "Στοιχεία λίστας",
-    cleaningStatus: "Κατάσταση",
-    activeBadge: "Ενεργή",
-    inactiveBadge: "Ανενεργή",
-
-    suppliesSectionTitle: "Λίστα αναλωσίμων",
-    suppliesSectionSubtitle:
-      "Η λίστα αναλωσίμων δεν ορίζεται χειροκίνητα εδώ. Χτίζεται αυτόματα από τα ενεργά αναλώσιμα της σελίδας αναλωσίμων του ακινήτου και ανεβαίνει στην εργασία όταν επιλέγεται αποστολή λίστας αναλωσίμων.",
-    manageSupplies: "Διαχείριση αναλωσίμων",
-    suppliesReadyTitle: "Η λίστα αναλωσίμων είναι έτοιμη",
-    suppliesReadySubtitle:
-      "Η εργασία θα χρησιμοποιεί αυτόματα τα ενεργά αναλώσιμα του ακινήτου.",
-    noSuppliesTitle: "Δεν υπάρχουν ενεργά αναλώσιμα",
-    noSuppliesSubtitle:
-      "Πήγαινε στη σελίδα αναλωσίμων και ενεργοποίησε όσα θέλεις να συμμετέχουν στη λίστα αναλωσίμων των εργασιών.",
-    activeSuppliesCount: "Ενεργά αναλώσιμα",
-    sampleItems: "Ενδεικτικά ενεργά στοιχεία",
-
-    formTitle: "Νέα βασική λίστα καθαριότητας",
-    formSubtitle:
-      "Ορίζεις μία μοναδική βασική λίστα για το ακίνητο. Δεν δημιουργούμε βοηθητικά πρότυπα σε αυτή τη ροή.",
-    checklistTitle: "Τίτλος λίστας",
-    checklistTitlePlaceholder: "π.χ. Βασική λίστα καθαριότητας ακινήτου",
-    checklistDescription: "Περιγραφή",
-    checklistDescriptionPlaceholder:
-      "Σύντομη περιγραφή της βασικής λίστας καθαριότητας.",
-    checklistItems: "Στοιχεία λίστας",
-    checklistItemsSubtitle:
-      "Όρισε τα βήματα που θα εμφανίζονται στον συνεργάτη στην ενότητα καθαριότητας.",
-
-    itemLabel: "Τίτλος στοιχείου",
-    itemLabelPlaceholder: "π.χ. Έλεγχος κουζίνας",
-    itemDescription: "Περιγραφή",
-    itemDescriptionPlaceholder: "Προαιρετική επεξήγηση του βήματος.",
-    itemFieldType: "Τύπος πεδίου",
-    itemCategory: "Κατηγορία",
-    itemCategoryPlaceholder: "π.χ. inspection",
-
-    itemChoices: "Επιλογές",
-    itemChoicesSubtitle:
-      "Πρόσθεσε τις επιλογές που θα εμφανίζονται στον συνεργάτη.",
-    choicePlaceholder: "π.χ. Καλή",
-    addChoice: "Προσθήκη επιλογής",
-    removeChoice: "Αφαίρεση επιλογής",
-
-    required: "Υποχρεωτικό",
-    requiresPhoto: "Απαιτεί φωτογραφία",
-    opensIssueOnFail: "Δημιουργεί συμβάν σε αποτυχία",
-
-    addItem: "Προσθήκη στοιχείου",
-    removeItem: "Αφαίρεση",
-    createChecklist: "Δημιουργία λίστας",
-    creating: "Δημιουργία...",
-
-    yesNo: "Ναι / Όχι",
-    text: "Κείμενο",
-    number: "Αριθμός",
-    choice: "Επιλογή",
-    photo: "Φωτογραφία",
-
-    languageGreek: "Ελληνικά",
-    languageEnglish: "English",
-  },
-  en: {
-    pageEyebrow: "Property lists management",
-    pageTitleFallback: "Property lists",
-    pageSubtitle:
-      "Each property has only two lists: one main cleaning checklist and one supplies list built automatically from the active property supplies.",
-
-    backToProperty: "Back to property",
-    backToChecklists: "Back to checklists",
-
-    loading: "Loading...",
-    loadError: "Failed to load property lists.",
-    saveError: "Failed to create cleaning checklist.",
-    createdSuccess: "Main cleaning checklist created successfully.",
-
-    propertyCode: "Code",
-    propertyAddress: "Address",
-
-    summaryTitle: "Summary",
-    cleaningSummary: "Cleaning checklist",
-    suppliesSummary: "Supplies list",
-    configured: "Configured",
-    missing: "Missing",
-    activeSupplies: "Active supplies",
-
-    cleaningSectionTitle: "Main cleaning checklist",
-    cleaningSectionSubtitle:
-      "This is the single main cleaning checklist of the property and is used automatically in tasks when sending a cleaning checklist.",
-    noCleaningTitle: "No main cleaning checklist yet",
-    noCleaningSubtitle:
-      "Create the single main cleaning checklist for this property.",
-    createCleaningChecklist: "Create main checklist",
-    hideCreateForm: "Hide form",
-    editCleaningChecklist: "View / edit checklist",
-    cleaningItemsCount: "Checklist items",
-    cleaningStatus: "Status",
-    activeBadge: "Active",
-    inactiveBadge: "Inactive",
-
-    suppliesSectionTitle: "Supplies list",
-    suppliesSectionSubtitle:
-      "The supplies list is not managed manually here. It is built automatically from the active supplies of the property supplies page and is attached to the task when sending the supplies list.",
-    manageSupplies: "Manage supplies",
-    suppliesReadyTitle: "Supplies list is ready",
-    suppliesReadySubtitle:
-      "The task will automatically use the active property supplies.",
-    noSuppliesTitle: "There are no active supplies",
-    noSuppliesSubtitle:
-      "Go to the supplies page and activate the items you want to participate in the task supplies list.",
-    activeSuppliesCount: "Active supplies",
-    sampleItems: "Sample active items",
-
-    formTitle: "New main cleaning checklist",
-    formSubtitle:
-      "You define one single main checklist for the property. We do not create support templates in this flow.",
-    checklistTitle: "Checklist title",
-    checklistTitlePlaceholder: "e.g. Main property cleaning checklist",
-    checklistDescription: "Description",
-    checklistDescriptionPlaceholder:
-      "Short description of the main cleaning checklist.",
-    checklistItems: "Checklist items",
-    checklistItemsSubtitle:
-      "Define the steps shown to the partner in the cleaning section.",
-
-    itemLabel: "Item title",
-    itemLabelPlaceholder: "e.g. Kitchen inspection",
-    itemDescription: "Description",
-    itemDescriptionPlaceholder: "Optional explanation for this step.",
-    itemFieldType: "Field type",
-    itemCategory: "Category",
-    itemCategoryPlaceholder: "e.g. inspection",
-
-    itemChoices: "Choices",
-    itemChoicesSubtitle: "Add the options shown to the partner.",
-    choicePlaceholder: "e.g. Good",
-    addChoice: "Add choice",
-    removeChoice: "Remove choice",
-
-    required: "Required",
-    requiresPhoto: "Requires photo",
-    opensIssueOnFail: "Creates issue on failure",
-
-    addItem: "Add item",
-    removeItem: "Remove",
-    createChecklist: "Create checklist",
-    creating: "Creating...",
-
-    yesNo: "Yes / No",
-    text: "Text",
-    number: "Number",
-    choice: "Choice",
-    photo: "Photo",
-
-    languageGreek: "Ελληνικά",
-    languageEnglish: "English",
-  },
-} satisfies Record<Language, Record<string, string>>
 
 function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ")
-}
-
-function getInitialLanguage(): Language {
-  if (typeof window === "undefined") return "el"
-
-  const url = new URL(window.location.href)
-  const lang = url.searchParams.get("lang")
-  if (lang === "el" || lang === "en") return lang
-
-  const saved = window.localStorage.getItem("ops-language")
-  if (saved === "el" || saved === "en") return saved
-
-  return "el"
 }
 
 function normalizeTemplateItem(
@@ -308,6 +116,30 @@ function normalizeTemplateItem(
       raw.optionsText === null || raw.optionsText === undefined
         ? null
         : String(raw.optionsText),
+    issueTypeOnFail:
+      raw.issueTypeOnFail === null || raw.issueTypeOnFail === undefined
+        ? null
+        : String(raw.issueTypeOnFail),
+    issueSeverityOnFail:
+      raw.issueSeverityOnFail === null || raw.issueSeverityOnFail === undefined
+        ? null
+        : String(raw.issueSeverityOnFail),
+    failureValuesText:
+      raw.failureValuesText === null || raw.failureValuesText === undefined
+        ? null
+        : String(raw.failureValuesText),
+    linkedSupplyItemId:
+      raw.linkedSupplyItemId === null || raw.linkedSupplyItemId === undefined
+        ? null
+        : String(raw.linkedSupplyItemId),
+    supplyUpdateMode:
+      raw.supplyUpdateMode === null || raw.supplyUpdateMode === undefined
+        ? null
+        : String(raw.supplyUpdateMode),
+    supplyQuantity:
+      raw.supplyQuantity === null || raw.supplyQuantity === undefined
+        ? null
+        : Number(raw.supplyQuantity),
   }
 }
 
@@ -338,21 +170,61 @@ function normalizeTemplate(rawValue: unknown): ChecklistTemplate {
 
 function normalizeSupply(rawValue: unknown): PropertySupply | null {
   const raw = (rawValue ?? {}) as Record<string, unknown>
-  const id = String(raw.id ?? "").trim()
-  const name = String(raw.name ?? raw.title ?? "").trim()
+
+  const supplyItem =
+    raw.supplyItem && typeof raw.supplyItem === "object"
+      ? (raw.supplyItem as Record<string, unknown>)
+      : null
+
+  const id = String(
+    supplyItem?.id ??
+      raw.supplyItemId ??
+      raw.id ??
+      raw.propertySupplyId ??
+      ""
+  ).trim()
+
+  const name = String(
+    supplyItem?.name ??
+      raw.name ??
+      raw.title ??
+      ""
+  ).trim()
 
   if (!id || !name) return null
 
   return {
     id,
+    propertySupplyId:
+      raw.propertySupplyId === null || raw.propertySupplyId === undefined
+        ? raw.id
+          ? String(raw.id)
+          : null
+        : String(raw.propertySupplyId),
     name,
     code:
-      raw.code === null || raw.code === undefined ? null : String(raw.code),
-    isActive: Boolean(raw.isActive ?? false),
+      supplyItem?.code === null || supplyItem?.code === undefined
+        ? raw.code === null || raw.code === undefined
+          ? null
+          : String(raw.code)
+        : String(supplyItem.code),
+    isActive: Boolean(raw.isActive ?? true),
     fillLevel:
       raw.fillLevel === null || raw.fillLevel === undefined
         ? null
         : String(raw.fillLevel),
+    category:
+      supplyItem?.category === null || supplyItem?.category === undefined
+        ? raw.category === null || raw.category === undefined
+          ? null
+          : String(raw.category)
+        : String(supplyItem.category),
+    unit:
+      supplyItem?.unit === null || supplyItem?.unit === undefined
+        ? raw.unit === null || raw.unit === undefined
+          ? null
+          : String(raw.unit)
+        : String(supplyItem.unit),
   }
 }
 
@@ -366,14 +238,61 @@ function buildEmptyItem(): NewItemDraft {
     requiresPhoto: false,
     opensIssueOnFail: false,
     options: [""],
+    issueTypeOnFail: "repair",
+    issueSeverityOnFail: "medium",
+    failureValuesText: "",
+    linkedSupplyItemId: null,
+    supplyUpdateMode: "none",
+    supplyQuantity: "",
   }
+}
+
+function parseOptions(optionsText?: string | null) {
+  if (!optionsText) return []
+
+  return optionsText
+    .split(/\r?\n|,/)
+    .map((option) => option.trim())
+    .filter(Boolean)
 }
 
 function joinOptions(options: string[]) {
   return options
     .map((option) => option.trim())
     .filter(Boolean)
-    .join(", ")
+    .join("\n")
+}
+
+function InfoCard({
+  label,
+  value,
+}: {
+  label: string
+  value: string
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+      <p className="text-sm font-medium text-slate-500">{label}</p>
+      <p className="mt-2 text-lg font-semibold text-slate-900">{value}</p>
+    </div>
+  )
+}
+
+function SummaryCard({
+  title,
+  value,
+}: {
+  title: string
+  value: string
+}) {
+  return (
+    <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+      <p className="text-sm font-medium text-slate-600">{title}</p>
+      <p className="mt-3 text-3xl font-bold tracking-tight text-slate-900">
+        {value}
+      </p>
+    </div>
+  )
 }
 
 export default function PropertyChecklistsPage({
@@ -382,8 +301,9 @@ export default function PropertyChecklistsPage({
   params: PageParams
 }) {
   const { propertyId } = use(params)
+  const { language } = useAppLanguage()
+  const t = getPropertyChecklistManagementTexts(language)
 
-  const [language, setLanguage] = useState<Language>("el")
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
@@ -400,25 +320,11 @@ export default function PropertyChecklistsPage({
   const [templateDescription, setTemplateDescription] = useState("")
   const [items, setItems] = useState<NewItemDraft[]>([buildEmptyItem()])
 
-  const t = texts[language]
-
-  useEffect(() => {
-    setLanguage(getInitialLanguage())
-  }, [])
-
-  useEffect(() => {
-    if (typeof window === "undefined") return
-
-    const url = new URL(window.location.href)
-    url.searchParams.set("lang", language)
-    window.history.replaceState({}, "", url.toString())
-    window.localStorage.setItem("ops-language", language)
-  }, [language])
-
   async function loadData() {
     try {
       setLoading(true)
       setError("")
+      setSuccessMessage("")
 
       const [checklistsResponse, suppliesResponse] = await Promise.all([
         fetch(`/api/property-checklists/${propertyId}`, {
@@ -438,7 +344,7 @@ export default function PropertyChecklistsPage({
       if (!checklistsResponse.ok) {
         throw new Error(
           typeof (checklistData as { error?: unknown })?.error === "string"
-            ? (checklistData as { error?: string }).error
+            ? (checklistData as { error?: string }).error!
             : t.loadError
         )
       }
@@ -474,7 +380,6 @@ export default function PropertyChecklistsPage({
 
   useEffect(() => {
     void loadData()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [propertyId])
 
   const suppliesPreview = useMemo(() => activeSupplies.slice(0, 6), [activeSupplies])
@@ -490,7 +395,10 @@ export default function PropertyChecklistsPage({
   }
 
   function removeItem(index: number) {
-    setItems((prev) => prev.filter((_, i) => i !== index))
+    setItems((prev) => {
+      const next = prev.filter((_, i) => i !== index)
+      return next.length > 0 ? next : [buildEmptyItem()]
+    })
   }
 
   function updateItem<K extends keyof NewItemDraft>(
@@ -575,7 +483,18 @@ export default function PropertyChecklistsPage({
           requiresPhoto: item.requiresPhoto,
           opensIssueOnFail: item.opensIssueOnFail,
           optionsText:
-            item.itemType === "choice" ? joinOptions(item.options) : "",
+            item.itemType === "choice" || item.itemType === "select"
+              ? joinOptions(item.options)
+              : "",
+          issueTypeOnFail: item.issueTypeOnFail,
+          issueSeverityOnFail: item.issueSeverityOnFail,
+          failureValuesText: item.failureValuesText,
+          linkedSupplyItemId: item.linkedSupplyItemId,
+          supplyUpdateMode: item.supplyUpdateMode,
+          supplyQuantity:
+            item.supplyQuantity.trim() === ""
+              ? null
+              : Number(item.supplyQuantity),
         })),
       }
 
@@ -630,43 +549,13 @@ export default function PropertyChecklistsPage({
             </p>
 
             <div className="mt-3 flex flex-wrap gap-3 text-sm text-slate-500">
-              {property?.code ? (
-                <span>{t.propertyCode}: {property.code}</span>
-              ) : null}
+              {property?.code ? <span>{t.propertyCode}: {property.code}</span> : null}
               {property?.address ? <span>• {property.address}</span> : null}
             </div>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1">
-            <button
-              type="button"
-              onClick={() => setLanguage("el")}
-              className={cn(
-                "rounded-lg px-3 py-2 text-sm font-medium transition",
-                language === "el"
-                  ? "bg-slate-900 text-white"
-                  : "text-slate-600 hover:bg-slate-50"
-              )}
-            >
-              {t.languageGreek}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setLanguage("en")}
-              className={cn(
-                "rounded-lg px-3 py-2 text-sm font-medium transition",
-                language === "en"
-                  ? "bg-slate-900 text-white"
-                  : "text-slate-600 hover:bg-slate-50"
-              )}
-            >
-              {t.languageEnglish}
-            </button>
-          </div>
-
           <Link
             href="/checklists"
             className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
@@ -707,11 +596,14 @@ export default function PropertyChecklistsPage({
             <p className="mt-2 max-w-3xl text-sm text-slate-600">
               {t.cleaningSectionSubtitle}
             </p>
+            <p className="mt-2 max-w-3xl text-sm text-slate-500">
+              {t.editorConsistencyNote}
+            </p>
           </div>
 
           {primaryTemplate ? (
             <Link
-              href={`/property-checklists/${propertyId}/templates/${primaryTemplate.id}?lang=${language}`}
+              href={`/property-checklists/${propertyId}/templates/${primaryTemplate.id}`}
               className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
             >
               {t.editCleaningChecklist}
@@ -931,6 +823,7 @@ export default function PropertyChecklistsPage({
                                 <option value="text">{t.text}</option>
                                 <option value="number">{t.number}</option>
                                 <option value="choice">{t.choice}</option>
+                                <option value="select">{t.select}</option>
                                 <option value="photo">{t.photo}</option>
                               </select>
                             </div>
@@ -950,7 +843,7 @@ export default function PropertyChecklistsPage({
                             </div>
                           </div>
 
-                          {item.itemType === "choice" ? (
+                          {(item.itemType === "choice" || item.itemType === "select") ? (
                             <div className="rounded-2xl border border-slate-200 bg-white p-4">
                               <div className="mb-3">
                                 <h5 className="text-sm font-semibold text-slate-800">
@@ -958,6 +851,9 @@ export default function PropertyChecklistsPage({
                                 </h5>
                                 <p className="mt-1 text-xs text-slate-500">
                                   {t.itemChoicesSubtitle}
+                                </p>
+                                <p className="mt-1 text-xs text-slate-500">
+                                  {t.optionsHelp}
                                 </p>
                               </div>
 
@@ -1053,6 +949,129 @@ export default function PropertyChecklistsPage({
                                 {t.opensIssueOnFail}
                               </span>
                             </label>
+                          </div>
+
+                          <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                            <h5 className="text-sm font-semibold text-slate-900">
+                              {t.issueRules}
+                            </h5>
+
+                            <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                              <div>
+                                <label className="mb-2 block text-sm font-medium text-slate-700">
+                                  {t.issueTypeOnFail}
+                                </label>
+                                <select
+                                  value={item.issueTypeOnFail}
+                                  onChange={(e) =>
+                                    updateItem(index, "issueTypeOnFail", e.target.value)
+                                  }
+                                  className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                                >
+                                  <option value="damage">{t.damage}</option>
+                                  <option value="repair">{t.repair}</option>
+                                  <option value="inspection">{t.inspection}</option>
+                                  <option value="cleaning">{t.cleaning}</option>
+                                  <option value="general">{t.general}</option>
+                                </select>
+                              </div>
+
+                              <div>
+                                <label className="mb-2 block text-sm font-medium text-slate-700">
+                                  {t.issueSeverityOnFail}
+                                </label>
+                                <select
+                                  value={item.issueSeverityOnFail}
+                                  onChange={(e) =>
+                                    updateItem(index, "issueSeverityOnFail", e.target.value)
+                                  }
+                                  className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                                >
+                                  <option value="low">{t.low}</option>
+                                  <option value="medium">{t.medium}</option>
+                                  <option value="high">{t.high}</option>
+                                  <option value="critical">{t.critical}</option>
+                                </select>
+                              </div>
+
+                              <div className="md:col-span-2 xl:col-span-1">
+                                <label className="mb-2 block text-sm font-medium text-slate-700">
+                                  {t.failureValuesText}
+                                </label>
+                                <input
+                                  value={item.failureValuesText}
+                                  onChange={(e) =>
+                                    updateItem(index, "failureValuesText", e.target.value)
+                                  }
+                                  placeholder={t.failureValuesPlaceholder}
+                                  className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                                />
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                            <h5 className="text-sm font-semibold text-slate-900">
+                              {t.supplyItem}
+                            </h5>
+
+                            <div className="mt-4 grid gap-4 md:grid-cols-3">
+                              <div>
+                                <label className="mb-2 block text-sm font-medium text-slate-700">
+                                  {t.supplyItem}
+                                </label>
+                                <select
+                                  value={item.linkedSupplyItemId ?? ""}
+                                  onChange={(e) =>
+                                    updateItem(
+                                      index,
+                                      "linkedSupplyItemId",
+                                      e.target.value.trim() ? e.target.value : null
+                                    )
+                                  }
+                                  className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                                >
+                                  <option value="">{t.noLinkedSupply}</option>
+                                  {activeSupplies.map((supply) => (
+                                    <option key={supply.id} value={supply.id}>
+                                      {supply.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+
+                              <div>
+                                <label className="mb-2 block text-sm font-medium text-slate-700">
+                                  {t.supplyUpdateMode}
+                                </label>
+                                <select
+                                  value={item.supplyUpdateMode}
+                                  onChange={(e) =>
+                                    updateItem(index, "supplyUpdateMode", e.target.value)
+                                  }
+                                  className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                                >
+                                  <option value="none">{t.supplyModeNone}</option>
+                                  <option value="status_map">{t.supplyModeStatusMap}</option>
+                                  <option value="set_stock">{t.supplyModeSetStock}</option>
+                                  <option value="consume">{t.supplyModeConsume}</option>
+                                  <option value="flag_low">{t.supplyModeFlagLow}</option>
+                                </select>
+                              </div>
+
+                              <div>
+                                <label className="mb-2 block text-sm font-medium text-slate-700">
+                                  {t.supplyQuantity}
+                                </label>
+                                <input
+                                  value={item.supplyQuantity}
+                                  onChange={(e) =>
+                                    updateItem(index, "supplyQuantity", e.target.value)
+                                  }
+                                  className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                                />
+                              </div>
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -1162,38 +1181,6 @@ export default function PropertyChecklistsPage({
           {successMessage}
         </div>
       ) : null}
-    </div>
-  )
-}
-
-function SummaryCard({
-  title,
-  value,
-}: {
-  title: string
-  value: string
-}) {
-  return (
-    <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-      <p className="text-sm font-medium text-slate-600">{title}</p>
-      <p className="mt-3 text-3xl font-bold tracking-tight text-slate-900">
-        {value}
-      </p>
-    </div>
-  )
-}
-
-function InfoCard({
-  label,
-  value,
-}: {
-  label: string
-  value: string
-}) {
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4">
-      <p className="text-sm font-medium text-slate-500">{label}</p>
-      <p className="mt-2 text-lg font-semibold text-slate-900">{value}</p>
     </div>
   )
 }

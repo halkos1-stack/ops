@@ -1,9 +1,56 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 
+function toText(value: unknown) {
+  return String(value ?? "").trim()
+}
+
+function toNullableText(value: unknown) {
+  const text = String(value ?? "").trim()
+  return text === "" ? null : text
+}
+
+function toBooleanValue(value: unknown, fallback = true) {
+  if (typeof value === "boolean") return value
+  return fallback
+}
+
+function normalizeTemplateType(value: unknown): "main" | "support" {
+  const text = String(value ?? "").trim().toLowerCase()
+
+  if (
+    text === "main" ||
+    text === "primary" ||
+    text === "base" ||
+    text === "cleaning" ||
+    text === "cleaning_checklist"
+  ) {
+    return "main"
+  }
+
+  return "support"
+}
+
+function normalizeItemType(value: unknown) {
+  const text = String(value ?? "").trim().toLowerCase()
+
+  if (
+    text === "boolean" ||
+    text === "text" ||
+    text === "number" ||
+    text === "choice" ||
+    text === "photo" ||
+    text === "select"
+  ) {
+    return text === "select" ? "choice" : text
+  }
+
+  return "boolean"
+}
+
 export async function GET() {
   try {
-    const templates = await prisma.checklistTemplate.findMany({
+    const templates = await prisma.propertyChecklistTemplate.findMany({
       include: {
         property: true,
         items: {
@@ -32,30 +79,34 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
 
-    const propertyId = body.propertyId?.trim()
-    const name = body.name?.trim()
-    const taskType = body.taskType?.trim()
-    const description = body.description?.trim() || null
-    const isActive =
-      typeof body.isActive === "boolean" ? body.isActive : true
+    const propertyId = toText(body.propertyId)
+    const title = toText(body.title || body.name)
+    const description = toNullableText(body.description)
+    const isActive = toBooleanValue(body.isActive, true)
+    const isPrimary = toBooleanValue(body.isPrimary, false)
+    const templateType = normalizeTemplateType(body.templateType || body.taskType)
     const items = Array.isArray(body.items) ? body.items : []
 
-    if (!propertyId || !name || !taskType) {
+    if (!propertyId || !title) {
       return NextResponse.json(
-        { error: "Ακίνητο, όνομα checklist και τύπος εργασίας είναι υποχρεωτικά." },
+        { error: "Ακίνητο και όνομα λίστας είναι υποχρεωτικά." },
         { status: 400 }
       )
     }
 
     if (items.length === 0) {
       return NextResponse.json(
-        { error: "Η checklist πρέπει να έχει τουλάχιστον ένα βήμα." },
+        { error: "Η λίστα πρέπει να έχει τουλάχιστον ένα στοιχείο." },
         { status: 400 }
       )
     }
 
     const property = await prisma.property.findUnique({
       where: { id: propertyId },
+      select: {
+        id: true,
+        organizationId: true,
+      },
     })
 
     if (!property) {
@@ -65,32 +116,58 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const template = await prisma.checklistTemplate.create({
+    if (isPrimary) {
+      await prisma.propertyChecklistTemplate.updateMany({
+        where: {
+          propertyId,
+          isPrimary: true,
+        },
+        data: {
+          isPrimary: false,
+        },
+      })
+    }
+
+    const template = await prisma.propertyChecklistTemplate.create({
       data: {
         propertyId,
-        name,
-        taskType,
+        title,
         description,
+        templateType,
+        isPrimary,
         isActive,
         items: {
-          create: items.map(
-            (
-              item: {
-                label?: string
-                description?: string
-                itemType?: string
-                isRequired?: boolean
-              },
-              index: number
-            ) => ({
-              label: item.label?.trim() || `Βήμα ${index + 1}`,
-              description: item.description?.trim() || null,
-              itemType: item.itemType?.trim() || "boolean",
+          create: items.map((item: unknown, index: number) => {
+            const row = item as {
+              label?: string
+              description?: string
+              itemType?: string
+              isRequired?: boolean
+              category?: string
+              requiresPhoto?: boolean
+              opensIssueOnFail?: boolean
+              optionsText?: string
+            }
+
+            return {
+              label: toText(row.label) || `Βήμα ${index + 1}`,
+              description: toNullableText(row.description),
+              itemType: normalizeItemType(row.itemType),
               isRequired:
-                typeof item.isRequired === "boolean" ? item.isRequired : true,
+                typeof row.isRequired === "boolean" ? row.isRequired : true,
               sortOrder: index + 1,
-            })
-          ),
+              category: toNullableText(row.category) || "inspection",
+              requiresPhoto:
+                typeof row.requiresPhoto === "boolean"
+                  ? row.requiresPhoto
+                  : false,
+              opensIssueOnFail:
+                typeof row.opensIssueOnFail === "boolean"
+                  ? row.opensIssueOnFail
+                  : false,
+              optionsText: toNullableText(row.optionsText),
+            }
+          }),
         },
       },
       include: {
@@ -105,17 +182,19 @@ export async function POST(req: NextRequest) {
 
     await prisma.activityLog.create({
       data: {
+        organizationId: property.organizationId,
         propertyId: property.id,
         entityType: "checklist_template",
         entityId: template.id,
         action: "created",
-        message: `Δημιουργήθηκε checklist "${template.name}" για τύπο εργασίας "${template.taskType}"`,
+        message: `Δημιουργήθηκε λίστα "${template.title}" για το ακίνητο.`,
         actorType: "admin",
         actorName: "System Admin",
         metadata: {
           propertyId: property.id,
           templateId: template.id,
-          taskType: template.taskType,
+          templateType: template.templateType,
+          isPrimary: template.isPrimary,
         },
       },
     })

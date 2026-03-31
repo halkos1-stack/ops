@@ -1,7 +1,8 @@
 "use client"
 
 import Link from "next/link"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useAppLanguage } from "@/components/i18n/LanguageProvider"
 
 type Language = "el" | "en"
 type CalendarView = "month" | "week" | "day"
@@ -73,7 +74,7 @@ const translations = {
     dayView: "Ημέρα",
     monthTasks: "Εργασίες μήνα",
     todayTasks: "Εργασίες σήμερα",
-    pendingTasks: "Σε αναμονή",
+    pendingTasks: "Προς αποδοχή",
     selectedDay: "Επιλεγμένη ημέρα",
     upcomingTasks: "Επόμενες εργασίες",
     noTasks: "Δεν υπάρχουν εργασίες",
@@ -87,7 +88,6 @@ const translations = {
     completed: "Ολοκληρωμένη",
     unknownProperty: "Χωρίς ακίνητο",
     untitledTask: "Χωρίς τίτλο",
-    untitledType: "Εργασία",
     startsAt: "Ώρα",
     property: "Ακίνητο",
     status: "Κατάσταση",
@@ -99,6 +99,7 @@ const translations = {
     upcomingEmptyTitle: "Δεν υπάρχουν επερχόμενες εργασίες",
     loading: "Φόρτωση...",
     nearestScheduledTasks: "Οι πιο κοντινές προγραμματισμένες εργασίες",
+    loadFailed: "Αποτυχία φόρτωσης εργασιών",
   },
   en: {
     pageTitle: "Calendar",
@@ -113,7 +114,7 @@ const translations = {
     dayView: "Day",
     monthTasks: "Month tasks",
     todayTasks: "Today tasks",
-    pendingTasks: "Pending",
+    pendingTasks: "Pending acceptance",
     selectedDay: "Selected day",
     upcomingTasks: "Upcoming tasks",
     noTasks: "No tasks",
@@ -127,7 +128,6 @@ const translations = {
     completed: "Completed",
     unknownProperty: "No property",
     untitledTask: "Untitled",
-    untitledType: "Task",
     startsAt: "Time",
     property: "Property",
     status: "Status",
@@ -139,6 +139,7 @@ const translations = {
     upcomingEmptyTitle: "There are no upcoming tasks",
     loading: "Loading...",
     nearestScheduledTasks: "The nearest scheduled tasks",
+    loadFailed: "Failed to load tasks",
   },
 } satisfies Record<Language, Record<string, string>>
 
@@ -393,7 +394,7 @@ function isTaskInView(task: CalendarTask, date: Date, view: CalendarView) {
 }
 
 export default function CalendarPage() {
-  const [language, setLanguage] = useState<Language>("el")
+  const { language } = useAppLanguage()
   const [selectedView, setSelectedView] = useState<CalendarView>("month")
   const [selectedDate, setSelectedDate] = useState<Date>(startOfDay(new Date()))
   const [statusFilter, setStatusFilter] = useState<StatusFilter | "all">("all")
@@ -406,27 +407,6 @@ export default function CalendarPage() {
 
   const t = translations[language]
   const statusMeta = getStatusMeta(language)
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const langParam = params.get("lang")
-    if (langParam === "el" || langParam === "en") {
-      setLanguage(langParam)
-      return
-    }
-
-    const savedLanguage = window.localStorage.getItem("ops-language")
-    if (savedLanguage === "el" || savedLanguage === "en") {
-      setLanguage(savedLanguage)
-    }
-  }, [])
-
-  useEffect(() => {
-    const url = new URL(window.location.href)
-    url.searchParams.set("lang", language)
-    window.history.replaceState({}, "", url.toString())
-    window.localStorage.setItem("ops-language", language)
-  }, [language])
 
   useEffect(() => {
     let cancelled = false
@@ -442,7 +422,7 @@ export default function CalendarPage() {
         })
 
         if (!response.ok) {
-          throw new Error("Failed to load tasks")
+          throw new Error(t.loadFailed)
         }
 
         const data = await response.json()
@@ -465,7 +445,7 @@ export default function CalendarPage() {
         }
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Failed to load tasks")
+          setError(err instanceof Error ? err.message : t.loadFailed)
           setTasks([])
         }
       } finally {
@@ -480,7 +460,7 @@ export default function CalendarPage() {
     return () => {
       cancelled = true
     }
-  }, [language])
+  }, [language, t.loadFailed])
 
   const filteredTasks = useMemo(() => {
     return tasks.filter((task) => {
@@ -582,34 +562,6 @@ export default function CalendarPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1">
-            <button
-              type="button"
-              onClick={() => setLanguage("el")}
-              className={cn(
-                "rounded-lg px-3 py-2 text-sm font-medium transition",
-                language === "el"
-                  ? "bg-slate-900 text-white"
-                  : "text-slate-600 hover:bg-slate-50"
-              )}
-            >
-              Ελληνικά
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setLanguage("en")}
-              className={cn(
-                "rounded-lg px-3 py-2 text-sm font-medium transition",
-                language === "en"
-                  ? "bg-slate-900 text-white"
-                  : "text-slate-600 hover:bg-slate-50"
-              )}
-            >
-              English
-            </button>
-          </div>
-
           <button
             type="button"
             onClick={() => {
@@ -1083,7 +1035,7 @@ function AsidePanel({
 }: {
   title: string
   subtitle: string
-  children: React.ReactNode
+  children: ReactNode
 }) {
   return (
     <section className="rounded-3xl border border-slate-200 bg-white shadow-sm">

@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { useAppLanguage } from "@/components/i18n/LanguageProvider"
 
 type Partner = {
   id: string
@@ -32,6 +33,144 @@ type PortalAccessResponse = {
   } | null
 }
 
+function getTexts(language: "el" | "en") {
+  if (language === "en") {
+    return {
+      loadFailed: "Failed to load partners.",
+      createFailed: "Failed to create partner.",
+      createSuccess: "The partner was created successfully.",
+      fillName: "Fill in partner name.",
+      fillEmail: "Fill in partner email.",
+      fillSpecialty: "Fill in specialty.",
+      portalCreateFailed: "Failed to create portal link.",
+      portalLoadFailed: "Failed to load portal link.",
+      portalMissing: "There is no active portal link for this partner yet.",
+      portalCreateSuccess: "Portal link was created successfully.",
+      portalLoadSuccess: "Portal link was loaded successfully.",
+      portalCopySuccess: "Portal link was copied.",
+      portalCopyFailed: "Failed to copy portal link.",
+      noPhone: "—",
+
+      title: "Partners",
+      subtitle:
+        "Manage partners, specialties, availability and access to the partner portal.",
+
+      totalPartners: "Total partners",
+      activePartners: "Active",
+      inactivePartners: "Inactive",
+
+      createSection: "Create partner",
+      name: "Name",
+      email: "Email",
+      phone: "Phone",
+      specialty: "Specialty",
+      status: "Status",
+      notes: "Notes",
+      save: "Save...",
+      addPartner: "Add partner",
+
+      cleaning: "Cleaning",
+      maintenance: "Maintenance",
+      technicalCheck: "Technical check",
+      inspection: "Inspection",
+      supplies: "Supplies",
+
+      active: "Active",
+      inactive: "Inactive",
+
+      notesPlaceholder: "Internal notes for the partner",
+
+      portalTitle: "Partner portal",
+      portalPartner: "Partner",
+      portalLink: "Portal link",
+      portalCreatedAt: "Created at",
+      portalLastUsedAt: "Last used",
+      copyLink: "Copy link",
+      openPortal: "Open portal",
+
+      listTitle: "Partners list",
+      searchPlaceholder: "Search by code, name, email...",
+      loading: "Loading partners...",
+      empty: "There are no partners yet.",
+
+      code: "Code",
+      portal: "Portal",
+
+      generateLink: "New link",
+      loadingCreate: "Creating...",
+      viewLink: "View link",
+      loadingLoad: "Loading...",
+    }
+  }
+
+  return {
+    loadFailed: "Αποτυχία φόρτωσης συνεργατών.",
+    createFailed: "Αποτυχία δημιουργίας συνεργάτη.",
+    createSuccess: "Ο συνεργάτης δημιουργήθηκε επιτυχώς.",
+    fillName: "Συμπλήρωσε όνομα συνεργάτη.",
+    fillEmail: "Συμπλήρωσε email συνεργάτη.",
+    fillSpecialty: "Συμπλήρωσε ειδικότητα.",
+    portalCreateFailed: "Αποτυχία δημιουργίας portal link.",
+    portalLoadFailed: "Αποτυχία φόρτωσης portal link.",
+    portalMissing: "Δεν υπάρχει ακόμη ενεργό portal link για αυτόν τον συνεργάτη.",
+    portalCreateSuccess: "Το portal link δημιουργήθηκε επιτυχώς.",
+    portalLoadSuccess: "Το portal link φορτώθηκε επιτυχώς.",
+    portalCopySuccess: "Το portal link αντιγράφηκε.",
+    portalCopyFailed: "Δεν ήταν δυνατή η αντιγραφή του link.",
+    noPhone: "—",
+
+    title: "Συνεργάτες",
+    subtitle:
+      "Διαχείριση συνεργατών, ειδικοτήτων, διαθεσιμότητας και πρόσβασης στο partner portal.",
+
+    totalPartners: "Σύνολο συνεργατών",
+    activePartners: "Ενεργοί",
+    inactivePartners: "Ανενεργοί",
+
+    createSection: "Δημιουργία συνεργάτη",
+    name: "Όνομα",
+    email: "Email",
+    phone: "Τηλέφωνο",
+    specialty: "Ειδικότητα",
+    status: "Κατάσταση",
+    notes: "Σημειώσεις",
+    save: "Αποθήκευση...",
+    addPartner: "Προσθήκη συνεργάτη",
+
+    cleaning: "Καθαρισμός",
+    maintenance: "Συντήρηση",
+    technicalCheck: "Τεχνικός έλεγχος",
+    inspection: "Επιθεώρηση",
+    supplies: "Αναλώσιμα",
+
+    active: "Ενεργός",
+    inactive: "Ανενεργός",
+
+    notesPlaceholder: "Εσωτερικές σημειώσεις για τον συνεργάτη",
+
+    portalTitle: "Partner portal",
+    portalPartner: "Συνεργάτης",
+    portalLink: "Portal link",
+    portalCreatedAt: "Δημιουργία",
+    portalLastUsedAt: "Τελευταία χρήση",
+    copyLink: "Αντιγραφή link",
+    openPortal: "Άνοιγμα portal",
+
+    listTitle: "Λίστα συνεργατών",
+    searchPlaceholder: "Αναζήτηση σε κωδικό, όνομα, email...",
+    loading: "Φόρτωση συνεργατών...",
+    empty: "Δεν υπάρχουν ακόμη συνεργάτες.",
+
+    code: "Κωδικός",
+    portal: "Portal",
+
+    generateLink: "Νέο link",
+    loadingCreate: "Δημιουργία...",
+    viewLink: "Προβολή link",
+    loadingLoad: "Φόρτωση...",
+  }
+}
+
 function getStatusBadgeClasses(status: string) {
   switch (status.toLowerCase()) {
     case "active":
@@ -43,24 +182,26 @@ function getStatusBadgeClasses(status: string) {
   }
 }
 
-function getStatusLabel(status: string) {
+function getStatusLabel(status: string, language: "el" | "en") {
+  const texts = getTexts(language)
+
   switch (status.toLowerCase()) {
     case "active":
-      return "Ενεργός"
+      return texts.active
     case "inactive":
-      return "Ανενεργός"
+      return texts.inactive
     default:
       return status
   }
 }
 
-function formatDateTime(value?: string | null) {
+function formatDateTime(value: string | null | undefined, language: "el" | "en") {
   if (!value) return "—"
 
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return "—"
 
-  return new Intl.DateTimeFormat("el-GR", {
+  return new Intl.DateTimeFormat(language === "el" ? "el-GR" : "en-GB", {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
@@ -70,12 +211,17 @@ function formatDateTime(value?: string | null) {
 }
 
 export default function PartnersPage() {
+  const { language } = useAppLanguage()
+  const texts = getTexts(language)
+
   const [partners, setPartners] = useState<Partner[]>([])
 
   const [name, setName] = useState("")
   const [email, setEmail] = useState("")
   const [phone, setPhone] = useState("")
-  const [specialty, setSpecialty] = useState("Καθαρισμός")
+  const [specialty, setSpecialty] = useState(
+    language === "en" ? texts.cleaning : texts.cleaning
+  )
   const [status, setStatus] = useState("active")
   const [notes, setNotes] = useState("")
   const [search, setSearch] = useState("")
@@ -104,14 +250,14 @@ export default function PartnersPage() {
       })
 
       if (!res.ok) {
-        throw new Error("Αποτυχία φόρτωσης συνεργατών")
+        throw new Error(texts.loadFailed)
       }
 
       const data = await res.json()
-      setPartners(data)
+      setPartners(Array.isArray(data) ? data : [])
     } catch (err) {
       console.error("Load partners error:", err)
-      setError("Δεν ήταν δυνατή η φόρτωση των συνεργατών.")
+      setError(texts.loadFailed)
     } finally {
       setLoading(false)
     }
@@ -124,17 +270,17 @@ export default function PartnersPage() {
     setSuccess("")
 
     if (!name.trim()) {
-      setError("Συμπλήρωσε όνομα συνεργάτη.")
+      setError(texts.fillName)
       return
     }
 
     if (!email.trim()) {
-      setError("Συμπλήρωσε email συνεργάτη.")
+      setError(texts.fillEmail)
       return
     }
 
     if (!specialty.trim()) {
-      setError("Συμπλήρωσε ειδικότητα.")
+      setError(texts.fillSpecialty)
       return
     }
 
@@ -159,24 +305,22 @@ export default function PartnersPage() {
       const data = await res.json()
 
       if (!res.ok) {
-        throw new Error(data?.error || "Αποτυχία δημιουργίας συνεργάτη")
+        throw new Error(data?.error || texts.createFailed)
       }
 
       setName("")
       setEmail("")
       setPhone("")
-      setSpecialty("Καθαρισμός")
+      setSpecialty(texts.cleaning)
       setStatus("active")
       setNotes("")
-      setSuccess("Ο συνεργάτης δημιουργήθηκε επιτυχώς.")
+      setSuccess(texts.createSuccess)
 
       await loadPartners()
     } catch (err) {
       console.error("Create partner error:", err)
       setError(
-        err instanceof Error
-          ? err.message
-          : "Δεν ήταν δυνατή η δημιουργία του συνεργάτη."
+        err instanceof Error ? err.message : texts.createFailed
       )
     } finally {
       setSubmitting(false)
@@ -197,21 +341,23 @@ export default function PartnersPage() {
       const data = (await res.json().catch(() => null)) as PortalAccessResponse | null
 
       if (!res.ok) {
-        throw new Error(data && "error" in (data as any) ? (data as any).error : "Αποτυχία δημιουργίας portal link.")
+        throw new Error(
+          data && "error" in (data as any)
+            ? (data as any).error
+            : texts.portalCreateFailed
+        )
       }
 
       setPortalPartnerName(data?.partner?.name || "")
       setPortalUrl(data?.portalAccess?.portalUrl || "")
       setPortalCreatedAt(data?.portalAccess?.createdAt || null)
       setPortalLastUsedAt(data?.portalAccess?.lastUsedAt || null)
-      setPortalSuccess("Το portal link δημιουργήθηκε επιτυχώς.")
+      setPortalSuccess(texts.portalCreateSuccess)
       setShowPortalBox(true)
     } catch (err) {
       console.error("Generate portal link error:", err)
       setPortalError(
-        err instanceof Error
-          ? err.message
-          : "Δεν ήταν δυνατή η δημιουργία του portal link."
+        err instanceof Error ? err.message : texts.portalCreateFailed
       )
     } finally {
       setPortalLoadingId(null)
@@ -232,25 +378,27 @@ export default function PartnersPage() {
       const data = (await res.json().catch(() => null)) as PortalAccessResponse | null
 
       if (!res.ok) {
-        throw new Error(data && "error" in (data as any) ? (data as any).error : "Αποτυχία φόρτωσης portal link.")
+        throw new Error(
+          data && "error" in (data as any)
+            ? (data as any).error
+            : texts.portalLoadFailed
+        )
       }
 
       if (!data?.portalAccess?.portalUrl) {
-        throw new Error("Δεν υπάρχει ακόμη ενεργό portal link για αυτόν τον συνεργάτη.")
+        throw new Error(texts.portalMissing)
       }
 
       setPortalPartnerName(data?.partner?.name || "")
       setPortalUrl(data?.portalAccess?.portalUrl || "")
       setPortalCreatedAt(data?.portalAccess?.createdAt || null)
       setPortalLastUsedAt(data?.portalAccess?.lastUsedAt || null)
-      setPortalSuccess("Το portal link φορτώθηκε επιτυχώς.")
+      setPortalSuccess(texts.portalLoadSuccess)
       setShowPortalBox(true)
     } catch (err) {
       console.error("Load portal link error:", err)
       setPortalError(
-        err instanceof Error
-          ? err.message
-          : "Δεν ήταν δυνατή η φόρτωση του portal link."
+        err instanceof Error ? err.message : texts.portalLoadFailed
       )
     } finally {
       setPortalLoadingId(null)
@@ -261,16 +409,39 @@ export default function PartnersPage() {
     try {
       if (!portalUrl) return
       await navigator.clipboard.writeText(portalUrl)
-      setPortalSuccess("Το portal link αντιγράφηκε.")
+      setPortalSuccess(texts.portalCopySuccess)
     } catch (err) {
       console.error("Copy portal link error:", err)
-      setPortalError("Δεν ήταν δυνατή η αντιγραφή του link.")
+      setPortalError(texts.portalCopyFailed)
     }
   }
 
   useEffect(() => {
     loadPartners()
-  }, [])
+  }, [language])
+
+  useEffect(() => {
+    setSpecialty((prev) => {
+      const values = [
+        "Καθαρισμός",
+        "Συντήρηση",
+        "Τεχνικός έλεγχος",
+        "Επιθεώρηση",
+        "Αναλώσιμα",
+        "Cleaning",
+        "Maintenance",
+        "Technical check",
+        "Inspection",
+        "Supplies",
+      ]
+
+      if (values.includes(prev)) {
+        return texts.cleaning
+      }
+
+      return prev
+    })
+  }, [texts.cleaning])
 
   const filteredPartners = useMemo(() => {
     const query = search.trim().toLowerCase()
@@ -300,30 +471,28 @@ export default function PartnersPage() {
     <div className="space-y-8">
       <section>
         <h1 className="text-3xl font-bold tracking-tight text-slate-900">
-          Συνεργάτες
+          {texts.title}
         </h1>
-        <p className="mt-2 text-sm text-slate-500">
-          Διαχείριση συνεργατών, ειδικοτήτων, διαθεσιμότητας και πρόσβασης στο partner portal.
-        </p>
+        <p className="mt-2 text-sm text-slate-500">{texts.subtitle}</p>
       </section>
 
       <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm font-medium text-slate-500">Σύνολο συνεργατών</p>
+          <p className="text-sm font-medium text-slate-500">{texts.totalPartners}</p>
           <p className="mt-3 text-3xl font-bold text-slate-900">
             {totalPartners}
           </p>
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm font-medium text-slate-500">Ενεργοί</p>
+          <p className="text-sm font-medium text-slate-500">{texts.activePartners}</p>
           <p className="mt-3 text-3xl font-bold text-green-600">
             {activePartners}
           </p>
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm font-medium text-slate-500">Ανενεργοί</p>
+          <p className="text-sm font-medium text-slate-500">{texts.inactivePartners}</p>
           <p className="mt-3 text-3xl font-bold text-slate-700">
             {inactivePartners}
           </p>
@@ -333,7 +502,7 @@ export default function PartnersPage() {
       <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="mb-6">
           <h2 className="text-lg font-semibold text-slate-900">
-            Δημιουργία συνεργάτη
+            {texts.createSection}
           </h2>
         </div>
 
@@ -343,20 +512,20 @@ export default function PartnersPage() {
         >
           <div className="lg:col-span-3">
             <label className="mb-2 block text-sm font-medium text-slate-700">
-              Όνομα
+              {texts.name}
             </label>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="π.χ. Μαρία Παπαδάκη"
+              placeholder={language === "en" ? "e.g. Maria Papadaki" : "π.χ. Μαρία Παπαδάκη"}
               className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
             />
           </div>
 
           <div className="lg:col-span-3">
             <label className="mb-2 block text-sm font-medium text-slate-700">
-              Email
+              {texts.email}
             </label>
             <input
               type="email"
@@ -369,7 +538,7 @@ export default function PartnersPage() {
 
           <div className="lg:col-span-2">
             <label className="mb-2 block text-sm font-medium text-slate-700">
-              Τηλέφωνο
+              {texts.phone}
             </label>
             <input
               type="text"
@@ -382,44 +551,44 @@ export default function PartnersPage() {
 
           <div className="lg:col-span-2">
             <label className="mb-2 block text-sm font-medium text-slate-700">
-              Ειδικότητα
+              {texts.specialty}
             </label>
             <select
               value={specialty}
               onChange={(e) => setSpecialty(e.target.value)}
               className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
             >
-              <option value="Καθαρισμός">Καθαρισμός</option>
-              <option value="Συντήρηση">Συντήρηση</option>
-              <option value="Τεχνικός έλεγχος">Τεχνικός έλεγχος</option>
-              <option value="Επιθεώρηση">Επιθεώρηση</option>
-              <option value="Αναλώσιμα">Αναλώσιμα</option>
+              <option value={texts.cleaning}>{texts.cleaning}</option>
+              <option value={texts.maintenance}>{texts.maintenance}</option>
+              <option value={texts.technicalCheck}>{texts.technicalCheck}</option>
+              <option value={texts.inspection}>{texts.inspection}</option>
+              <option value={texts.supplies}>{texts.supplies}</option>
             </select>
           </div>
 
           <div className="lg:col-span-2">
             <label className="mb-2 block text-sm font-medium text-slate-700">
-              Κατάσταση
+              {texts.status}
             </label>
             <select
               value={status}
               onChange={(e) => setStatus(e.target.value)}
               className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
             >
-              <option value="active">Ενεργός</option>
-              <option value="inactive">Ανενεργός</option>
+              <option value="active">{texts.active}</option>
+              <option value="inactive">{texts.inactive}</option>
             </select>
           </div>
 
           <div className="lg:col-span-9">
             <label className="mb-2 block text-sm font-medium text-slate-700">
-              Σημειώσεις
+              {texts.notes}
             </label>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               rows={3}
-              placeholder="Εσωτερικές σημειώσεις για τον συνεργάτη"
+              placeholder={texts.notesPlaceholder}
               className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
             />
           </div>
@@ -430,7 +599,7 @@ export default function PartnersPage() {
               disabled={submitting}
               className="w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {submitting ? "Αποθήκευση..." : "Προσθήκη συνεργάτη"}
+              {submitting ? texts.save : texts.addPartner}
             </button>
           </div>
         </form>
@@ -452,7 +621,7 @@ export default function PartnersPage() {
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="mb-4">
             <h2 className="text-lg font-semibold text-slate-900">
-              Partner portal
+              {texts.portalTitle}
             </h2>
           </div>
 
@@ -472,7 +641,7 @@ export default function PartnersPage() {
             <div className="mt-4 space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <div>
                 <div className="text-sm font-semibold text-slate-900">
-                  Συνεργάτης
+                  {texts.portalPartner}
                 </div>
                 <div className="mt-1 text-sm text-slate-700">
                   {portalPartnerName}
@@ -481,7 +650,7 @@ export default function PartnersPage() {
 
               <div>
                 <div className="text-sm font-semibold text-slate-900">
-                  Portal link
+                  {texts.portalLink}
                 </div>
                 <div className="mt-1 break-all rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
                   {portalUrl}
@@ -490,13 +659,13 @@ export default function PartnersPage() {
 
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
-                  <span className="font-semibold text-slate-900">Δημιουργία:</span>{" "}
-                  {formatDateTime(portalCreatedAt)}
+                  <span className="font-semibold text-slate-900">{texts.portalCreatedAt}:</span>{" "}
+                  {formatDateTime(portalCreatedAt, language)}
                 </div>
 
                 <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
-                  <span className="font-semibold text-slate-900">Τελευταία χρήση:</span>{" "}
-                  {formatDateTime(portalLastUsedAt)}
+                  <span className="font-semibold text-slate-900">{texts.portalLastUsedAt}:</span>{" "}
+                  {formatDateTime(portalLastUsedAt, language)}
                 </div>
               </div>
 
@@ -506,7 +675,7 @@ export default function PartnersPage() {
                   onClick={handleCopyPortalLink}
                   className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
                 >
-                  Αντιγραφή link
+                  {texts.copyLink}
                 </button>
 
                 <a
@@ -515,7 +684,7 @@ export default function PartnersPage() {
                   rel="noreferrer"
                   className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
                 >
-                  Άνοιγμα portal
+                  {texts.openPortal}
                 </a>
               </div>
             </div>
@@ -527,14 +696,14 @@ export default function PartnersPage() {
         <div className="flex flex-col gap-4 border-b border-slate-200 px-6 py-4 md:flex-row md:items-center md:justify-between">
           <div>
             <h2 className="text-lg font-semibold text-slate-900">
-              Λίστα συνεργατών
+              {texts.listTitle}
             </h2>
           </div>
 
           <div className="w-full md:w-80">
             <input
               type="text"
-              placeholder="Αναζήτηση σε κωδικό, όνομα, email..."
+              placeholder={texts.searchPlaceholder}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
@@ -547,25 +716,25 @@ export default function PartnersPage() {
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50">
                 <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
-                  Κωδικός
+                  {texts.code}
                 </th>
                 <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
-                  Όνομα
+                  {texts.name}
                 </th>
                 <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
-                  Email
+                  {texts.email}
                 </th>
                 <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
-                  Τηλέφωνο
+                  {texts.phone}
                 </th>
                 <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
-                  Ειδικότητα
+                  {texts.specialty}
                 </th>
                 <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
-                  Κατάσταση
+                  {texts.status}
                 </th>
                 <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
-                  Portal
+                  {texts.portal}
                 </th>
               </tr>
             </thead>
@@ -574,13 +743,13 @@ export default function PartnersPage() {
               {loading ? (
                 <tr>
                   <td colSpan={7} className="px-6 py-10 text-sm text-slate-500">
-                    Φόρτωση συνεργατών...
+                    {texts.loading}
                   </td>
                 </tr>
               ) : filteredPartners.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="px-6 py-12 text-center text-sm text-slate-500">
-                    Δεν υπάρχουν ακόμη συνεργάτες.
+                    {texts.empty}
                   </td>
                 </tr>
               ) : (
@@ -599,7 +768,7 @@ export default function PartnersPage() {
                       {partner.email}
                     </td>
                     <td className="px-6 py-4 text-sm text-slate-700">
-                      {partner.phone || "—"}
+                      {partner.phone || texts.noPhone}
                     </td>
                     <td className="px-6 py-4 text-sm text-slate-700">
                       {partner.specialty}
@@ -610,7 +779,7 @@ export default function PartnersPage() {
                           partner.status
                         )}`}
                       >
-                        {getStatusLabel(partner.status)}
+                        {getStatusLabel(partner.status, language)}
                       </span>
                     </td>
                     <td className="px-6 py-4 text-sm">
@@ -622,8 +791,8 @@ export default function PartnersPage() {
                           className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {portalLoadingId === partner.id
-                            ? "Δημιουργία..."
-                            : "Νέο link"}
+                            ? texts.loadingCreate
+                            : texts.generateLink}
                         </button>
 
                         <button
@@ -633,8 +802,8 @@ export default function PartnersPage() {
                           className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {portalLoadingId === partner.id
-                            ? "Φόρτωση..."
-                            : "Προβολή link"}
+                            ? texts.loadingLoad
+                            : texts.viewLink}
                         </button>
                       </div>
                     </td>

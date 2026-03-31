@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import {
   requireApiAppAccess,
-  buildTenantWhere,
   canAccessOrganization,
 } from "@/lib/route-access"
 
@@ -35,7 +34,10 @@ export async function GET(_req: NextRequest, context: RouteContext) {
     const { id } = await context.params
 
     const issue = await prisma.issue.findFirst({
-      where: buildTenantWhere(auth, { id }),
+      where:
+        auth.isSuperAdmin || !auth.organizationId
+          ? { id }
+          : { id, organizationId: auth.organizationId },
       include: {
         property: {
           select: {
@@ -127,7 +129,7 @@ export async function PUT(req: NextRequest, context: RouteContext) {
 
     const { auth } = access
     const { id } = await context.params
-    const body = await req.json()
+    const body = await req.json().catch(() => ({}))
 
     const existingIssue = await prisma.issue.findUnique({
       where: { id },
@@ -166,6 +168,8 @@ export async function PUT(req: NextRequest, context: RouteContext) {
       )
     }
 
+    const normalizedStatus = status?.toLowerCase() ?? null
+
     const updatedIssue = await prisma.issue.update({
       where: { id },
       data: {
@@ -176,7 +180,7 @@ export async function PUT(req: NextRequest, context: RouteContext) {
         ...(severity !== null ? { severity } : {}),
         ...(reportedBy !== null ? { reportedBy } : {}),
         ...(resolutionNotes !== null ? { resolutionNotes } : {}),
-        ...(status?.toLowerCase() === "resolved" || status?.toLowerCase() === "closed"
+        ...(normalizedStatus === "resolved" || normalizedStatus === "closed"
           ? { resolvedAt: new Date() }
           : {}),
       },
@@ -264,7 +268,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
 
     const { auth } = access
     const { id } = await context.params
-    const body = await req.json()
+    const body = await req.json().catch(() => ({}))
 
     const existingIssue = await prisma.issue.findUnique({
       where: { id },
@@ -288,23 +292,67 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       )
     }
 
-    const data: Record<string, unknown> = {}
+    const data: {
+      title?: string
+      description?: string | null
+      status?: string
+      severity?: string
+      issueType?: string
+      reportedBy?: string
+      resolutionNotes?: string | null
+      resolvedAt?: Date
+    } = {}
 
-    if (body.title !== undefined) data.title = toStringValue(body.title)
-    if (body.description !== undefined) data.description = toNullableString(body.description)
-    if (body.status !== undefined) data.status = toNullableString(body.status)
-    if (body.severity !== undefined) data.severity = toNullableString(body.severity)
-    if (body.issueType !== undefined) data.issueType = toNullableString(body.issueType)
-    if (body.reportedBy !== undefined) data.reportedBy = toNullableString(body.reportedBy)
-    if (body.resolutionNotes !== undefined) {
-      data.resolutionNotes = toNullableString(body.resolutionNotes)
+    if (body.title !== undefined) {
+      const title = toStringValue(body.title)
+      if (!title) {
+        return NextResponse.json(
+          { error: "Ο τίτλος ζητήματος δεν μπορεί να είναι κενός." },
+          { status: 400 }
+        )
+      }
+      data.title = title
     }
 
-    const normalizedStatus =
-      typeof data.status === "string" ? data.status.toLowerCase() : null
+    if (body.description !== undefined) {
+      data.description = toNullableString(body.description)
+    }
 
-    if (normalizedStatus === "resolved" || normalizedStatus === "closed") {
-      data.resolvedAt = new Date()
+    if (body.status !== undefined) {
+      const status = toNullableString(body.status)
+      if (status !== null) {
+        data.status = status
+
+        const normalizedStatus = status.toLowerCase()
+        if (normalizedStatus === "resolved" || normalizedStatus === "closed") {
+          data.resolvedAt = new Date()
+        }
+      }
+    }
+
+    if (body.severity !== undefined) {
+      const severity = toNullableString(body.severity)
+      if (severity !== null) {
+        data.severity = severity
+      }
+    }
+
+    if (body.issueType !== undefined) {
+      const issueType = toNullableString(body.issueType)
+      if (issueType !== null) {
+        data.issueType = issueType
+      }
+    }
+
+    if (body.reportedBy !== undefined) {
+      const reportedBy = toNullableString(body.reportedBy)
+      if (reportedBy !== null) {
+        data.reportedBy = reportedBy
+      }
+    }
+
+    if (body.resolutionNotes !== undefined) {
+      data.resolutionNotes = toNullableString(body.resolutionNotes)
     }
 
     const updatedIssue = await prisma.issue.update({

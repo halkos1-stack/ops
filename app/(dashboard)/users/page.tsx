@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { useAppLanguage } from "@/components/i18n/LanguageProvider"
 
 type OrganizationInfo = {
   id: string
@@ -49,7 +50,7 @@ type SupportContactFormState = {
 
 type StatusFilter = "ALL" | "ACTIVE" | "INACTIVE"
 
-type UsersApiResponse = {
+type UsersApiSuccessResponse = {
   organization: OrganizationInfo | null
   primaryOrgAdmin: UserRow | null
   users: UserRow[]
@@ -58,6 +59,12 @@ type UsersApiResponse = {
     label: string
   }
 }
+
+type UsersApiErrorResponse = {
+  error: string
+}
+
+type UsersApiResponse = UsersApiSuccessResponse | UsersApiErrorResponse
 
 const initialFormState: CreateUserFormState = {
   name: "",
@@ -71,9 +78,18 @@ const initialSupportFormState: SupportContactFormState = {
   message: "",
 }
 
-function formatDate(value: string) {
+function isUsersApiError(data: unknown): data is UsersApiErrorResponse {
+  return (
+    typeof data === "object" &&
+    data !== null &&
+    "error" in data &&
+    typeof (data as { error?: unknown }).error === "string"
+  )
+}
+
+function formatDate(value: string, language: "el" | "en") {
   try {
-    return new Intl.DateTimeFormat("el-GR", {
+    return new Intl.DateTimeFormat(language === "en" ? "en-GB" : "el-GR", {
       dateStyle: "medium",
       timeStyle: "short",
     }).format(new Date(value))
@@ -82,7 +98,257 @@ function formatDate(value: string) {
   }
 }
 
+function getTexts(language: "el" | "en") {
+  if (language === "en") {
+    return {
+      loadError: "Failed to load users.",
+      unknownLoadError: "Unknown error while loading users.",
+      createError: "Failed to create user.",
+      unknownCreateError: "Unknown error while creating user.",
+      updateError: "Failed to update user.",
+      unknownUpdateError: "Unknown error while updating user.",
+      inviteError: "Failed to send invitation.",
+      unknownInviteError: "Unknown error while sending invitation.",
+      deleteError: "Failed to delete manager.",
+      unknownDeleteError: "Unknown error while deleting manager.",
+      editError: "Failed to edit user.",
+      unknownEditError: "Unknown error while editing user.",
+      supportError: "Failed to send support message.",
+      unknownSupportError: "Unknown error while sending support message.",
+
+      organizationUsers: "Organization users",
+      loadingOrganization: "Loading organization...",
+      pageDescription:
+        "The primary organization admin can create and manage only organization managers.",
+      refresh: "Refresh",
+      hideForm: "Hide form",
+      newManager: "New manager",
+
+      totalUsers: "Total users",
+      activeUsers: "Active",
+      inactiveUsers: "Inactive",
+      orgAdmins: "Organization admins",
+      managers: "Managers",
+
+      filtersTitle: "User management filters",
+      filtersDescription:
+        "Search and control users by access status.",
+      clearFilters: "Clear filters",
+      search: "Search",
+      searchPlaceholder: "Name or email...",
+      status: "Status",
+      all: "All",
+      activeOnly: "Only active",
+      inactiveOnly: "Only inactive",
+
+      primaryOrgAdminBadge: "Primary organization admin",
+      primaryOrgAdminTitle: "Main user management owner",
+      primaryOrgAdminDescription:
+        "The primary admin permanently keeps the Organization Admin role, cannot change role, cannot be disabled and does not show invitation or temporary password actions.",
+      active: "Active",
+      inactive: "Inactive",
+      role: "Role",
+      organizationAdmin: "Organization admin",
+      createdAt: "Created",
+      allowedAction: "Allowed action",
+      editDetails: "Edit details",
+
+      otherUsersTitle: "Other organization users",
+      otherUsersDescription:
+        "From here you manage only organization managers.",
+      visibleUsers: "Visible",
+      loadingUsers: "Loading users...",
+      noUsersWithFilters: "No users found with the current filters.",
+
+      currentRole: "Current role",
+      manager: "Manager",
+      organizationRole: "Organization role",
+      organizationRoleLocked:
+        "Users from this page remain managers only.",
+      userActions: "User actions",
+      edit: "Edit",
+      invite: "Invite",
+      saving: "Saving...",
+      disable: "Disable",
+      enable: "Enable",
+      deleting: "Deleting...",
+      delete: "Delete",
+
+      editUser: "Edit user",
+      editUserDescription:
+        "Update basic user details. The primary organization admin has locked role and status.",
+      close: "Close",
+      fullName: "Full name",
+      email: "Email",
+      userIsActive: "User is active",
+      primaryAdminLocked:
+        "The primary organization admin cannot change role or be disabled.",
+      saveChanges: "Save changes",
+
+      createManagerTitle: "New manager",
+      createManagerDescription:
+        "Create a new manager account for your organization.",
+      showForm: "Show form",
+      firstAccessPassword: "First access password",
+      passwordPlaceholder: "at least 6 characters",
+      activeFromStart: "User should be active from the start",
+      createManager: "Create manager",
+      createFormHidden: "The create form is hidden.",
+
+      supportTitle: "Platform support",
+      contactSupport: "Contact support",
+      closeSupportForm: "Close form",
+      supportDescription: "Contact support",
+      subject: "Subject",
+      subjectPlaceholder: "e.g. User access problem",
+      message: "Message",
+      messagePlaceholder: "Write your support request...",
+      sending: "Sending...",
+      sendMessage: "Send message",
+
+      successManagerCreated: "The manager was created successfully.",
+      successUserEnabled: "The user was enabled successfully.",
+      successUserDisabled: "The user was disabled successfully.",
+      successInviteSent: "Activation invitation was sent successfully.",
+      successInviteCreated: "The invitation was created.",
+      successUserUpdated: "User details were updated successfully.",
+      successSupportSent: "Support message was sent successfully.",
+      successSupportLogged:
+        "The message was logged, but no email was sent because SMTP is not configured.",
+
+      confirmDelete:
+        'Are you sure you want to delete manager "{name}"? This action is permanent.',
+      systemUserId: "User ID",
+    }
+  }
+
+  return {
+    loadError: "Αποτυχία φόρτωσης χρηστών.",
+    unknownLoadError: "Άγνωστο σφάλμα φόρτωσης χρηστών.",
+    createError: "Αποτυχία δημιουργίας χρήστη.",
+    unknownCreateError: "Άγνωστο σφάλμα δημιουργίας χρήστη.",
+    updateError: "Αποτυχία ενημέρωσης χρήστη.",
+    unknownUpdateError: "Άγνωστο σφάλμα ενημέρωσης χρήστη.",
+    inviteError: "Αποτυχία αποστολής πρόσκλησης.",
+    unknownInviteError: "Άγνωστο σφάλμα αποστολής πρόσκλησης.",
+    deleteError: "Αποτυχία διαγραφής manager.",
+    unknownDeleteError: "Άγνωστο σφάλμα διαγραφής manager.",
+    editError: "Αποτυχία επεξεργασίας χρήστη.",
+    unknownEditError: "Άγνωστο σφάλμα επεξεργασίας χρήστη.",
+    supportError: "Αποτυχία αποστολής μηνύματος προς την υποστήριξη.",
+    unknownSupportError:
+      "Άγνωστο σφάλμα αποστολής μηνύματος προς την υποστήριξη.",
+
+    organizationUsers: "Χρήστες οργανισμού",
+    loadingOrganization: "Φόρτωση οργανισμού...",
+    pageDescription:
+      "Ο βασικός διαχειριστής οργανισμού μπορεί να δημιουργεί και να διαχειρίζεται μόνο managers του οργανισμού.",
+    refresh: "Ανανέωση",
+    hideForm: "Απόκρυψη φόρμας",
+    newManager: "Νέος manager",
+
+    totalUsers: "Σύνολο χρηστών",
+    activeUsers: "Ενεργοί",
+    inactiveUsers: "Ανενεργοί",
+    orgAdmins: "Διαχειριστές οργανισμού",
+    managers: "Managers",
+
+    filtersTitle: "Φίλτρα διαχείρισης χρηστών",
+    filtersDescription:
+      "Αναζήτηση και έλεγχος χρηστών ανά κατάσταση πρόσβασης.",
+    clearFilters: "Καθαρισμός φίλτρων",
+    search: "Αναζήτηση",
+    searchPlaceholder: "Όνομα ή email...",
+    status: "Κατάσταση",
+    all: "Όλοι",
+    activeOnly: "Μόνο ενεργοί",
+    inactiveOnly: "Μόνο ανενεργοί",
+
+    primaryOrgAdminBadge: "Βασικός διαχειριστής οργανισμού",
+    primaryOrgAdminTitle: "Κύριος υπεύθυνος διαχείρισης χρηστών",
+    primaryOrgAdminDescription:
+      "Ο βασικός διαχειριστής έχει μόνιμα ρόλο «Διαχειριστής οργανισμού», δεν αλλάζει ρόλο, δεν απενεργοποιείται και δεν εμφανίζει ενέργειες πρόσκλησης ή προσωρινού κωδικού.",
+    active: "Ενεργός",
+    inactive: "Ανενεργός",
+    role: "Ρόλος",
+    organizationAdmin: "Διαχειριστής οργανισμού",
+    createdAt: "Δημιουργία",
+    allowedAction: "Επιτρεπόμενη ενέργεια",
+    editDetails: "Επεξεργασία στοιχείων",
+
+    otherUsersTitle: "Υπόλοιποι χρήστες οργανισμού",
+    otherUsersDescription:
+      "Από εδώ διαχειρίζεσαι μόνο managers του οργανισμού.",
+    visibleUsers: "Εμφανίζονται",
+    loadingUsers: "Φόρτωση χρηστών...",
+    noUsersWithFilters: "Δεν βρέθηκαν χρήστες με τα τρέχοντα φίλτρα.",
+
+    currentRole: "Τρέχων ρόλος",
+    manager: "Manager",
+    organizationRole: "Ρόλος οργανισμού",
+    organizationRoleLocked:
+      "Οι χρήστες από αυτή τη σελίδα παραμένουν μόνο managers.",
+    userActions: "Ενέργειες χρήστη",
+    edit: "Επεξεργασία",
+    invite: "Πρόσκληση",
+    saving: "Αποθήκευση...",
+    disable: "Απενεργοποίηση",
+    enable: "Ενεργοποίηση",
+    deleting: "Διαγραφή...",
+    delete: "Διαγραφή",
+
+    editUser: "Επεξεργασία χρήστη",
+    editUserDescription:
+      "Ενημέρωσε βασικά στοιχεία χρήστη. Ο βασικός διαχειριστής έχει κλειδωμένο ρόλο και κατάσταση.",
+    close: "Κλείσιμο",
+    fullName: "Ονοματεπώνυμο",
+    email: "Email",
+    userIsActive: "Ο χρήστης είναι ενεργός",
+    primaryAdminLocked:
+      "Ο βασικός διαχειριστής οργανισμού δεν μπορεί να αλλάξει ρόλο ή να απενεργοποιηθεί.",
+    saveChanges: "Αποθήκευση αλλαγών",
+
+    createManagerTitle: "Νέος manager",
+    createManagerDescription:
+      "Δημιουργία νέου λογαριασμού manager για τον οργανισμό σου.",
+    showForm: "Εμφάνιση φόρμας",
+    firstAccessPassword: "Κωδικός πρώτης εισόδου",
+    passwordPlaceholder: "τουλάχιστον 6 χαρακτήρες",
+    activeFromStart: "Ο χρήστης να είναι ενεργός από την αρχή",
+    createManager: "Δημιουργία manager",
+    createFormHidden: "Η φόρμα δημιουργίας είναι κρυφή.",
+
+    supportTitle: "Υποστήριξη πλατφόρμας",
+    contactSupport: "Επικοινωνία με υποστήριξη",
+    closeSupportForm: "Κλείσιμο φόρμας",
+    supportDescription: "Επικοινωνία με υποστήριξη",
+    subject: "Θέμα",
+    subjectPlaceholder: "π.χ. Πρόβλημα πρόσβασης χρήστη",
+    message: "Μήνυμα",
+    messagePlaceholder: "Γράψε το αίτημά σου προς την υποστήριξη...",
+    sending: "Αποστολή...",
+    sendMessage: "Αποστολή μηνύματος",
+
+    successManagerCreated: "Ο manager δημιουργήθηκε επιτυχώς.",
+    successUserEnabled: "Ο χρήστης ενεργοποιήθηκε επιτυχώς.",
+    successUserDisabled: "Ο χρήστης απενεργοποιήθηκε επιτυχώς.",
+    successInviteSent: "Η πρόσκληση ενεργοποίησης στάλθηκε επιτυχώς.",
+    successInviteCreated: "Η πρόσκληση δημιουργήθηκε.",
+    successUserUpdated: "Τα στοιχεία χρήστη ενημερώθηκαν επιτυχώς.",
+    successSupportSent: "Το μήνυμα προς την υποστήριξη στάλθηκε επιτυχώς.",
+    successSupportLogged:
+      "Το μήνυμα καταγράφηκε, αλλά δεν στάλθηκε email επειδή το SMTP δεν είναι ρυθμισμένο.",
+
+    confirmDelete:
+      'Θέλεις σίγουρα να διαγράψεις τον manager "{name}"; Η ενέργεια είναι οριστική.',
+    systemUserId: "User ID",
+  }
+}
+
 export default function OrganizationUsersPage() {
+  const { language } = useAppLanguage()
+  const texts = getTexts(language)
+
   const [organization, setOrganization] = useState<OrganizationInfo | null>(null)
   const [primaryOrgAdmin, setPrimaryOrgAdmin] = useState<UserRow | null>(null)
   const [users, setUsers] = useState<UserRow[]>([])
@@ -100,9 +366,9 @@ export default function OrganizationUsersPage() {
     initialSupportFormState
   )
   const [editForm, setEditForm] = useState<EditUserFormState | null>(null)
-  const [supportContact, setSupportContact] = useState<UsersApiResponse["supportContact"]>({
+  const [supportContact, setSupportContact] = useState<UsersApiSuccessResponse["supportContact"]>({
     email: "admin@ops.local",
-    label: "Υποστήριξη πλατφόρμας",
+    label: language === "en" ? "Platform support" : "Υποστήριξη πλατφόρμας",
   })
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
@@ -117,34 +383,35 @@ export default function OrganizationUsersPage() {
         cache: "no-store",
       })
 
-      const data = (await res.json()) as UsersApiResponse | { error?: string }
+      const data = (await res.json()) as UsersApiResponse
 
-      if (!res.ok) {
-        throw new Error(data?.error || "Αποτυχία φόρτωσης χρηστών.")
+      if (!res.ok || isUsersApiError(data)) {
+        throw new Error(
+          isUsersApiError(data) ? data.error : texts.loadError
+        )
       }
 
       const safePrimary =
-        data?.primaryOrgAdmin &&
-        data.primaryOrgAdmin.systemRole !== "SUPER_ADMIN"
+        data.primaryOrgAdmin && data.primaryOrgAdmin.systemRole !== "SUPER_ADMIN"
           ? data.primaryOrgAdmin
           : null
 
-      const safeUsers = (data?.users ?? []).filter(
-        (user) => user.systemRole !== "SUPER_ADMIN"
+      const safeUsers = (data.users ?? []).filter(
+        (user: UserRow) => user.systemRole !== "SUPER_ADMIN"
       )
 
-      setOrganization(data?.organization ?? null)
+      setOrganization(data.organization ?? null)
       setPrimaryOrgAdmin(safePrimary)
       setUsers(safeUsers)
       setSupportContact(
-        data?.supportContact ?? {
+        data.supportContact ?? {
           email: "admin@ops.local",
-          label: "Υποστήριξη πλατφόρμας",
+          label: language === "en" ? "Platform support" : "Υποστήριξη πλατφόρμας",
         }
       )
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : "Άγνωστο σφάλμα φόρτωσης χρηστών."
+        err instanceof Error ? err.message : texts.unknownLoadError
       setError(message)
     } finally {
       setLoading(false)
@@ -153,7 +420,7 @@ export default function OrganizationUsersPage() {
 
   useEffect(() => {
     loadUsers()
-  }, [])
+  }, [language])
 
   const stats = useMemo(() => {
     const allUsers = primaryOrgAdmin ? [primaryOrgAdmin, ...users] : users
@@ -220,18 +487,20 @@ export default function OrganizationUsersPage() {
         }),
       })
 
-      const data = await res.json()
+      const data = (await res.json()) as Record<string, unknown>
 
       if (!res.ok) {
-        throw new Error(data?.error || "Αποτυχία δημιουργίας χρήστη.")
+        throw new Error(
+          typeof data?.error === "string" ? data.error : texts.createError
+        )
       }
 
       setForm(initialFormState)
-      setSuccess("Ο manager δημιουργήθηκε επιτυχώς.")
+      setSuccess(texts.successManagerCreated)
       await loadUsers()
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : "Άγνωστο σφάλμα δημιουργίας χρήστη."
+        err instanceof Error ? err.message : texts.unknownCreateError
       setError(message)
     } finally {
       setSaving(false)
@@ -254,22 +523,19 @@ export default function OrganizationUsersPage() {
         }),
       })
 
-      const data = await res.json()
+      const data = (await res.json()) as Record<string, unknown>
 
       if (!res.ok) {
-        throw new Error(data?.error || "Αποτυχία ενημέρωσης χρήστη.")
+        throw new Error(
+          typeof data?.error === "string" ? data.error : texts.updateError
+        )
       }
 
-      setSuccess(
-        !user.isActive
-          ? "Ο χρήστης ενεργοποιήθηκε επιτυχώς."
-          : "Ο χρήστης απενεργοποιήθηκε επιτυχώς."
-      )
-
+      setSuccess(!user.isActive ? texts.successUserEnabled : texts.successUserDisabled)
       await loadUsers()
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : "Άγνωστο σφάλμα ενημέρωσης χρήστη."
+        err instanceof Error ? err.message : texts.unknownUpdateError
       setError(message)
     } finally {
       setUpdatingUserId(null)
@@ -286,24 +552,28 @@ export default function OrganizationUsersPage() {
         method: "POST",
       })
 
-      const data = await res.json()
+      const data = (await res.json()) as Record<string, unknown>
 
       if (!res.ok) {
-        throw new Error(data?.error || "Αποτυχία αποστολής πρόσκλησης.")
+        throw new Error(
+          typeof data?.error === "string" ? data.error : texts.inviteError
+        )
       }
 
       if (data?.sent) {
-        setSuccess("Η πρόσκληση ενεργοποίησης στάλθηκε επιτυχώς.")
-      } else if (data?.activationUrl) {
-        setSuccess(
-          `Το SMTP δεν είναι ρυθμισμένο. Link ενεργοποίησης: ${data.activationUrl}`
-        )
+        setSuccess(texts.successInviteSent)
+      } else if (typeof data?.activationUrl === "string") {
+        setSuccess(`${texts.successInviteCreated} ${data.activationUrl}`)
       } else {
-        setSuccess(data?.message || "Η πρόσκληση δημιουργήθηκε.")
+        setSuccess(
+          typeof data?.message === "string"
+            ? data.message
+            : texts.successInviteCreated
+        )
       }
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : "Άγνωστο σφάλμα αποστολής πρόσκλησης."
+        err instanceof Error ? err.message : texts.unknownInviteError
       setError(message)
     } finally {
       setUpdatingUserId(null)
@@ -312,7 +582,7 @@ export default function OrganizationUsersPage() {
 
   async function handleDeleteUser(user: UserRow) {
     const confirmed = window.confirm(
-      `Θέλεις σίγουρα να διαγράψεις τον manager "${user.name ?? user.email}"; Η ενέργεια είναι οριστική.`
+      texts.confirmDelete.replace("{name}", user.name ?? user.email)
     )
 
     if (!confirmed) {
@@ -328,17 +598,25 @@ export default function OrganizationUsersPage() {
         method: "DELETE",
       })
 
-      const data = await res.json()
+      const data = (await res.json()) as Record<string, unknown>
 
       if (!res.ok) {
-        throw new Error(data?.error || "Αποτυχία διαγραφής manager.")
+        throw new Error(
+          typeof data?.error === "string" ? data.error : texts.deleteError
+        )
       }
 
-      setSuccess(data?.message || "Ο manager διαγράφηκε επιτυχώς.")
+      setSuccess(
+        typeof data?.message === "string"
+          ? data.message
+          : language === "en"
+            ? "The manager was deleted successfully."
+            : "Ο manager διαγράφηκε επιτυχώς."
+      )
       await loadUsers()
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : "Άγνωστο σφάλμα διαγραφής manager."
+        err instanceof Error ? err.message : texts.unknownDeleteError
       setError(message)
     } finally {
       setDeletingUserId(null)
@@ -387,18 +665,20 @@ export default function OrganizationUsersPage() {
         body: JSON.stringify(payload),
       })
 
-      const data = await res.json()
+      const data = (await res.json()) as Record<string, unknown>
 
       if (!res.ok) {
-        throw new Error(data?.error || "Αποτυχία επεξεργασίας χρήστη.")
+        throw new Error(
+          typeof data?.error === "string" ? data.error : texts.editError
+        )
       }
 
-      setSuccess("Τα στοιχεία χρήστη ενημερώθηκαν επιτυχώς.")
+      setSuccess(texts.successUserUpdated)
       setEditForm(null)
       await loadUsers()
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : "Άγνωστο σφάλμα επεξεργασίας χρήστη."
+        err instanceof Error ? err.message : texts.unknownEditError
       setError(message)
     } finally {
       setUpdatingUserId(null)
@@ -423,11 +703,11 @@ export default function OrganizationUsersPage() {
         body: JSON.stringify(supportForm),
       })
 
-      const data = await res.json()
+      const data = (await res.json()) as Record<string, unknown>
 
       if (!res.ok) {
         throw new Error(
-          data?.error || "Αποτυχία αποστολής μηνύματος προς την υποστήριξη."
+          typeof data?.error === "string" ? data.error : texts.supportError
         )
       }
 
@@ -435,18 +715,17 @@ export default function OrganizationUsersPage() {
       setShowSupportForm(false)
 
       if (data?.sent) {
-        setSuccess("Το μήνυμα προς την υποστήριξη στάλθηκε επιτυχώς.")
+        setSuccess(texts.successSupportSent)
       } else {
         setSuccess(
-          data?.message ||
-            "Το μήνυμα καταγράφηκε, αλλά δεν στάλθηκε email επειδή το SMTP δεν είναι ρυθμισμένο."
+          typeof data?.message === "string"
+            ? data.message
+            : texts.successSupportLogged
         )
       }
     } catch (err) {
       const message =
-        err instanceof Error
-          ? err.message
-          : "Άγνωστο σφάλμα αποστολής μηνύματος προς την υποστήριξη."
+        err instanceof Error ? err.message : texts.unknownSupportError
       setError(message)
     } finally {
       setSendingSupportMessage(false)
@@ -464,14 +743,13 @@ export default function OrganizationUsersPage() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">
-              Χρήστες οργανισμού
+              {texts.organizationUsers}
             </p>
             <h1 className="mt-2 text-3xl font-bold text-slate-900">
-              {organization?.name ?? "Φόρτωση οργανισμού..."}
+              {organization?.name ?? texts.loadingOrganization}
             </h1>
             <p className="mt-2 text-sm text-slate-600">
-              Ο βασικός διαχειριστής οργανισμού μπορεί να δημιουργεί και να
-              διαχειρίζεται μόνο managers του οργανισμού.
+              {texts.pageDescription}
             </p>
           </div>
 
@@ -480,14 +758,14 @@ export default function OrganizationUsersPage() {
               onClick={loadUsers}
               className="inline-flex rounded-2xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
             >
-              Ανανέωση
+              {texts.refresh}
             </button>
 
             <button
               onClick={() => setShowCreateForm((prev) => !prev)}
               className="inline-flex rounded-2xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
             >
-              {showCreateForm ? "Απόκρυψη φόρμας" : "Νέος manager"}
+              {showCreateForm ? texts.hideForm : texts.newManager}
             </button>
           </div>
         </div>
@@ -495,27 +773,27 @@ export default function OrganizationUsersPage() {
 
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 2xl:grid-cols-5">
         <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Σύνολο χρηστών</p>
+          <p className="text-sm text-slate-500">{texts.totalUsers}</p>
           <p className="mt-2 text-3xl font-bold text-slate-900">{stats.total}</p>
         </div>
 
         <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Ενεργοί</p>
+          <p className="text-sm text-slate-500">{texts.activeUsers}</p>
           <p className="mt-2 text-3xl font-bold text-emerald-600">{stats.active}</p>
         </div>
 
         <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Ανενεργοί</p>
+          <p className="text-sm text-slate-500">{texts.inactiveUsers}</p>
           <p className="mt-2 text-3xl font-bold text-amber-600">{stats.inactive}</p>
         </div>
 
         <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Διαχειριστές οργανισμού</p>
+          <p className="text-sm text-slate-500">{texts.orgAdmins}</p>
           <p className="mt-2 text-3xl font-bold text-slate-900">{stats.orgAdmins}</p>
         </div>
 
         <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Managers</p>
+          <p className="text-sm text-slate-500">{texts.managers}</p>
           <p className="mt-2 text-3xl font-bold text-slate-900">{stats.managers}</p>
         </div>
       </section>
@@ -524,10 +802,10 @@ export default function OrganizationUsersPage() {
         <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <h2 className="text-xl font-bold text-slate-900">
-              Φίλτρα διαχείρισης χρηστών
+              {texts.filtersTitle}
             </h2>
             <p className="mt-1 text-sm text-slate-600">
-              Αναζήτηση και έλεγχος χρηστών ανά κατάσταση πρόσβασης.
+              {texts.filtersDescription}
             </p>
           </div>
 
@@ -535,27 +813,27 @@ export default function OrganizationUsersPage() {
             onClick={resetFilters}
             className="inline-flex rounded-2xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
           >
-            Καθαρισμός φίλτρων
+            {texts.clearFilters}
           </button>
         </div>
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <div>
             <label className="mb-2 block text-sm font-medium text-slate-700">
-              Αναζήτηση
+              {texts.search}
             </label>
             <input
               type="text"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Όνομα ή email..."
+              placeholder={texts.searchPlaceholder}
               className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-slate-900"
             />
           </div>
 
           <div>
             <label className="mb-2 block text-sm font-medium text-slate-700">
-              Κατάσταση
+              {texts.status}
             </label>
             <select
               value={statusFilter}
@@ -564,9 +842,9 @@ export default function OrganizationUsersPage() {
               }
               className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-slate-900"
             >
-              <option value="ALL">Όλοι</option>
-              <option value="ACTIVE">Μόνο ενεργοί</option>
-              <option value="INACTIVE">Μόνο ανενεργοί</option>
+              <option value="ALL">{texts.all}</option>
+              <option value="ACTIVE">{texts.activeOnly}</option>
+              <option value="INACTIVE">{texts.inactiveOnly}</option>
             </select>
           </div>
         </div>
@@ -588,15 +866,13 @@ export default function OrganizationUsersPage() {
         <section className="rounded-3xl border border-blue-200 bg-white p-6 shadow-sm">
           <div className="mb-4">
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-700">
-              Βασικός διαχειριστής οργανισμού
+              {texts.primaryOrgAdminBadge}
             </p>
             <h2 className="mt-2 text-xl font-bold text-slate-900">
-              Κύριος υπεύθυνος διαχείρισης χρηστών
+              {texts.primaryOrgAdminTitle}
             </h2>
             <p className="mt-1 text-sm text-slate-600">
-              Ο βασικός διαχειριστής έχει μόνιμα ρόλο «Διαχειριστής οργανισμού»,
-              δεν αλλάζει ρόλο, δεν απενεργοποιείται και δεν εμφανίζει ενέργειες
-              πρόσκλησης ή προσωρινού κωδικού.
+              {texts.primaryOrgAdminDescription}
             </p>
           </div>
 
@@ -616,11 +892,11 @@ export default function OrganizationUsersPage() {
                           : "bg-amber-100 text-amber-700"
                       }`}
                     >
-                      {primaryOrgAdmin.isActive ? "Ενεργός" : "Ανενεργός"}
+                      {primaryOrgAdmin.isActive ? texts.active : texts.inactive}
                     </span>
 
                     <span className="inline-flex rounded-full bg-blue-100 px-3 py-1 text-[11px] font-semibold text-blue-700">
-                      Βασικός διαχειριστής
+                      {texts.primaryOrgAdminBadge}
                     </span>
                   </div>
 
@@ -629,26 +905,26 @@ export default function OrganizationUsersPage() {
                   </p>
 
                   <p className="mt-1 break-all text-xs text-slate-500">
-                    User ID: {primaryOrgAdmin.userId}
+                    {texts.systemUserId}: {primaryOrgAdmin.userId}
                   </p>
                 </div>
 
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:min-w-[360px]">
                   <div className="rounded-2xl bg-slate-50 px-4 py-3">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                      Ρόλος
+                      {texts.role}
                     </p>
                     <p className="mt-1 text-sm font-semibold text-slate-900">
-                      Διαχειριστής οργανισμού
+                      {texts.organizationAdmin}
                     </p>
                   </div>
 
                   <div className="rounded-2xl bg-slate-50 px-4 py-3">
                     <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                      Δημιουργία
+                      {texts.createdAt}
                     </p>
                     <p className="mt-1 text-sm font-semibold text-slate-900">
-                      {formatDate(primaryOrgAdmin.userCreatedAt)}
+                      {formatDate(primaryOrgAdmin.userCreatedAt, language)}
                     </p>
                   </div>
                 </div>
@@ -656,7 +932,7 @@ export default function OrganizationUsersPage() {
 
               <div className="rounded-2xl border border-slate-200 p-4">
                 <p className="mb-3 text-sm font-medium text-slate-700">
-                  Επιτρεπόμενη ενέργεια
+                  {texts.allowedAction}
                 </p>
 
                 <div className="flex flex-wrap gap-2">
@@ -665,7 +941,7 @@ export default function OrganizationUsersPage() {
                     disabled={updatingUserId === primaryOrgAdmin.userId}
                     className="inline-flex rounded-xl border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    Επεξεργασία στοιχείων
+                    {texts.editDetails}
                   </button>
                 </div>
               </div>
@@ -678,25 +954,25 @@ export default function OrganizationUsersPage() {
         <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h2 className="text-xl font-bold text-slate-900">
-              Υπόλοιποι χρήστες οργανισμού
+              {texts.otherUsersTitle}
             </h2>
             <p className="mt-1 text-sm text-slate-600">
-              Από εδώ διαχειρίζεσαι μόνο managers του οργανισμού.
+              {texts.otherUsersDescription}
             </p>
           </div>
 
           <div className="rounded-2xl bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700">
-            Εμφανίζονται: {filteredUsers.length}
+            {texts.visibleUsers}: {filteredUsers.length}
           </div>
         </div>
 
         {loading ? (
           <div className="rounded-2xl border border-dashed border-slate-300 px-6 py-12 text-center text-sm text-slate-500">
-            Φόρτωση χρηστών...
+            {texts.loadingUsers}
           </div>
         ) : filteredUsers.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-slate-300 px-6 py-12 text-center text-sm text-slate-500">
-            Δεν βρέθηκαν χρήστες με τα τρέχοντα φίλτρα.
+            {texts.noUsersWithFilters}
           </div>
         ) : (
           <div className="space-y-4">
@@ -720,7 +996,7 @@ export default function OrganizationUsersPage() {
                               : "bg-amber-100 text-amber-700"
                           }`}
                         >
-                          {user.isActive ? "Ενεργός" : "Ανενεργός"}
+                          {user.isActive ? texts.active : texts.inactive}
                         </span>
                       </div>
 
@@ -729,26 +1005,26 @@ export default function OrganizationUsersPage() {
                       </p>
 
                       <p className="mt-1 break-all text-xs text-slate-500">
-                        User ID: {user.userId}
+                        {texts.systemUserId}: {user.userId}
                       </p>
                     </div>
 
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:min-w-[360px]">
                       <div className="rounded-2xl bg-slate-50 px-4 py-3">
                         <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                          Τρέχων ρόλος
+                          {texts.currentRole}
                         </p>
                         <p className="mt-1 text-sm font-semibold text-slate-900">
-                          Manager
+                          {texts.manager}
                         </p>
                       </div>
 
                       <div className="rounded-2xl bg-slate-50 px-4 py-3">
                         <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                          Δημιουργία
+                          {texts.createdAt}
                         </p>
                         <p className="mt-1 text-sm font-semibold text-slate-900">
-                          {formatDate(user.userCreatedAt)}
+                          {formatDate(user.userCreatedAt, language)}
                         </p>
                       </div>
                     </div>
@@ -757,21 +1033,21 @@ export default function OrganizationUsersPage() {
                   <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,260px)_minmax(0,1fr)]">
                     <div className="rounded-2xl border border-slate-200 p-4">
                       <label className="mb-2 block text-sm font-medium text-slate-700">
-                        Ρόλος οργανισμού
+                        {texts.organizationRole}
                       </label>
 
                       <div className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-medium text-slate-700">
-                        Manager
+                        {texts.manager}
                       </div>
 
                       <p className="mt-2 text-xs text-slate-500">
-                        Οι χρήστες από αυτή τη σελίδα παραμένουν μόνο managers.
+                        {texts.organizationRoleLocked}
                       </p>
                     </div>
 
                     <div className="rounded-2xl border border-slate-200 p-4">
                       <p className="mb-3 text-sm font-medium text-slate-700">
-                        Ενέργειες χρήστη
+                        {texts.userActions}
                       </p>
 
                       <div className="flex flex-wrap gap-2">
@@ -780,7 +1056,7 @@ export default function OrganizationUsersPage() {
                           disabled={updatingUserId === user.userId}
                           className="inline-flex rounded-xl border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                         >
-                          Επεξεργασία
+                          {texts.edit}
                         </button>
 
                         <button
@@ -788,7 +1064,7 @@ export default function OrganizationUsersPage() {
                           disabled={updatingUserId === user.userId}
                           className="inline-flex rounded-xl border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                         >
-                          Πρόσκληση
+                          {texts.invite}
                         </button>
 
                         <button
@@ -797,10 +1073,10 @@ export default function OrganizationUsersPage() {
                           className="inline-flex rounded-xl border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {updatingUserId === user.userId
-                            ? "Αποθήκευση..."
+                            ? texts.saving
                             : user.isActive
-                              ? "Απενεργοποίηση"
-                              : "Ενεργοποίηση"}
+                              ? texts.disable
+                              : texts.enable}
                         </button>
 
                         <button
@@ -809,8 +1085,8 @@ export default function OrganizationUsersPage() {
                           className="inline-flex rounded-xl border border-rose-300 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {deletingUserId === user.userId
-                            ? "Διαγραφή..."
-                            : "Διαγραφή"}
+                            ? texts.deleting
+                            : texts.delete}
                         </button>
                       </div>
                     </div>
@@ -826,10 +1102,9 @@ export default function OrganizationUsersPage() {
         <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
-              <h2 className="text-xl font-bold text-slate-900">Επεξεργασία χρήστη</h2>
+              <h2 className="text-xl font-bold text-slate-900">{texts.editUser}</h2>
               <p className="mt-1 text-sm text-slate-600">
-                Ενημέρωσε βασικά στοιχεία χρήστη. Ο βασικός διαχειριστής έχει
-                κλειδωμένο ρόλο και κατάσταση.
+                {texts.editUserDescription}
               </p>
             </div>
 
@@ -837,7 +1112,7 @@ export default function OrganizationUsersPage() {
               onClick={() => setEditForm(null)}
               className="inline-flex rounded-2xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
             >
-              Κλείσιμο
+              {texts.close}
             </button>
           </div>
 
@@ -847,7 +1122,7 @@ export default function OrganizationUsersPage() {
           >
             <div>
               <label className="mb-2 block text-sm font-medium text-slate-700">
-                Ονοματεπώνυμο
+                {texts.fullName}
               </label>
               <input
                 type="text"
@@ -869,7 +1144,7 @@ export default function OrganizationUsersPage() {
 
             <div>
               <label className="mb-2 block text-sm font-medium text-slate-700">
-                Email
+                {texts.email}
               </label>
               <input
                 type="email"
@@ -891,15 +1166,15 @@ export default function OrganizationUsersPage() {
 
             <div>
               <label className="mb-2 block text-sm font-medium text-slate-700">
-                Ρόλος οργανισμού
+                {texts.organizationRole}
               </label>
               <select
                 value={editForm.isPrimaryOrgAdmin ? "ORG_ADMIN" : "MANAGER"}
                 disabled
                 className="w-full rounded-2xl border border-slate-300 bg-slate-100 px-4 py-3 text-sm outline-none disabled:cursor-not-allowed disabled:text-slate-500"
               >
-                <option value="ORG_ADMIN">Διαχειριστής οργανισμού</option>
-                <option value="MANAGER">Manager</option>
+                <option value="ORG_ADMIN">{texts.organizationAdmin}</option>
+                <option value="MANAGER">{texts.manager}</option>
               </select>
             </div>
 
@@ -922,7 +1197,7 @@ export default function OrganizationUsersPage() {
                   className="h-4 w-4"
                 />
                 <span className="text-sm font-medium text-slate-700">
-                  Ο χρήστης είναι ενεργός
+                  {texts.userIsActive}
                 </span>
               </label>
             </div>
@@ -930,8 +1205,7 @@ export default function OrganizationUsersPage() {
             {editForm.isPrimaryOrgAdmin ? (
               <div className="md:col-span-2">
                 <p className="text-xs font-medium text-blue-700">
-                  Ο βασικός διαχειριστής οργανισμού δεν μπορεί να αλλάξει ρόλο ή
-                  να απενεργοποιηθεί.
+                  {texts.primaryAdminLocked}
                 </p>
               </div>
             ) : null}
@@ -943,8 +1217,8 @@ export default function OrganizationUsersPage() {
                 className="inline-flex rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {updatingUserId === editForm.userId
-                  ? "Αποθήκευση..."
-                  : "Αποθήκευση αλλαγών"}
+                  ? texts.saving
+                  : texts.saveChanges}
               </button>
             </div>
           </form>
@@ -954,9 +1228,9 @@ export default function OrganizationUsersPage() {
       <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h2 className="text-xl font-bold text-slate-900">Νέος manager</h2>
+            <h2 className="text-xl font-bold text-slate-900">{texts.createManagerTitle}</h2>
             <p className="mt-1 text-sm text-slate-600">
-              Δημιουργία νέου λογαριασμού manager για τον οργανισμό σου.
+              {texts.createManagerDescription}
             </p>
           </div>
 
@@ -964,7 +1238,7 @@ export default function OrganizationUsersPage() {
             onClick={() => setShowCreateForm((prev) => !prev)}
             className="inline-flex rounded-2xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
           >
-            {showCreateForm ? "Απόκρυψη φόρμας" : "Εμφάνιση φόρμας"}
+            {showCreateForm ? texts.hideForm : texts.showForm}
           </button>
         </div>
 
@@ -972,7 +1246,7 @@ export default function OrganizationUsersPage() {
           <form onSubmit={handleCreateUser} className="space-y-4">
             <div>
               <label className="mb-2 block text-sm font-medium text-slate-700">
-                Ονοματεπώνυμο
+                {texts.fullName}
               </label>
               <input
                 type="text"
@@ -980,7 +1254,9 @@ export default function OrganizationUsersPage() {
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, name: event.target.value }))
                 }
-                placeholder="π.χ. Νίκος Παπαδάκης"
+                placeholder={
+                  language === "en" ? "e.g. Nick Papadakis" : "π.χ. Νίκος Παπαδάκης"
+                }
                 className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-slate-900"
                 required
               />
@@ -988,7 +1264,7 @@ export default function OrganizationUsersPage() {
 
             <div>
               <label className="mb-2 block text-sm font-medium text-slate-700">
-                Email
+                {texts.email}
               </label>
               <input
                 type="email"
@@ -1004,7 +1280,7 @@ export default function OrganizationUsersPage() {
 
             <div>
               <label className="mb-2 block text-sm font-medium text-slate-700">
-                Κωδικός πρώτης εισόδου
+                {texts.firstAccessPassword}
               </label>
               <input
                 type="text"
@@ -1012,7 +1288,7 @@ export default function OrganizationUsersPage() {
                 onChange={(event) =>
                   setForm((prev) => ({ ...prev, password: event.target.value }))
                 }
-                placeholder="τουλάχιστον 6 χαρακτήρες"
+                placeholder={texts.passwordPlaceholder}
                 className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-slate-900"
                 required
               />
@@ -1020,10 +1296,10 @@ export default function OrganizationUsersPage() {
 
             <div>
               <label className="mb-2 block text-sm font-medium text-slate-700">
-                Ρόλος οργανισμού
+                {texts.organizationRole}
               </label>
               <div className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
-                Manager
+                {texts.manager}
               </div>
             </div>
 
@@ -1037,7 +1313,7 @@ export default function OrganizationUsersPage() {
                 className="h-4 w-4"
               />
               <span className="text-sm font-medium text-slate-700">
-                Ο χρήστης να είναι ενεργός από την αρχή
+                {texts.activeFromStart}
               </span>
             </label>
 
@@ -1046,24 +1322,24 @@ export default function OrganizationUsersPage() {
               disabled={saving}
               className="w-full rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {saving ? "Αποθήκευση..." : "Δημιουργία manager"}
+              {saving ? texts.saving : texts.createManager}
             </button>
           </form>
         ) : (
           <div className="rounded-2xl border border-dashed border-slate-300 px-6 py-12 text-center text-sm text-slate-500">
-            Η φόρμα δημιουργίας είναι κρυφή.
+            {texts.createFormHidden}
           </div>
         )}
       </section>
 
       <section className="rounded-3xl border border-blue-200 bg-blue-50 p-6 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-700">
-              Υποστήριξη πλατφόρμας
+              {supportContact.label || texts.supportTitle}
             </p>
             <h2 className="mt-2 text-xl font-bold text-slate-900">
-              Επικοινωνία με υποστήριξη
+              {texts.contactSupport}
             </h2>
           </div>
 
@@ -1071,7 +1347,7 @@ export default function OrganizationUsersPage() {
             onClick={() => setShowSupportForm((prev) => !prev)}
             className="inline-flex rounded-2xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
           >
-            {showSupportForm ? "Κλείσιμο φόρμας" : "Επικοινωνία με υποστήριξη"}
+            {showSupportForm ? texts.closeSupportForm : texts.contactSupport}
           </button>
         </div>
 
@@ -1082,7 +1358,7 @@ export default function OrganizationUsersPage() {
           >
             <div>
               <label className="mb-2 block text-sm font-medium text-slate-700">
-                Θέμα
+                {texts.subject}
               </label>
               <input
                 type="text"
@@ -1093,7 +1369,7 @@ export default function OrganizationUsersPage() {
                     subject: event.target.value,
                   }))
                 }
-                placeholder="π.χ. Πρόβλημα πρόσβασης χρήστη"
+                placeholder={texts.subjectPlaceholder}
                 className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-slate-900"
                 required
               />
@@ -1101,7 +1377,7 @@ export default function OrganizationUsersPage() {
 
             <div>
               <label className="mb-2 block text-sm font-medium text-slate-700">
-                Μήνυμα
+                {texts.message}
               </label>
               <textarea
                 value={supportForm.message}
@@ -1111,7 +1387,7 @@ export default function OrganizationUsersPage() {
                     message: event.target.value,
                   }))
                 }
-                placeholder="Γράψε το αίτημά σου προς την υποστήριξη..."
+                placeholder={texts.messagePlaceholder}
                 rows={6}
                 className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-slate-900"
                 required
@@ -1124,9 +1400,7 @@ export default function OrganizationUsersPage() {
                 disabled={sendingSupportMessage}
                 className="inline-flex rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {sendingSupportMessage
-                  ? "Αποστολή..."
-                  : "Αποστολή μηνύματος"}
+                {sendingSupportMessage ? texts.sending : texts.sendMessage}
               </button>
             </div>
           </form>

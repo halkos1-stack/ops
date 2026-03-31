@@ -59,6 +59,13 @@ export function normalizeBookingInput(
     externalBookingId,
     externalListingId: toNullableString(body.externalListingId),
     externalListingName: toNullableString(body.externalListingName),
+
+    externalPropertyAddress: toNullableString(body.externalPropertyAddress),
+    externalPropertyCity: toNullableString(body.externalPropertyCity),
+    externalPropertyRegion: toNullableString(body.externalPropertyRegion),
+    externalPropertyPostalCode: toNullableString(body.externalPropertyPostalCode),
+    externalPropertyCountry: toNullableString(body.externalPropertyCountry),
+
     propertyId: toNullableString(body.propertyId),
     guestName: toNullableString(body.guestName),
     guestPhone: toNullableString(body.guestPhone),

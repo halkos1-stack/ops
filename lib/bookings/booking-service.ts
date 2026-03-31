@@ -16,6 +16,26 @@ function mapSyncStatus(params: {
   return "PENDING_MATCH"
 }
 
+function toPrismaNullableJson(
+  value: unknown
+): Prisma.NullableJsonNullValueInput | Prisma.InputJsonValue | undefined {
+  if (value === undefined) return undefined
+  if (value === null) return Prisma.JsonNull
+  return value as Prisma.InputJsonValue
+}
+
+function buildPropertyRelationInput(propertyId: string | null | undefined) {
+  if (propertyId) {
+    return {
+      connect: { id: propertyId },
+    }
+  }
+
+  return {
+    disconnect: true,
+  }
+}
+
 export async function upsertBookingFromNormalizedInput(
   input: NormalizedBookingInput
 ) {
@@ -43,13 +63,16 @@ export async function upsertBookingFromNormalizedInput(
     matched: match.matched,
   })
 
-  const bookingData = {
-    organizationId: input.organizationId,
-    propertyId: match.propertyId,
-    sourcePlatform: input.sourcePlatform,
-    externalBookingId: input.externalBookingId,
+  const commonData = {
     externalListingId: input.externalListingId ?? null,
     externalListingName: input.externalListingName ?? null,
+
+    externalPropertyAddress: input.externalPropertyAddress ?? null,
+    externalPropertyCity: input.externalPropertyCity ?? null,
+    externalPropertyRegion: input.externalPropertyRegion ?? null,
+    externalPropertyPostalCode: input.externalPropertyPostalCode ?? null,
+    externalPropertyCountry: input.externalPropertyCountry ?? null,
+
     guestName: input.guestName ?? null,
     guestPhone: input.guestPhone ?? null,
     guestEmail: input.guestEmail ?? null,
@@ -65,14 +88,10 @@ export async function upsertBookingFromNormalizedInput(
     needsMapping: !match.matched,
     isManual: Boolean(input.isManual),
     sourceUpdatedAt: input.sourceUpdatedAt ?? null,
-    rawPayload:
-      input.rawPayload === undefined
-        ? Prisma.JsonNull
-        : (input.rawPayload as Prisma.InputJsonValue),
+    rawPayload: toPrismaNullableJson(input.rawPayload) ?? Prisma.JsonNull,
     lastProcessedAt: new Date(),
     lastError: null,
     notes: input.notes ?? null,
-    importedAt: existingBooking?.importedAt ?? new Date(),
   }
 
   const booking = existingBooking
@@ -80,10 +99,32 @@ export async function upsertBookingFromNormalizedInput(
         where: {
           id: existingBooking.id,
         },
-        data: bookingData,
+        data: {
+          ...commonData,
+          property: buildPropertyRelationInput(match.propertyId),
+        },
       })
     : await prisma.booking.create({
-        data: bookingData,
+        data: {
+          organization: {
+            connect: {
+              id: input.organizationId,
+            },
+          },
+          ...(match.propertyId
+            ? {
+                property: {
+                  connect: {
+                    id: match.propertyId,
+                  },
+                },
+              }
+            : {}),
+          sourcePlatform: input.sourcePlatform,
+          externalBookingId: input.externalBookingId,
+          importedAt: existingBooking?.importedAt ?? new Date(),
+          ...commonData,
+        },
       })
 
   await createBookingSyncEvent({
@@ -132,8 +173,8 @@ export async function cancelBookingByExternalKey(params: {
       sourceUpdatedAt: params.sourceUpdatedAt ?? booking.sourceUpdatedAt,
       rawPayload:
         params.rawPayload === undefined
-          ? booking.rawPayload
-          : (params.rawPayload as Prisma.InputJsonValue),
+          ? toPrismaNullableJson(booking.rawPayload) ?? Prisma.JsonNull
+          : toPrismaNullableJson(params.rawPayload),
       lastProcessedAt: new Date(),
       lastError: null,
     },
@@ -182,7 +223,7 @@ export async function reprocessBookingById(bookingId: string) {
       id: booking.id,
     },
     data: {
-      propertyId: match.propertyId,
+      property: buildPropertyRelationInput(match.propertyId),
       needsMapping: !match.matched,
       syncStatus,
       lastProcessedAt: new Date(),
@@ -223,7 +264,7 @@ export async function reprocessBookingsForMapping(params: {
     },
   })
 
-  const results = []
+  const results: string[] = []
 
   for (const booking of bookings) {
     const result = await reprocessBookingById(booking.id)

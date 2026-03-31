@@ -34,12 +34,20 @@ export async function GET(_req: NextRequest, context: RouteContext) {
     const run = await prisma.taskChecklistRun.findFirst({
       where: {
         id: runId,
-        organizationId: auth.organizationId,
+        task: {
+          organizationId: auth.organizationId,
+          assignments: {
+            some: {
+              partnerId: auth.partnerId,
+            },
+          },
+        },
       },
       include: {
         task: {
           include: {
             property: true,
+            booking: true,
             assignments: {
               where: {
                 partnerId: auth.partnerId,
@@ -48,6 +56,7 @@ export async function GET(_req: NextRequest, context: RouteContext) {
                 partner: true,
               },
             },
+            issues: true,
           },
         },
         template: {

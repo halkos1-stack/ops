@@ -36,7 +36,9 @@ export async function GET(_req: NextRequest, context: RouteContext) {
     const partner = await prisma.partner.findFirst({
       where: {
         id,
-        ...(auth.isSuperAdmin ? {} : { organizationId: auth.organizationId }),
+        ...(auth.isSuperAdmin || !auth.organizationId
+          ? {}
+          : { organizationId: auth.organizationId }),
       },
       include: {
         organization: {
@@ -46,17 +48,48 @@ export async function GET(_req: NextRequest, context: RouteContext) {
             slug: true,
           },
         },
-        assignments: {
+        taskAssignments: {
+          orderBy: {
+            createdAt: "desc",
+          },
+          take: 20,
+          include: {
+            task: {
+              select: {
+                id: true,
+                title: true,
+                status: true,
+                taskType: true,
+                scheduledDate: true,
+                property: {
+                  select: {
+                    id: true,
+                    code: true,
+                    name: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+        portalAccessTokens: {
           orderBy: {
             createdAt: "desc",
           },
           take: 20,
         },
-        tasks: {
+        defaultProperties: {
           orderBy: {
-            createdAt: "desc",
+            updatedAt: "desc",
           },
           take: 20,
+          select: {
+            id: true,
+            code: true,
+            name: true,
+            city: true,
+            status: true,
+          },
         },
       },
     })
@@ -88,7 +121,7 @@ export async function PUT(req: NextRequest, context: RouteContext) {
 
     const { auth } = access
     const { id } = await context.params
-    const body = await req.json()
+    const body = await req.json().catch(() => ({}))
 
     const existingPartner = await prisma.partner.findUnique({
       where: { id },
@@ -112,14 +145,30 @@ export async function PUT(req: NextRequest, context: RouteContext) {
       )
     }
 
-    const fullName = toStringValue(body.fullName)
-    const email = toNullableString(body.email)
+    const name = toStringValue(body.name || body.fullName)
+    const email = toStringValue(body.email)
     const phone = toNullableString(body.phone)
+    const specialty = toStringValue(body.specialty)
     const status = toNullableString(body.status)
+    const notes = toNullableString(body.notes)
 
-    if (!fullName) {
+    if (!name) {
       return NextResponse.json(
-        { error: "Το ονοματεπώνυμο συνεργάτη είναι υποχρεωτικό." },
+        { error: "Το όνομα συνεργάτη είναι υποχρεωτικό." },
+        { status: 400 }
+      )
+    }
+
+    if (!email) {
+      return NextResponse.json(
+        { error: "Το email συνεργάτη είναι υποχρεωτικό." },
+        { status: 400 }
+      )
+    }
+
+    if (!specialty) {
+      return NextResponse.json(
+        { error: "Η ειδικότητα συνεργάτη είναι υποχρεωτική." },
         { status: 400 }
       )
     }
@@ -127,9 +176,11 @@ export async function PUT(req: NextRequest, context: RouteContext) {
     const updatedPartner = await prisma.partner.update({
       where: { id },
       data: {
-        fullName,
+        name,
         email,
         phone,
+        specialty,
+        notes,
         ...(status !== null ? { status } : {}),
       },
       include: {
@@ -163,7 +214,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
 
     const { auth } = access
     const { id } = await context.params
-    const body = await req.json()
+    const body = await req.json().catch(() => ({}))
 
     const existingPartner = await prisma.partner.findUnique({
       where: { id },
@@ -187,12 +238,62 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       )
     }
 
-    const data: Record<string, unknown> = {}
+    const data: {
+      name?: string
+      email?: string
+      phone?: string | null
+      specialty?: string
+      status?: string
+      notes?: string | null
+    } = {}
 
-    if (body.fullName !== undefined) data.fullName = toStringValue(body.fullName)
-    if (body.email !== undefined) data.email = toNullableString(body.email)
-    if (body.phone !== undefined) data.phone = toNullableString(body.phone)
-    if (body.status !== undefined) data.status = toNullableString(body.status)
+    if (body.name !== undefined || body.fullName !== undefined) {
+      const name = toStringValue(body.name ?? body.fullName)
+      if (!name) {
+        return NextResponse.json(
+          { error: "Το όνομα συνεργάτη δεν μπορεί να είναι κενό." },
+          { status: 400 }
+        )
+      }
+      data.name = name
+    }
+
+    if (body.email !== undefined) {
+      const email = toStringValue(body.email)
+      if (!email) {
+        return NextResponse.json(
+          { error: "Το email συνεργάτη δεν μπορεί να είναι κενό." },
+          { status: 400 }
+        )
+      }
+      data.email = email
+    }
+
+    if (body.phone !== undefined) {
+      data.phone = toNullableString(body.phone)
+    }
+
+    if (body.specialty !== undefined) {
+      const specialty = toStringValue(body.specialty)
+      if (!specialty) {
+        return NextResponse.json(
+          { error: "Η ειδικότητα συνεργάτη δεν μπορεί να είναι κενή." },
+          { status: 400 }
+        )
+      }
+      data.specialty = specialty
+    }
+
+    if (body.status !== undefined) {
+      const status = toNullableString(body.status)
+      if (status !== null) {
+        data.status = status
+      }
+    }
+
+    if (body.notes !== undefined) {
+      data.notes = toNullableString(body.notes)
+    }
 
     const updatedPartner = await prisma.partner.update({
       where: { id },

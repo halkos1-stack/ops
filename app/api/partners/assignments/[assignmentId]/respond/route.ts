@@ -14,6 +14,51 @@ function toNullableString(value: unknown) {
   return text === "" ? null : text
 }
 
+function normalizeSystemTaskTitleForLog(rawTitle: unknown) {
+  const title = String(rawTitle ?? "").trim()
+  if (!title) return "Task"
+
+  let match = title.match(/^Καθαρισμός μετά από check-out\s*-\s*(.+)$/i)
+  if (match?.[1]) {
+    return `Cleaning after check-out - ${match[1]}`
+  }
+
+  match = title.match(/^Cleaning after check-out\s*-\s*(.+)$/i)
+  if (match?.[1]) {
+    return `Cleaning after check-out - ${match[1]}`
+  }
+
+  match = title.match(/^Επιθεώρηση πριν από check-in\s*-\s*(.+)$/i)
+  if (match?.[1]) {
+    return `Inspection before check-in - ${match[1]}`
+  }
+
+  match = title.match(/^Inspection before check-in\s*-\s*(.+)$/i)
+  if (match?.[1]) {
+    return `Inspection before check-in - ${match[1]}`
+  }
+
+  match = title.match(/^Αναπλήρωση αναλωσίμων\s*-\s*(.+)$/i)
+  if (match?.[1]) {
+    return `Supplies refill - ${match[1]}`
+  }
+
+  match = title.match(/^Supplies refill\s*-\s*(.+)$/i)
+  if (match?.[1]) {
+    return `Supplies refill - ${match[1]}`
+  }
+
+  return title
+}
+
+function buildAssignmentAcceptedMessage(partnerName: string, taskTitle: string) {
+  return `Partner ${partnerName} accepted task "${taskTitle}" from the portal.`
+}
+
+function buildAssignmentRejectedMessage(partnerName: string, taskTitle: string) {
+  return `Partner ${partnerName} rejected task "${taskTitle}" from the portal.`
+}
+
 export async function POST(req: NextRequest, context: RouteContext) {
   try {
     const access = await requireApiPartnerAccess()
@@ -24,9 +69,10 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
     const { auth } = access
     const { assignmentId } = await context.params
-    const body = await req.json()
+    const body = await req.json().catch(() => ({}))
 
     const action = toNullableString(body.action)?.toUpperCase()
+    const rejectionReason = toNullableString(body.rejectionReason)
 
     if (action !== "ACCEPTED" && action !== "REJECTED") {
       return NextResponse.json(
@@ -38,13 +84,32 @@ export async function POST(req: NextRequest, context: RouteContext) {
     const existingAssignment = await prisma.taskAssignment.findFirst({
       where: {
         id: assignmentId,
-        organizationId: auth.organizationId,
         partnerId: auth.partnerId,
+        task: {
+          organizationId: auth.organizationId,
+        },
       },
       select: {
         id: true,
         taskId: true,
         status: true,
+        partnerId: true,
+        task: {
+          select: {
+            id: true,
+            organizationId: true,
+            status: true,
+            propertyId: true,
+            title: true,
+          },
+        },
+        partner: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
       },
     })
 
@@ -55,15 +120,34 @@ export async function POST(req: NextRequest, context: RouteContext) {
       )
     }
 
+    const now = new Date()
+
+    const partnerName =
+      existingAssignment.partner?.name?.trim() ||
+      auth.email?.trim() ||
+      "Partner"
+
+    const taskTitle = normalizeSystemTaskTitleForLog(existingAssignment.task.title)
+
     const result = await prisma.$transaction(async (tx) => {
       const updatedAssignment = await tx.taskAssignment.update({
         where: {
           id: assignmentId,
         },
-        data: {
-          status: action,
-          respondedAt: new Date(),
-        },
+        data:
+          action === "ACCEPTED"
+            ? {
+                status: "ACCEPTED",
+                acceptedAt: now,
+                rejectedAt: null,
+                rejectionReason: null,
+              }
+            : {
+                status: "REJECTED",
+                acceptedAt: null,
+                rejectedAt: now,
+                rejectionReason,
+              },
       })
 
       await tx.task.update({
@@ -71,7 +155,35 @@ export async function POST(req: NextRequest, context: RouteContext) {
           id: existingAssignment.taskId,
         },
         data: {
-          status: action === "ACCEPTED" ? "ACCEPTED" : "REJECTED",
+          status: action === "ACCEPTED" ? "ACCEPTED" : "PENDING",
+        },
+      })
+
+      await tx.activityLog.create({
+        data: {
+          organizationId: existingAssignment.task.organizationId,
+          propertyId: existingAssignment.task.propertyId,
+          taskId: existingAssignment.taskId,
+          partnerId: existingAssignment.partnerId,
+          entityType: "TASK_ASSIGNMENT",
+          entityId: existingAssignment.id,
+          action:
+            action === "ACCEPTED"
+              ? "ASSIGNMENT_ACCEPTED"
+              : "ASSIGNMENT_REJECTED",
+          message:
+            action === "ACCEPTED"
+              ? buildAssignmentAcceptedMessage(partnerName, taskTitle)
+              : buildAssignmentRejectedMessage(partnerName, taskTitle),
+          actorType: "PARTNER",
+          actorName: partnerName,
+          metadata: {
+            assignmentId: existingAssignment.id,
+            taskId: existingAssignment.taskId,
+            responseAction: action,
+            rejectionReason,
+            canonicalMessageFormat: "partner-task-portal-v1",
+          },
         },
       })
 
@@ -81,6 +193,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
     return NextResponse.json(result)
   } catch (error) {
     console.error("Partner assignment respond POST error:", error)
+
     return NextResponse.json(
       { error: "Αποτυχία απάντησης ανάθεσης." },
       { status: 500 }

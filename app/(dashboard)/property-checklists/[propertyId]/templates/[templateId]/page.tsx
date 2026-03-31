@@ -16,6 +16,24 @@ type PropertyInfo = {
   address?: string | null
 }
 
+type SupplyCatalogItem = {
+  id: string
+  code?: string | null
+  name: string
+  category?: string | null
+  unit?: string | null
+  minimumStock?: number | null
+}
+
+type ActiveSupplyRow = {
+  propertySupplyId: string
+  currentStock?: number | null
+  targetStock?: number | null
+  reorderThreshold?: number | null
+  lastUpdatedAt?: string | null
+  supplyItem: SupplyCatalogItem
+}
+
 type TemplateResponse = {
   id: string
   title?: string | null
@@ -25,6 +43,8 @@ type TemplateResponse = {
   isActive?: boolean
   items?: unknown[]
   property?: PropertyInfo | null
+  activeSupplies?: ActiveSupplyRow[]
+  supplyCatalog?: SupplyCatalogItem[]
 }
 
 type ItemDraft = {
@@ -41,6 +61,9 @@ type ItemDraft = {
   issueTypeOnFail: string
   issueSeverityOnFail: string
   failureValuesText: string
+  linkedSupplyItemId: string | null
+  supplyUpdateMode: string
+  supplyQuantity: string
 }
 
 function cn(...classes: Array<string | false | null | undefined>) {
@@ -89,6 +112,15 @@ function normalizeItem(raw: any, index: number): ItemDraft {
       raw?.failureValuesText === null || raw?.failureValuesText === undefined
         ? ""
         : String(raw.failureValuesText),
+    linkedSupplyItemId:
+      raw?.linkedSupplyItemId === null || raw?.linkedSupplyItemId === undefined
+        ? null
+        : String(raw.linkedSupplyItemId),
+    supplyUpdateMode: String(raw?.supplyUpdateMode ?? "none").toLowerCase(),
+    supplyQuantity:
+      raw?.supplyQuantity === null || raw?.supplyQuantity === undefined
+        ? ""
+        : String(raw.supplyQuantity),
   }
 }
 
@@ -98,7 +130,7 @@ function getTexts(language: "el" | "en") {
       pageEyebrow: "Cleaning checklist",
       pageTitleFallback: "Cleaning checklist",
       pageSubtitle:
-        "Configure only the cleaning checklist items of this property. Supplies are managed separately from the property supplies page.",
+        "Configure the exact form used for the property's cleaning list. The task-level cleaning list editor follows the same structure and fields.",
       backToTemplates: "Back to lists",
       backToProperty: "Back to property",
       loading: "Loading...",
@@ -121,7 +153,8 @@ function getTexts(language: "el" | "en") {
       inactiveBadge: "Inactive",
       propertySection: "Property",
       itemsSection: "Checklist items",
-      itemsSubtitle: "Configure only the cleaning items shown to the partner.",
+      itemsSubtitle:
+        "This editor is the same structure used by the task-level cleaning list editor.",
       itemLabel: "Item title",
       itemLabelPlaceholder: "e.g. Kitchen inspection",
       itemDescription: "Description",
@@ -165,6 +198,24 @@ function getTexts(language: "el" | "en") {
       propertyName: "Name",
       propertyCode: "Code",
       propertyAddress: "Address",
+      editorConsistencyNote:
+        "This page and the task cleaning list editor must remain visually and structurally aligned.",
+      categoryInspection: "Inspection",
+      categoryCleaning: "Cleaning",
+      categoryBathroom: "Bathroom",
+      categoryKitchen: "Kitchen",
+      categoryBedroom: "Bedroom",
+      categoryGeneral: "General",
+      supplyItem: "Linked supply",
+      noLinkedSupply: "No linked supply",
+      supplyUpdateMode: "Supply update mode",
+      supplyQuantity: "Quantity",
+      supplyModeNone: "None",
+      supplyModeStatusMap: "Status map",
+      supplyModeSetStock: "Set stock",
+      supplyModeConsume: "Consume",
+      supplyModeFlagLow: "Flag low",
+      optionsHelp: "Used only for choice/select fields.",
     }
   }
 
@@ -172,7 +223,7 @@ function getTexts(language: "el" | "en") {
     pageEyebrow: "Λίστα καθαριότητας",
     pageTitleFallback: "Λίστα καθαριότητας",
     pageSubtitle:
-      "Ρύθμισε μόνο τα στοιχεία της λίστας καθαριότητας του ακινήτου. Τα αναλώσιμα διαχειρίζονται ξεχωριστά από τη σελίδα αναλωσίμων του ακινήτου.",
+      "Ρύθμισε ακριβώς τη φόρμα που χρησιμοποιείται στη λίστα καθαριότητας του ακινήτου. Ο επεξεργαστής λίστας καθαριότητας μέσα στην εργασία ακολουθεί την ίδια δομή και τα ίδια πεδία.",
     backToTemplates: "Επιστροφή στις λίστες",
     backToProperty: "Επιστροφή στο ακίνητο",
     loading: "Φόρτωση...",
@@ -196,7 +247,7 @@ function getTexts(language: "el" | "en") {
     propertySection: "Ακίνητο",
     itemsSection: "Στοιχεία λίστας",
     itemsSubtitle:
-      "Ρύθμισε μόνο τα στοιχεία καθαριότητας που θα εμφανίζονται στον συνεργάτη.",
+      "Αυτός ο επεξεργαστής είναι η ίδια δομή που χρησιμοποιεί και ο επεξεργαστής λίστας καθαριότητας της εργασίας.",
     itemLabel: "Τίτλος στοιχείου",
     itemLabelPlaceholder: "π.χ. Έλεγχος κουζίνας",
     itemDescription: "Περιγραφή",
@@ -240,6 +291,24 @@ function getTexts(language: "el" | "en") {
     propertyName: "Όνομα",
     propertyCode: "Κωδικός",
     propertyAddress: "Διεύθυνση",
+    editorConsistencyNote:
+      "Αυτή η σελίδα και ο επεξεργαστής λίστας καθαριότητας της εργασίας πρέπει να παραμένουν οπτικά και δομικά ευθυγραμμισμένοι.",
+    categoryInspection: "Επιθεώρηση",
+    categoryCleaning: "Καθαριότητα",
+    categoryBathroom: "Μπάνιο",
+    categoryKitchen: "Κουζίνα",
+    categoryBedroom: "Υπνοδωμάτιο",
+    categoryGeneral: "Γενικά",
+    supplyItem: "Συνδεδεμένο αναλώσιμο",
+    noLinkedSupply: "Χωρίς συνδεδεμένο αναλώσιμο",
+    supplyUpdateMode: "Τρόπος ενημέρωσης αναλώσιμου",
+    supplyQuantity: "Ποσότητα",
+    supplyModeNone: "Χωρίς ενημέρωση",
+    supplyModeStatusMap: "Χαρτογράφηση κατάστασης",
+    supplyModeSetStock: "Ορισμός αποθέματος",
+    supplyModeConsume: "Κατανάλωση",
+    supplyModeFlagLow: "Σήμανση χαμηλού",
+    optionsHelp: "Χρησιμοποιείται μόνο σε πεδία επιλογής.",
   }
 }
 
@@ -263,6 +332,7 @@ export default function PropertyChecklistTemplateDetailPage({
   const [isPrimary, setIsPrimary] = useState(false)
   const [isActive, setIsActive] = useState(true)
   const [items, setItems] = useState<ItemDraft[]>([])
+  const [activeSupplies, setActiveSupplies] = useState<ActiveSupplyRow[]>([])
 
   async function loadData() {
     try {
@@ -300,6 +370,7 @@ export default function PropertyChecklistTemplateDetailPage({
       setIsPrimary(Boolean(data?.isPrimary ?? false))
       setIsActive(Boolean(data?.isActive ?? true))
       setItems(normalizedItems)
+      setActiveSupplies(Array.isArray(data?.activeSupplies) ? data.activeSupplies : [])
     } catch (err) {
       setError(err instanceof Error ? err.message : t.loadError)
     } finally {
@@ -327,6 +398,9 @@ export default function PropertyChecklistTemplateDetailPage({
         issueTypeOnFail: "repair",
         issueSeverityOnFail: "medium",
         failureValuesText: "",
+        linkedSupplyItemId: null,
+        supplyUpdateMode: "none",
+        supplyQuantity: "",
       },
     ])
   }
@@ -430,9 +504,12 @@ export default function PropertyChecklistTemplateDetailPage({
           issueTypeOnFail: item.issueTypeOnFail,
           issueSeverityOnFail: item.issueSeverityOnFail,
           failureValuesText: item.failureValuesText,
-          linkedSupplyItemId: null,
-          supplyUpdateMode: "none",
-          supplyQuantity: null,
+          linkedSupplyItemId: item.linkedSupplyItemId,
+          supplyUpdateMode: item.supplyUpdateMode,
+          supplyQuantity:
+            item.supplyQuantity.trim() === ""
+              ? null
+              : Number(item.supplyQuantity),
         })),
       }
 
@@ -510,6 +587,10 @@ export default function PropertyChecklistTemplateDetailPage({
 
             <p className="mt-3 text-sm text-slate-500">
               {t.templateId}: {templateId}
+            </p>
+
+            <p className="mt-2 text-sm text-slate-500">
+              {t.editorConsistencyNote}
             </p>
           </div>
         </div>
@@ -738,7 +819,7 @@ export default function PropertyChecklistTemplateDetailPage({
                       </div>
                     </div>
 
-                    {(item.itemType === "choice" || item.itemType === "select") ? (
+                    {item.itemType === "choice" || item.itemType === "select" ? (
                       <div className="rounded-2xl border border-slate-200 bg-white p-4">
                         <div className="mb-3">
                           <h4 className="text-sm font-semibold text-slate-800">
@@ -746,6 +827,9 @@ export default function PropertyChecklistTemplateDetailPage({
                           </h4>
                           <p className="mt-1 text-xs text-slate-500">
                             {t.itemChoicesSubtitle}
+                          </p>
+                          <p className="mt-1 text-xs text-slate-500">
+                            {t.optionsHelp}
                           </p>
                         </div>
 
@@ -887,12 +971,84 @@ export default function PropertyChecklistTemplateDetailPage({
                         </div>
                       </div>
                     </div>
+
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                      <h3 className="text-sm font-semibold text-slate-900">
+                        {t.supplyItem}
+                      </h3>
+
+                      <div className="mt-4 grid gap-4 md:grid-cols-3">
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-slate-700">
+                            {t.supplyItem}
+                          </label>
+                          <select
+                            value={item.linkedSupplyItemId ?? ""}
+                            onChange={(e) =>
+                              updateItem(
+                                index,
+                                "linkedSupplyItemId",
+                                e.target.value.trim() ? e.target.value : null
+                              )
+                            }
+                            className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                          >
+                            <option value="">{t.noLinkedSupply}</option>
+                            {activeSupplies.map((row) => (
+                              <option key={row.supplyItem.id} value={row.supplyItem.id}>
+                                {row.supplyItem.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-slate-700">
+                            {t.supplyUpdateMode}
+                          </label>
+                          <select
+                            value={item.supplyUpdateMode}
+                            onChange={(e) =>
+                              updateItem(index, "supplyUpdateMode", e.target.value)
+                            }
+                            className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                          >
+                            <option value="none">{t.supplyModeNone}</option>
+                            <option value="status_map">{t.supplyModeStatusMap}</option>
+                            <option value="set_stock">{t.supplyModeSetStock}</option>
+                            <option value="consume">{t.supplyModeConsume}</option>
+                            <option value="flag_low">{t.supplyModeFlagLow}</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-slate-700">
+                            {t.supplyQuantity}
+                          </label>
+                          <input
+                            value={item.supplyQuantity}
+                            onChange={(e) =>
+                              updateItem(index, "supplyQuantity", e.target.value)
+                            }
+                            className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                          />
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               ))
             )}
 
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <button
+                type="button"
+                onClick={addGeneralItem}
+                className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+              >
+                {t.addItem}
+              </button>
+
               <button
                 type="submit"
                 disabled={saving}

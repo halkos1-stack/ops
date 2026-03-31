@@ -1,0 +1,352 @@
+Folder PATH listing
+Volume serial number is DE93-63A1
+C:\USERS\USER\OPS-SAAS\APP
+|   favicon.ico
+|   globals.css
+|   layout.tsx
+|   page.tsx
+|   seed
+|   
++---(dashboard)
+|   |   DashboardSidebar.tsx
+|   |   layout.tsx
+|   |   page.tsx
+|   |   
+|   +---account
+|   |       page.tsx
+|   |       
+|   +---ai-assistant
+|   |       page.tsx
+|   |       
+|   +---bookings
+|   |   |   page.tsx
+|   |   |   
+|   |   +---history
+|   |   |       page.tsx
+|   |   |       
+|   |   \---[id]
+|   |           page.tsx
+|   |           
+|   +---calendar
+|   |       page.tsx
+|   |       
+|   +---checklists
+|   |       page.tsx
+|   |       
+|   +---dashboard
+|   |       page.tsx
+|   |       
+|   +---issues
+|   |   |   page.tsx
+|   |   |   
+|   |   \---[id]
+|   |           page.tsx
+|   |           
+|   +---partners
+|   |   |   page.tsx
+|   |   |   
+|   |   \---[partnerId]
+|   |           page.tsx
+|   |           
+|   +---properties
+|   |   |   page.tsx
+|   |   |   
+|   |   \---[id]
+|   |       |   page.tsx
+|   |       |   
+|   |       +---supplies
+|   |       |       page.tsx
+|   |       |       
+|   |       \---tasks
+|   |           |   page.tsx
+|   |           |   
+|   |           \---history
+|   |                   page.tsx
+|   |                   
+|   +---property-checklists
+|   |   \---[propertyId]
+|   |       |   page.tsx
+|   |       |   
+|   |       \---templates
+|   |           \---[templateId]
+|   |                   page.tsx
+|   |                   
+|   +---settings
+|   |       page.tsx
+|   |       
+|   +---tasks
+|   |   |   page.tsx
+|   |   |   
+|   |   +---new
+|   |   |       page.tsx
+|   |   |       
+|   |   \---[taskId]
+|   |       |   page.tsx
+|   |       |   
+|   |       \---checklist
+|   \---users
+|           page.tsx
+|           
++---activate
+|   \---[token]
+|           page.tsx
+|           
++---api
+|   +---account
+|   |   \---change-password
+|   |           route.ts
+|   |           
+|   +---activation
+|   |   \---[token]
+|   |       |   route.ts
+|   |       |   
+|   |       \---complete
+|   |               route.ts
+|   |               
+|   +---ai-assistant
+|   |       route.ts
+|   |       
+|   +---auth
+|   |   \---[...nextauth]
+|   |           route.ts
+|   |           
+|   +---bookings
+|   |   |   route.ts
+|   |   |   
+|   |   +---import
+|   |   |       route.ts
+|   |   |       
+|   |   +---mappings
+|   |   |   |   route.ts
+|   |   |   |   
+|   |   |   \---[id]
+|   |   |           route.ts
+|   |   |           
+|   |   +---reprocess
+|   |   |       route.ts
+|   |   |       
+|   |   \---[id]
+|   |       |   route.ts
+|   |       |   
+|   |       \---create-task
+|   |               route.ts
+|   |               
+|   +---checklist-templates
+|   |   |   route.ts
+|   |   |   
+|   |   \---[id]
+|   |           route.ts
+|   |           
+|   +---create-user
+|   |       route.ts
+|   |       
+|   +---events
+|   |   |   route.ts
+|   |   |   
+|   |   \---[id]
+|   |           route.ts
+|   |           
+|   +---incidents
+|   |   |   route.ts
+|   |   |   
+|   |   \---[id]
+|   |           route.ts
+|   |           
+|   +---issues
+|   |   |   route.ts
+|   |   |   
+|   |   \---[id]
+|   |           route.ts
+|   |           
+|   +---organization-options
+|   |       route.ts
+|   |       
+|   +---partner
+|   |   \---[token]
+|   |       |   route.ts
+|   |       |   
+|   |       +---assignments
+|   |       |   \---[assignmentId]
+|   |       |       \---respond
+|   |       |               route.ts
+|   |       |               
+|   |       +---calendar
+|   |       |       route.ts
+|   |       |       
+|   |       +---history
+|   |       |       route.ts
+|   |       |       
+|   |       +---schedule
+|   |       |       route.ts
+|   |       |       
+|   |       \---tasks
+|   |           |   route.ts
+|   |           |   
+|   |           \---[taskId]
+|   |               |   route.ts
+|   |               |   
+|   |               +---checklist
+|   |               |       route.ts
+|   |               |       
+|   |               +---checklist-upload
+|   |               |       route.ts
+|   |               |       
+|   |               \---supplies
+|   |                       route.ts
+|   |                       
+|   +---partners
+|   |   |   route.ts
+|   |   |   
+|   |   +---assignments
+|   |   |   |   route.ts
+|   |   |   |   
+|   |   |   \---[assignmentId]
+|   |   |       |   route.ts
+|   |   |       |   
+|   |   |       \---respond
+|   |   |               route.ts
+|   |   |               
+|   |   +---checklists
+|   |   |   |   route.ts
+|   |   |   |   
+|   |   |   \---[runId]
+|   |   |       |   route.ts
+|   |   |       |   
+|   |   |       \---submit
+|   |   |               route.ts
+|   |   |               
+|   |   +---tasks
+|   |   |   |   route.ts
+|   |   |   |   
+|   |   |   \---[taskId]
+|   |   |           route.ts
+|   |   |           
+|   |   \---[id]
+|   |       |   route.ts
+|   |       |   
+|   |       \---portal-link
+|   |               route.ts
+|   |               
+|   +---properties
+|   |   |   route.ts
+|   |   |   
+|   |   \---[id]
+|   |       |   route.ts
+|   |       |   
+|   |       +---supplies
+|   |       |   |   route.ts
+|   |       |   |   
+|   |       |   \---[propertySupplyId]
+|   |       |           route.ts
+|   |       |           
+|   |       \---tasks
+|   |               route.ts
+|   |               
+|   +---property-checklists
+|   |   |   route.ts
+|   |   |   
+|   |   \---[propertyId]
+|   |       |   route.ts
+|   |       |   
+|   |       \---templates
+|   |           \---[templateId]
+|   |                   route.ts
+|   |                   
+|   +---settings
+|   |       route.ts
+|   |       
+|   +---super-admin
+|   |   \---organizations
+|   |       |   route.ts
+|   |       |   
+|   |       \---[id]
+|   |           |   route.ts
+|   |           |   
+|   |           +---overview
+|   |           |       route.ts
+|   |           |       
+|   |           \---users
+|   |               |   route.ts
+|   |               |   
+|   |               \---[userId]
+|   |                   |   route.ts
+|   |                   |   
+|   |                   \---send-invite
+|   |                           route.ts
+|   |                           
+|   +---task-assignments
+|   |   |   route.ts
+|   |   |   
+|   |   \---[id]
+|   |           route.ts
+|   |           
+|   +---task-checklist-runs
+|   |   \---by-task
+|   |       \---[taskId]
+|   |           |   route.ts
+|   |           |   
+|   |           \---[id]
+|   |                   route.ts
+|   |                   
+|   +---tasks
+|   |   |   route.ts
+|   |   |   
+|   |   \---[taskId]
+|   |       |   route.ts
+|   |       |   
+|   |       +---cancel
+|   |       |       route.ts
+|   |       |       
+|   |       \---checklists
+|   |           \---customize
+|   |                   route.ts
+|   |                   
+|   \---users
+|       |   route.ts
+|       |   
+|       +---support-contact
+|       |       route.ts
+|       |       
+|       \---[userId]
+|           |   route.ts
+|           |   
+|           \---send-invite
+|                   route.ts
+|                   
++---legacy
++---login
+|       page.tsx
+|       
++---partner
+|   \---[token]
+|       |   page.tsx
+|       |   portal-i18n.ts
+|       |   
+|       +---calendar
+|       |       page.tsx
+|       |       
+|       +---history
+|       |       page.tsx
+|       |       
+|       +---schedule
+|       |       page.tsx
+|       |       
+|       \---tasks
+|           \---[taskId]
+|                   page.tsx
+|                   
+\---super-admin
+    |   layout.tsx
+    |   
+    \---organizations
+        |   page.tsx
+        |   
+        \---[id]
+            |   page.tsx
+            |   
+            +---overview
+            |       page.tsx
+            |       
+            \---users
+                    page.tsx
+                    

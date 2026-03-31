@@ -1,0 +1,21 @@
+Folder PATH listing
+Volume serial number is 0000006A DE93:63A1
+C:\USERS\USER\OPS-SAAS\COMPONENTS
++---ai
+|       AiAssistantClient.tsx
+|       
++---i18n
+|       LanguageProvider.tsx
+|       LanguageSwitcher.tsx
+|       
++---layout
+|       DashboardLayoutShell.tsx
+|       DashboardLogoutButton.tsx
+|       DashboardShell.tsx
+|       SuperAdminBackToManagementLink.tsx
+|       SuperAdminLogoutButton.tsx
+|       
++---properties
+\---propertiescomponents
+    \---properties
+        \---CreatePropertyForm.tsx

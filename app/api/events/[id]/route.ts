@@ -23,6 +23,52 @@ function toStringValue(value: unknown, fallback = "") {
   return value.trim()
 }
 
+function normalizeEventType(value: unknown) {
+  const text = String(value ?? "").trim().toLowerCase()
+
+  if (!text) return "general"
+
+  if (
+    [
+      "general",
+      "task",
+      "issue",
+      "property",
+      "system",
+      "alert",
+      "booking",
+      "dispatch",
+    ].includes(text)
+  ) {
+    return text
+  }
+
+  return "general"
+}
+
+function normalizeEventStatus(value: unknown) {
+  const text = String(value ?? "").trim().toLowerCase()
+
+  if (!text) return "open"
+
+  if (
+    [
+      "open",
+      "in_progress",
+      "resolved",
+      "closed",
+      "cancelled",
+      "completed",
+      "active",
+      "pending",
+    ].includes(text)
+  ) {
+    return text
+  }
+
+  return "open"
+}
+
 export async function GET(_req: NextRequest, context: RouteContext) {
   try {
     const access = await requireApiAppAccess()
@@ -96,8 +142,8 @@ export async function PUT(req: NextRequest, context: RouteContext) {
 
     const title = toStringValue(body.title)
     const description = toNullableString(body.description)
-    const type = toNullableString(body.type)
-    const status = toNullableString(body.status)
+    const type = normalizeEventType(body.type)
+    const status = normalizeEventStatus(body.status)
 
     if (!title) {
       return NextResponse.json(
@@ -167,12 +213,28 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
 
     const data: Record<string, unknown> = {}
 
-    if (body.title !== undefined) data.title = toStringValue(body.title)
+    if (body.title !== undefined) {
+      const title = toStringValue(body.title)
+      if (!title) {
+        return NextResponse.json(
+          { error: "Ο τίτλος συμβάντος δεν μπορεί να είναι κενός." },
+          { status: 400 }
+        )
+      }
+      data.title = title
+    }
+
     if (body.description !== undefined) {
       data.description = toNullableString(body.description)
     }
-    if (body.type !== undefined) data.type = toNullableString(body.type)
-    if (body.status !== undefined) data.status = toNullableString(body.status)
+
+    if (body.type !== undefined) {
+      data.type = normalizeEventType(body.type)
+    }
+
+    if (body.status !== undefined) {
+      data.status = normalizeEventStatus(body.status)
+    }
 
     const updatedEvent = await prisma.event.update({
       where: { id },

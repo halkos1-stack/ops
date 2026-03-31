@@ -42,6 +42,24 @@ function normalizeLanguage(input?: string | null): AssistantUiLanguage {
   return input === "en" ? "en" : "el"
 }
 
+function getRouteTexts(language: AssistantUiLanguage) {
+  if (language === "en") {
+    return {
+      requiredQuestion: "Question is required.",
+      missingApiKey: "OPENAI_API_KEY is missing from the server environment.",
+      openAiNoAnswer: "I could not generate a response at this time.",
+      unknownRouteError: "Unknown AI assistant error.",
+    }
+  }
+
+  return {
+    requiredQuestion: "Η ερώτηση είναι υποχρεωτική.",
+    missingApiKey: "Δεν υπάρχει OPENAI_API_KEY στο περιβάλλον του server.",
+    openAiNoAnswer: "Δεν μπόρεσα να δημιουργήσω απάντηση αυτή τη στιγμή.",
+    unknownRouteError: "Άγνωστο σφάλμα AI βοηθού.",
+  }
+}
+
 function buildUserPrompt(params: {
   question: string
   language: AssistantUiLanguage
@@ -66,7 +84,7 @@ Behavior reminders:
 - If you mention a task, include task link and property link when available.
 - If you mention a booking, include booking link and property link when available.
 - If you mention an issue, include property link and task link when available.
-- If you mention submitted or pending checklist/supplies runs, connect them to task and property.
+- If you mention submitted or pending checklist or supplies runs, connect them to task and property.
 - If the request is about system usage, provide steps and where to go.
 - If the request is about risk or pending items, clearly explain why.
 - Stay read-only.
@@ -85,13 +103,13 @@ ${JSON.stringify(compactHistory, null, 2)}
 ${question}
 
 Υπενθυμίσεις συμπεριφοράς:
-- Αν αναφέρεις εργασία, δώσε λινκ εργασίας και λινκ ακινήτου όταν υπάρχουν.
-- Αν αναφέρεις κράτηση, δώσε λινκ κράτησης και λινκ ακινήτου όταν υπάρχουν.
-- Αν αναφέρεις ζημιά/βλάβη, δώσε λινκ ακινήτου και λινκ εργασίας όταν υπάρχουν.
-- Αν αναφέρεις υποβληθείσες ή εκκρεμείς λίστες, σύνδεσέ τες με εργασία και ακίνητο.
-- Αν η ερώτηση είναι για χρήση του συστήματος, δώσε βήματα και πού να πάει ο χρήστης.
-- Αν η ερώτηση είναι για κίνδυνο ή εκκρεμότητα, πες καθαρά γιατί θεωρείται κίνδυνος.
-- Να παραμένεις read-only.
+- Αν αναφέρεις εργασία, δώσε σύνδεσμο εργασίας και σύνδεσμο ακινήτου όταν υπάρχουν.
+- Αν αναφέρεις κράτηση, δώσε σύνδεσμο κράτησης και σύνδεσμο ακινήτου όταν υπάρχουν.
+- Αν αναφέρεις ζήτημα, ζημιά ή βλάβη, δώσε σύνδεσμο ακινήτου και σύνδεσμο εργασίας όταν υπάρχουν.
+- Αν αναφέρεις υποβληθείσες ή εκκρεμείς λίστες ή λίστες αναλωσίμων, σύνδεσέ τες με εργασία και ακίνητο.
+- Αν η ερώτηση είναι για χρήση του συστήματος, δώσε καθαρά βήματα και πού πρέπει να πάει ο χρήστης.
+- Αν η ερώτηση είναι για κίνδυνο ή εκκρεμότητα, εξήγησε καθαρά γιατί θεωρείται κίνδυνος ή εκκρεμότητα.
+- Να παραμένεις μόνο για ανάγνωση.
 - Να απαντάς στα ελληνικά.
 
 Operational context:
@@ -103,8 +121,10 @@ async function callOpenAI(params: {
   apiKey: string
   systemPrompt: string
   userPrompt: string
+  language: AssistantUiLanguage
 }) {
-  const { apiKey, systemPrompt, userPrompt } = params
+  const { apiKey, systemPrompt, userPrompt, language } = params
+  const texts = getRouteTexts(language)
 
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -134,20 +154,24 @@ async function callOpenAI(params: {
   }
 
   const json = await response.json()
-  return (
-    json?.choices?.[0]?.message?.content?.trim() ||
-    "Δεν μπόρεσα να δημιουργήσω απάντηση αυτή τη στιγμή."
-  )
+
+  return json?.choices?.[0]?.message?.content?.trim() || texts.openAiNoAnswer
 }
 
 export async function POST(req: NextRequest) {
+  const fallbackLanguage = normalizeLanguage(
+    req.headers.get("x-ui-language") || null
+  )
+
   try {
     const body = (await req.json()) as RequestBody
+    const language = normalizeLanguage(body.language || fallbackLanguage)
+    const texts = getRouteTexts(language)
     const question = body.question?.trim()
 
     if (!question) {
       return NextResponse.json(
-        { error: "Η ερώτηση είναι υποχρεωτική." },
+        { error: texts.requiredQuestion },
         { status: 400 }
       )
     }
@@ -155,14 +179,11 @@ export async function POST(req: NextRequest) {
     const apiKey = process.env.OPENAI_API_KEY
     if (!apiKey) {
       return NextResponse.json(
-        {
-          error: "Δεν υπάρχει OPENAI_API_KEY στο περιβάλλον του server.",
-        },
+        { error: texts.missingApiKey },
         { status: 500 }
       )
     }
 
-    const language = normalizeLanguage(body.language)
     const auth = getMockAuthFromRequest(req)
 
     const context = await buildAssistantContext({
@@ -171,7 +192,7 @@ export async function POST(req: NextRequest) {
       scope: body.scope,
     })
 
-    const usageGuide = buildOpsUsageGuide()
+    const usageGuide = buildOpsUsageGuide(language)
 
     const systemPrompt = buildAssistantSystemPrompt({
       context,
@@ -191,6 +212,7 @@ export async function POST(req: NextRequest) {
       apiKey,
       systemPrompt,
       userPrompt,
+      language,
     })
 
     return NextResponse.json({
@@ -206,12 +228,11 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     console.error("AI assistant route error:", error)
 
+    const texts = getRouteTexts(fallbackLanguage)
+
     return NextResponse.json(
       {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Άγνωστο σφάλμα AI βοηθού.",
+        error: error instanceof Error ? error.message : texts.unknownRouteError,
       },
       { status: 500 }
     )

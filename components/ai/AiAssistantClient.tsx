@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useAppLanguage } from "@/components/i18n/LanguageProvider"
+import { getAiAssistantTexts } from "@/lib/i18n/translations"
 
 type ScopeInput = {
   propertyId?: string | null
@@ -36,127 +37,6 @@ function normalizeText(text: string) {
 
 function getStorageKey(language: AssistantUiLanguage) {
   return language === "en" ? STORAGE_KEY_EN : STORAGE_KEY_EL
-}
-
-function getAiAssistantTexts(language: AssistantUiLanguage) {
-  if (language === "en") {
-    return {
-      title: "OPS AI Assistant",
-      subtitle:
-        "Read-only assistant for system data, navigation, usage guidance, daily briefing and risk review.",
-      dashboard: "Dashboard",
-      chatTitle: "Conversation",
-      promptsTitle: "Quick questions",
-      emptyState:
-        "Ask about tasks, bookings, properties, issues, supplies, checklist runs, alerts, pending items, risks or how to use OPS.",
-      placeholder:
-        "Ask about OPS data, usage guidance, pending items, risks or navigation...",
-      readonly:
-        "The assistant is read-only. It does not change OPS data.",
-      send: "Send",
-      clear: "Clear conversation",
-      thinking: "Thinking…",
-      you: "You",
-      assistant: "AI Assistant",
-      errorFallback: "AI assistant request failed.",
-      promptGroups: [
-        {
-          title: "Daily operations",
-          items: [
-            "Give me a daily briefing.",
-            "What needs attention today?",
-            "Show me today's check-outs.",
-            "Show me the active alerts.",
-          ],
-        },
-        {
-          title: "Tasks and bookings",
-          items: [
-            "Which tasks are open?",
-            "Which bookings do not have a task?",
-            "Show me the submitted checklist runs.",
-            "Show me the pending checklist runs.",
-          ],
-        },
-        {
-          title: "Issues and supplies",
-          items: [
-            "Show me open issues.",
-            "Show me low supplies.",
-            "Why is this task considered risky?",
-            "Show me the most important pending items.",
-          ],
-        },
-        {
-          title: "How to use OPS",
-          items: [
-            "How do I create a task from a booking?",
-            "How does task assignment work?",
-            "How do cleaning checklist and supplies checklist work?",
-            "What does alert mean in OPS?",
-          ],
-        },
-      ],
-    }
-  }
-
-  return {
-    title: "AI Βοηθός OPS",
-    subtitle:
-      "Read-only βοηθός δεδομένων, πλοήγησης, οδηγιών χρήσης, σύνοψης ημέρας και ελέγχου κινδύνων.",
-    dashboard: "Πίνακας ελέγχου",
-    chatTitle: "Συνομιλία",
-    promptsTitle: "Έτοιμες ερωτήσεις",
-    emptyState:
-      "Ρώτησέ με για εργασίες, κρατήσεις, ακίνητα, ζημιές / βλάβες, αναλώσιμα, λίστες, alert, εκκρεμότητες, κινδύνους ή για τη χρήση του OPS.",
-    placeholder:
-      "Ρώτησε για δεδομένα του OPS, οδηγίες χρήσης, εκκρεμότητες, κινδύνους ή πλοήγηση...",
-    readonly: "Ο βοηθός είναι read-only. Δεν αλλάζει δεδομένα του OPS.",
-    send: "Αποστολή",
-    clear: "Καθαρισμός συνομιλίας",
-    thinking: "Σκέφτομαι…",
-    you: "Εσύ",
-    assistant: "AI Βοηθός",
-    errorFallback: "Αποτυχία απάντησης AI βοηθού.",
-    promptGroups: [
-      {
-        title: "Ημέρα",
-        items: [
-          "Δώσε μου σύνοψη ημέρας.",
-          "Τι χρειάζεται προσοχή σήμερα;",
-          "Δείξε μου τα σημερινά check-out.",
-          "Δείξε μου τα ενεργά alert.",
-        ],
-      },
-      {
-        title: "Εργασίες και κρατήσεις",
-        items: [
-          "Ποιες εργασίες είναι ανοικτές;",
-          "Ποιες κρατήσεις δεν έχουν εργασία;",
-          "Δείξε μου τις υποβληθείσες λίστες.",
-          "Δείξε μου τις εκκρεμείς λίστες.",
-        ],
-      },
-      {
-        title: "Ζημιές και αναλώσιμα",
-        items: [
-          "Δείξε μου ανοιχτές ζημιές / βλάβες.",
-          "Δείξε μου χαμηλά αναλώσιμα.",
-          "Γιατί αυτή η εργασία θεωρείται σε κίνδυνο;",
-          "Δείξε μου τις πιο σημαντικές εκκρεμότητες.",
-        ],
-      },
-      {
-        title: "Χρήση του OPS",
-        items: [
-          "Πώς δημιουργώ εργασία από κράτηση;",
-          "Πώς λειτουργεί η ανάθεση σε συνεργάτη;",
-          "Πώς λειτουργεί η λίστα καθαριότητας και η λίστα αναλωσίμων;",
-          "Τι σημαίνει alert στο OPS;",
-        ],
-      },
-    ],
-  }
 }
 
 function InlineMarkdown({
@@ -325,7 +205,7 @@ export default function AiAssistantClient({ scope }: Props) {
         JSON.stringify(messages)
       )
     } catch {
-      // ignore storage errors
+      // αγνόηση σφαλμάτων αποθήκευσης
     }
   }, [messages, uiLanguage])
 
@@ -396,8 +276,8 @@ export default function AiAssistantClient({ scope }: Props) {
     }
   }
 
-  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault()
+  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
     if (!canSubmit) return
     void askAssistant(question)
   }
@@ -414,7 +294,7 @@ export default function AiAssistantClient({ scope }: Props) {
     try {
       window.localStorage.removeItem(getStorageKey(uiLanguage))
     } catch {
-      // ignore storage errors
+      // αγνόηση σφαλμάτων αποθήκευσης
     }
   }
 
@@ -446,7 +326,7 @@ export default function AiAssistantClient({ scope }: Props) {
             </div>
 
             <div className="px-4 py-4 md:px-5">
-              <div className="max-h-[42vh] min-h-[220px] overflow-y-auto space-y-4 pr-1 md:max-h-[46vh]">
+              <div className="max-h-[42vh] min-h-[220px] space-y-4 overflow-y-auto pr-1 md:max-h-[46vh]">
                 {messages.length === 0 ? (
                   <div className="mr-auto max-w-[94%] rounded-2xl bg-slate-50 px-4 py-3 ring-1 ring-slate-200 md:max-w-[82%]">
                     <div className="mb-2 flex items-center justify-between gap-3">
@@ -527,7 +407,7 @@ export default function AiAssistantClient({ scope }: Props) {
               <form onSubmit={handleSubmit} className="space-y-3">
                 <textarea
                   value={question}
-                  onChange={(e) => setQuestion(e.target.value)}
+                  onChange={(event) => setQuestion(event.target.value)}
                   rows={3}
                   placeholder={t.placeholder}
                   className="w-full resize-none rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-400"
@@ -570,7 +450,7 @@ export default function AiAssistantClient({ scope }: Props) {
               </h2>
             </div>
 
-            <div className="max-h-[70vh] overflow-y-auto space-y-4 p-4 md:p-5">
+            <div className="max-h-[70vh] space-y-4 overflow-y-auto p-4 md:p-5">
               {t.promptGroups.map((group) => (
                 <div key={group.title} className="space-y-2">
                   <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">

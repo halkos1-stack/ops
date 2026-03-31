@@ -1,16 +1,38 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import { requireApiAppAccess } from "@/lib/route-access"
+
+function toText(value: unknown, fallback = "") {
+  if (typeof value !== "string") return fallback
+  return value.trim()
+}
 
 export async function GET() {
   try {
-    const settings = await prisma.settings.findFirst({
-      orderBy: {
-        createdAt: "asc",
+    const access = await requireApiAppAccess()
+
+    if (!access.ok) {
+      return access.response
+    }
+
+    const { auth } = access
+
+    if (!auth.organizationId) {
+      return NextResponse.json(
+        { error: "Δεν βρέθηκε οργανισμός χρήστη." },
+        { status: 400 }
+      )
+    }
+
+    const settings = await prisma.settings.findUnique({
+      where: {
+        organizationId: auth.organizationId,
       },
     })
 
     if (!settings) {
       return NextResponse.json({
+        organizationId: auth.organizationId,
         companyName: "",
         companyEmail: "",
         companyPhone: "",
@@ -29,7 +51,7 @@ export async function GET() {
     console.error("Get settings error:", error)
 
     return NextResponse.json(
-      { error: "Failed to fetch settings" },
+      { error: "Αποτυχία φόρτωσης ρυθμίσεων." },
       { status: 500 }
     )
   }
@@ -37,32 +59,47 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json()
+    const access = await requireApiAppAccess()
 
-    const companyName = body.companyName?.trim()
-    const companyEmail = body.companyEmail?.trim()
-    const companyPhone = body.companyPhone?.trim() || ""
-    const companyAddress = body.companyAddress?.trim() || ""
-    const defaultTaskStatus = body.defaultTaskStatus?.trim() || "pending"
-    const defaultPartnerStatus = body.defaultPartnerStatus?.trim() || "active"
-    const timezone = body.timezone?.trim() || "Europe/Athens"
-    const language = body.language?.trim() || "el"
-    const notificationsEnabled =
-      typeof body.notificationsEnabled === "boolean"
-        ? body.notificationsEnabled
-        : true
-    const calendarDefaultView = body.calendarDefaultView?.trim() || "month"
+    if (!access.ok) {
+      return access.response
+    }
 
-    if (!companyName || !companyEmail) {
+    const { auth } = access
+
+    if (!auth.organizationId) {
       return NextResponse.json(
-        { error: "Company name and company email are required" },
+        { error: "Δεν βρέθηκε οργανισμός χρήστη." },
         { status: 400 }
       )
     }
 
-    const existingSettings = await prisma.settings.findFirst({
-      orderBy: {
-        createdAt: "asc",
+    const body = await req.json().catch(() => ({}))
+
+    const companyName = toText(body.companyName)
+    const companyEmail = toText(body.companyEmail)
+    const companyPhone = toText(body.companyPhone)
+    const companyAddress = toText(body.companyAddress)
+    const defaultTaskStatus = toText(body.defaultTaskStatus, "pending")
+    const defaultPartnerStatus = toText(body.defaultPartnerStatus, "active")
+    const timezone = toText(body.timezone, "Europe/Athens")
+    const language = toText(body.language, "el")
+    const notificationsEnabled =
+      typeof body.notificationsEnabled === "boolean"
+        ? body.notificationsEnabled
+        : true
+    const calendarDefaultView = toText(body.calendarDefaultView, "month")
+
+    if (!companyName || !companyEmail) {
+      return NextResponse.json(
+        { error: "Το όνομα εταιρείας και το email εταιρείας είναι υποχρεωτικά." },
+        { status: 400 }
+      )
+    }
+
+    const existingSettings = await prisma.settings.findUnique({
+      where: {
+        organizationId: auth.organizationId,
       },
     })
 
@@ -90,6 +127,7 @@ export async function POST(req: NextRequest) {
 
     const createdSettings = await prisma.settings.create({
       data: {
+        organizationId: auth.organizationId,
         companyName,
         companyEmail,
         companyPhone,
@@ -108,7 +146,7 @@ export async function POST(req: NextRequest) {
     console.error("Save settings error:", error)
 
     return NextResponse.json(
-      { error: "Failed to save settings" },
+      { error: "Αποτυχία αποθήκευσης ρυθμίσεων." },
       { status: 500 }
     )
   }

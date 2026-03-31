@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import {
   requireApiAppAccess,
-  buildTenantWhere,
   canAccessOrganization,
 } from "@/lib/route-access"
 
@@ -28,7 +27,10 @@ export async function GET() {
     const { auth } = access
 
     const issues = await prisma.issue.findMany({
-      where: buildTenantWhere(auth),
+      where:
+        auth.isSuperAdmin || !auth.organizationId
+          ? {}
+          : { organizationId: auth.organizationId },
       orderBy: {
         createdAt: "desc",
       },
@@ -85,7 +87,7 @@ export async function POST(req: NextRequest) {
     }
 
     const { auth } = access
-    const body = await req.json()
+    const body = await req.json().catch(() => ({}))
 
     const issueType = toStringValue(body.issueType, "general")
     const title = toStringValue(body.title)

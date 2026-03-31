@@ -4,6 +4,7 @@ import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
 import { useParams } from "next/navigation"
 import { useAppLanguage } from "@/components/i18n/LanguageProvider"
+import { getSupplyPresetByCode } from "@/lib/supply-presets"
 
 type Language = "el" | "en"
 type SupplyFilter = "all" | "missing" | "medium" | "full"
@@ -188,6 +189,18 @@ function getTexts(language: Language) {
   }
 }
 
+function getSupplyDisplayName(
+  language: Language,
+  supplyItem?: { code?: string | null; name?: string | null } | null
+) {
+  const fallback = String(supplyItem?.name || "").trim() || "—"
+  const preset = getSupplyPresetByCode(supplyItem?.code)
+
+  if (!preset) return fallback
+
+  return language === "en" ? preset.nameEn : preset.nameEl
+}
+
 function getSupplyState(row: PropertySupply): SupplyState {
   const current = Number(row.currentStock || 0)
   const target =
@@ -298,16 +311,16 @@ function CounterButton({
         ? "border-red-600 bg-red-600 text-white"
         : "border-red-200 bg-white text-red-700 hover:bg-red-50"
       : tone === "amber"
-      ? active
-        ? "border-amber-500 bg-amber-500 text-white"
-        : "border-amber-200 bg-white text-amber-700 hover:bg-amber-50"
-      : tone === "emerald"
-      ? active
-        ? "border-emerald-600 bg-emerald-600 text-white"
-        : "border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50"
-      : active
-      ? "border-slate-900 bg-slate-900 text-white"
-      : "border-slate-200 bg-white text-slate-800 hover:bg-slate-50"
+        ? active
+          ? "border-amber-500 bg-amber-500 text-white"
+          : "border-amber-200 bg-white text-amber-700 hover:bg-amber-50"
+        : tone === "emerald"
+          ? active
+            ? "border-emerald-600 bg-emerald-600 text-white"
+            : "border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50"
+          : active
+            ? "border-slate-900 bg-slate-900 text-white"
+            : "border-slate-200 bg-white text-slate-800 hover:bg-slate-50"
 
   return (
     <button
@@ -341,7 +354,9 @@ function Modal({
       <div className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:rounded-3xl">
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-4 py-4 sm:px-6">
           <div className="min-w-0">
-            <h2 className="text-lg font-semibold text-slate-900 sm:text-xl">{title}</h2>
+            <h2 className="text-lg font-semibold text-slate-900 sm:text-xl">
+              {title}
+            </h2>
             {subtitle ? <p className="mt-1 text-sm text-slate-500">{subtitle}</p> : null}
           </div>
 
@@ -429,6 +444,7 @@ export default function PropertySuppliesPage() {
 
   useEffect(() => {
     loadData()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [propertyId])
 
   const activeSupplies = data?.activeSupplies || []
@@ -438,8 +454,9 @@ export default function PropertySuppliesPage() {
       ...row,
       derivedState: getSupplyState(row),
       safeUpdatedAt: row.lastUpdatedAt || row.updatedAt || null,
+      displayName: getSupplyDisplayName(lang, row.supplyItem),
     }))
-  }, [activeSupplies])
+  }, [activeSupplies, lang])
 
   const hasActiveSupplies = supplyRows.length > 0
 
@@ -604,12 +621,9 @@ export default function PropertySuppliesPage() {
       setSaving(true)
       setError("")
 
-      const res = await fetch(
-        `/api/properties/${propertyId}/supplies/${rowId}`,
-        {
-          method: "DELETE",
-        }
-      )
+      const res = await fetch(`/api/properties/${propertyId}/supplies/${rowId}`, {
+        method: "DELETE",
+      })
 
       const json = await res.json().catch(() => null)
 
@@ -728,7 +742,7 @@ export default function PropertySuppliesPage() {
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="font-semibold text-slate-900">
-                          {row.supplyItem?.name || "—"}
+                          {row.displayName}
                         </div>
                         <div className="mt-1 text-sm text-slate-500">
                           {row.supplyItem?.code || "—"}
@@ -912,7 +926,7 @@ export default function PropertySuppliesPage() {
 
       {editingRow ? (
         <Modal
-          title={editingRow.supplyItem?.name || t.changeStatus}
+          title={getSupplyDisplayName(lang, editingRow.supplyItem) || t.changeStatus}
           subtitle={t.status}
           onClose={() => setEditingRow(null)}
           closeLabel={t.close}

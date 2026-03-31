@@ -274,11 +274,11 @@ function getDashboardTexts(language: "el" | "en") {
 
   return {
     locale: "el-GR",
-    title: "Πίνακας Ελέγχου",
+    title: "Πίνακας ελέγχου",
     subtitle:
       "Λειτουργική εικόνα ελέγχου με ανοιχτές εργασίες, ενεργά alert και φίλτρα ημερομηνιών.",
     newTask: "Νέα εργασία",
-    loadError: "Δεν ήταν δυνατή η φόρτωση του Πίνακα Ελέγχου.",
+    loadError: "Δεν ήταν δυνατή η φόρτωση του πίνακα ελέγχου.",
     loadingTasks: "Αποτυχία φόρτωσης εργασιών",
 
     openTasks: "Ανοιχτές εργασίες",
@@ -405,6 +405,13 @@ function normalizeTaskDescription(
       .replace(/Επισκέπτης:/gi, "Guest:")
       .replace(/Άφιξη:/gi, "Check-in:")
       .replace(/Αναχώρηση:/gi, "Check-out:")
+      .replace(/Καθαρισμός μετά από check-out/gi, "Cleaning after check-out")
+      .replace(/Καθαρισμός/gi, "Cleaning")
+      .replace(/Επιθεώρηση/gi, "Inspection")
+      .replace(/Τεχνικός έλεγχος/gi, "Technical check")
+      .replace(/Αναλώσιμα/gi, "Supplies")
+      .replace(/Βλάβη/gi, "Issue")
+      .replace(/Ζημιά/gi, "Damage")
   } else {
     text = text
       .replace(
@@ -416,6 +423,44 @@ function normalizeTaskDescription(
       .replace(/\bGuest:/gi, "Επισκέπτης:")
       .replace(/\bCheck-in:/gi, "Άφιξη:")
       .replace(/\bCheck-out:/gi, "Αναχώρηση:")
+      .replace(/Cleaning after check-out/gi, "Καθαρισμός μετά από check-out")
+      .replace(/\bCleaning\b/gi, "Καθαρισμός")
+      .replace(/\bInspection\b/gi, "Επιθεώρηση")
+      .replace(/Technical check/gi, "Τεχνικός έλεγχος")
+      .replace(/\bSupplies\b/gi, "Αναλώσιμα")
+      .replace(/\bIssue\b/gi, "Βλάβη")
+      .replace(/\bDamage\b/gi, "Ζημιά")
+  }
+
+  return text
+}
+
+function normalizeTaskTitle(
+  title: string | null | undefined,
+  language: "el" | "en"
+) {
+  if (!title || !title.trim()) return "—"
+
+  let text = title.trim()
+
+  if (language === "en") {
+    text = text
+      .replace(/Καθαρισμός μετά από check-out/gi, "Cleaning after check-out")
+      .replace(/\bΚαθαρισμός\b/gi, "Cleaning")
+      .replace(/Επιθεώρηση/gi, "Inspection")
+      .replace(/Τεχνικός έλεγχος/gi, "Technical check")
+      .replace(/Αναλώσιμα/gi, "Supplies")
+      .replace(/Βλάβη/gi, "Issue")
+      .replace(/Ζημιά/gi, "Damage")
+  } else {
+    text = text
+      .replace(/Cleaning after check-out/gi, "Καθαρισμός μετά από check-out")
+      .replace(/\bCleaning\b/gi, "Καθαρισμός")
+      .replace(/\bInspection\b/gi, "Επιθεώρηση")
+      .replace(/Technical check/gi, "Τεχνικός έλεγχος")
+      .replace(/\bSupplies\b/gi, "Αναλώσιμα")
+      .replace(/\bIssue\b/gi, "Βλάβη")
+      .replace(/\bDamage\b/gi, "Ζημιά")
   }
 
   return text
@@ -905,6 +950,11 @@ export default function DashboardPage() {
                   language
                 )
 
+                const normalizedTitle = normalizeTaskTitle(
+                  εργασία.title,
+                  language
+                )
+
                 return (
                   <div
                     key={εργασία.id}
@@ -914,7 +964,7 @@ export default function DashboardPage() {
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                           <p className="truncate text-sm font-semibold text-slate-900">
-                            {εργασία.title}
+                            {normalizedTitle}
                           </p>
 
                           <span

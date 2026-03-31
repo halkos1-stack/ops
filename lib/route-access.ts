@@ -3,6 +3,7 @@ import { getAuthContext } from "@/lib/auth"
 
 export type RouteAccessContext = {
   userId: string
+  name: string | null
   email: string
   systemRole: "SUPER_ADMIN" | "USER"
   organizationId: string | null
@@ -29,6 +30,7 @@ export async function requireApiUser(): Promise<
     ok: true,
     auth: {
       userId: auth.userId,
+      name: auth.name ?? null,
       email: auth.email,
       systemRole: auth.systemRole,
       organizationId: auth.organizationId,
@@ -138,33 +140,35 @@ export async function requireApiOrgAdminOnly(): Promise<
 export function buildTenantWhere<T extends Record<string, unknown>>(
   auth: RouteAccessContext,
   extraWhere?: T
-): T & { organizationId?: string | null } {
-  if (auth.isSuperAdmin) {
+): T & { organizationId?: string } {
+  const base = (extraWhere ?? {}) as T
+
+  if (auth.isSuperAdmin || !auth.organizationId) {
     return {
-      ...(extraWhere ?? {}),
-    }
+      ...base,
+    } as T & { organizationId?: string }
   }
 
   return {
-    ...(extraWhere ?? {}),
+    ...base,
     organizationId: auth.organizationId,
-  }
+  } as T & { organizationId?: string }
 }
 
 export function buildTenantCreateData<T extends Record<string, unknown>>(
   auth: RouteAccessContext,
   data: T
-): T & { organizationId?: string | null } {
-  if (auth.isSuperAdmin) {
+): T & { organizationId?: string } {
+  if (auth.isSuperAdmin || !auth.organizationId) {
     return {
       ...data,
-    }
+    } as T & { organizationId?: string }
   }
 
   return {
     ...data,
     organizationId: auth.organizationId,
-  }
+  } as T & { organizationId?: string }
 }
 
 export function canAccessOrganization(

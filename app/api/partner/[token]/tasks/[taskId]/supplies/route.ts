@@ -9,9 +9,11 @@ type RouteContext = {
   }>
 }
 
+type SupplyFillLevel = "low" | "medium" | "full"
+
 type IncomingSupplyAnswer = {
   propertySupplyId: string
-  fillLevel?: string | null
+  fillLevel?: SupplyFillLevel | null
   notes?: string | null
 }
 
@@ -31,7 +33,7 @@ function toNullableTrimmedString(value: unknown) {
   return text === "" ? null : text
 }
 
-function normalizeFillLevel(value: unknown) {
+function normalizeFillLevel(value: unknown): SupplyFillLevel | null {
   const text = String(value || "")
     .trim()
     .toLowerCase()
@@ -52,7 +54,7 @@ function normalizeFillLevel(value: unknown) {
 }
 
 function computeStockFromFillLevel(params: {
-  fillLevel: "low" | "medium" | "full"
+  fillLevel: SupplyFillLevel
   currentStock?: number | null
   targetStock?: number | null
   reorderThreshold?: number | null

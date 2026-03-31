@@ -22,13 +22,36 @@ export async function GET(_req: NextRequest, context: RouteContext) {
     const assignment = await prisma.taskAssignment.findFirst({
       where: {
         id: assignmentId,
-        organizationId: auth.organizationId,
         partnerId: auth.partnerId,
+        task: {
+          organizationId: auth.organizationId,
+        },
       },
       include: {
         task: {
           include: {
             property: true,
+            booking: true,
+            checklistRun: {
+              include: {
+                template: true,
+                answers: true,
+              },
+            },
+            supplyRun: {
+              include: {
+                answers: {
+                  include: {
+                    propertySupply: {
+                      include: {
+                        supplyItem: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            issues: true,
           },
         },
         partner: true,

@@ -1,8 +1,19 @@
 "use client"
 
 import Link from "next/link"
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useAppLanguage } from "@/components/i18n/LanguageProvider"
+import {
+  getPropertyStatusLabel,
+  getPropertyTypeLabel,
+} from "@/lib/i18n/labels"
+import {
+  normalizeBookingStatus,
+  normalizeIssueStatus,
+  normalizePropertyStatus,
+  normalizeTaskStatus,
+} from "@/lib/i18n/normalizers"
+import { getPropertiesPageTexts } from "@/lib/i18n/translations"
 
 type PartnerOption = {
   id: string
@@ -57,14 +68,14 @@ type PropertyListItem = {
     alertAt?: string | null
     assignments?: Array<{
       id: string
-      status: string
+      status?: string | null
       assignedAt?: string | null
       acceptedAt?: string | null
       rejectedAt?: string | null
     }>
     checklistRun?: {
       id: string
-      status: string
+      status?: string | null
       startedAt?: string | null
       completedAt?: string | null
     } | null
@@ -100,21 +111,15 @@ type MetricFilter =
   | "requires_action"
   | "alerts"
 
-const initialCreateForm: CreatePropertyFormState = {
-  name: "",
-  address: "",
-  city: "",
-  region: "",
-  postalCode: "",
-  country: "Ελλάδα",
-  type: "Διαμέρισμα",
-  status: "active",
-  bedrooms: "0",
-  bathrooms: "0",
-  maxGuests: "0",
-  defaultPartnerId: "",
-  notes: "",
-}
+const PROPERTY_TYPE_OPTIONS = [
+  "apartment",
+  "villa",
+  "studio",
+  "house",
+  "maisonette",
+  "loft",
+  "other",
+] as const
 
 function safeArray<T>(value: T[] | undefined | null): T[] {
   return Array.isArray(value) ? value : []
@@ -160,30 +165,17 @@ function combineCheckInDateTime(
 }
 
 function getStatusBadgeClasses(status?: string | null) {
-  switch ((status || "").toLowerCase()) {
-    case "active":
-    case "completed":
-    case "confirmed":
-    case "resolved":
-      return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
-    case "pending":
-    case "assigned":
-    case "accepted":
-    case "in_progress":
-    case "maintenance":
-      return "bg-amber-50 text-amber-700 ring-1 ring-amber-200"
-    case "inactive":
-    case "cancelled":
-    case "archived":
-    case "closed":
-      return "bg-slate-100 text-slate-700 ring-1 ring-slate-200"
-    case "critical":
-    case "high":
-    case "open":
-      return "bg-red-50 text-red-700 ring-1 ring-red-200"
-    default:
-      return "bg-slate-100 text-slate-700 ring-1 ring-slate-200"
+  const normalized = normalizePropertyStatus(status)
+
+  if (normalized === "ACTIVE") {
+    return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
   }
+
+  if (normalized === "INACTIVE") {
+    return "bg-slate-100 text-slate-700 ring-1 ring-slate-200"
+  }
+
+  return "bg-amber-50 text-amber-700 ring-1 ring-amber-200"
 }
 
 function getMetricCardClasses(
@@ -208,313 +200,33 @@ function getMetricCardClasses(
   return "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
 }
 
-function getPropertiesPageTexts(language: "el" | "en") {
-  if (language === "en") {
-    return {
-      locale: "en-GB",
-      title: "Properties",
-      subtitle:
-        "Clean operational view with dynamic filters, readiness status and critical alerts.",
-      newProperty: "New property",
-      loading: "Loading properties...",
-      loadError: "Failed to load property data.",
-      listTitle: "Properties",
-      noResults: "No properties found with the current filters.",
-
-      search: "Search",
-      searchPlaceholder: "Name, code, address, city...",
-      type: "Type",
-      city: "City",
-      sort: "Sort",
-      clearFilters: "Clear filters",
-
-      allTypes: "All",
-      allCities: "All",
-
-      sortUpdatedDesc: "Most recently updated",
-      sortUpdatedAsc: "Oldest update",
-      sortNameAsc: "Name A-Z",
-      sortNameDesc: "Name Z-A",
-      sortCityAsc: "City A-Z",
-      sortCityDesc: "City Z-A",
-
-      total: "Total properties",
-      active: "Active",
-      inactive: "Inactive",
-      ready: "Ready",
-      requiresAction: "Needs action",
-      alerts: "Alerts",
-
-      property: "Property",
-      address: "Address",
-      readiness: "Readiness",
-      updated: "Updated",
-      actions: "Actions",
-      view: "View",
-
-      propertyReady: "Ready",
-      propertyNeedsAction: "Needs action",
-      criticalAlert: "Critical before check-in",
-      activeTaskAlert: "Active alert",
-      noCriticalAlert: "No critical alert",
-
-      formName: "Name *",
-      formAddress: "Address *",
-      formCity: "City *",
-      formRegion: "Region / Area *",
-      formPostalCode: "Postal code *",
-      formCountry: "Country *",
-      formType: "Type *",
-      formStatus: "Status *",
-      formBedrooms: "Bedrooms",
-      formBathrooms: "Bathrooms",
-      formMaxGuests: "Max guests",
-      formDefaultPartner: "Default partner",
-      formNotes: "Notes",
-
-      placeholderName: "e.g. Villa Marina",
-      placeholderAddress: "Street, number",
-      placeholderCity: "e.g. Heraklion",
-      placeholderRegion: "e.g. Crete",
-      placeholderPostalCode: "e.g. 71307",
-      placeholderNotes: "Internal notes for the property",
-
-      apartment: "Apartment",
-      villa: "Villa",
-      studio: "Studio",
-      house: "House",
-      maisonette: "Maisonette",
-      loft: "Loft",
-      other: "Other",
-      greece: "Greece",
-
-      statusActive: "Active",
-      statusInactive: "Inactive",
-      statusMaintenance: "Maintenance",
-      statusArchived: "Archived",
-
-      noPartner: "Without partner",
-      createTitle: "New property",
-      createSubtitle:
-        "The property code is generated automatically from the organization.",
-      close: "Close",
-      cancel: "Cancel",
-      saveProperty: "Save property",
-      saving: "Creating...",
-      createError: "Failed to create property.",
-
-      pageHint:
-        "The counters work as dynamic filters. The list stays intentionally clean.",
-    }
-  }
-
-  return {
-    locale: "el-GR",
-    title: "Ακίνητα",
-    subtitle:
-      "Καθαρή επιχειρησιακή εικόνα με δυναμικά φίλτρα, ετοιμότητα και κρίσιμα alerts.",
-    newProperty: "Νέο ακίνητο",
-    loading: "Φόρτωση ακινήτων...",
-    loadError: "Αποτυχία φόρτωσης δεδομένων ακινήτων.",
-    listTitle: "Ακίνητα",
-    noResults: "Δεν βρέθηκαν ακίνητα με τα τρέχοντα φίλτρα.",
-
-    search: "Αναζήτηση",
-    searchPlaceholder: "Όνομα, κωδικός, διεύθυνση, πόλη...",
-    type: "Τύπος",
-    city: "Πόλη",
-    sort: "Ταξινόμηση",
-    clearFilters: "Καθαρισμός φίλτρων",
-
-    allTypes: "Όλοι",
-    allCities: "Όλες",
-
-    sortUpdatedDesc: "Πιο πρόσφατη ενημέρωση",
-    sortUpdatedAsc: "Παλαιότερη ενημέρωση",
-    sortNameAsc: "Όνομα Α-Ω",
-    sortNameDesc: "Όνομα Ω-Α",
-    sortCityAsc: "Πόλη Α-Ω",
-    sortCityDesc: "Πόλη Ω-Α",
-
-    total: "Συνολικά ακίνητα",
-    active: "Ενεργά",
-    inactive: "Ανενεργά",
-    ready: "Έτοιμα",
-    requiresAction: "Θέλουν ενέργειες",
-    alerts: "Alert",
-
-    property: "Ακίνητο",
-    address: "Διεύθυνση",
-    readiness: "Κατάσταση",
-    updated: "Ενημέρωση",
-    actions: "Ενέργειες",
-    view: "Προβολή",
-
-    propertyReady: "Έτοιμο",
-    propertyNeedsAction: "Θέλει ενέργειες",
-    criticalAlert: "Κρίσιμο πριν το check-in",
-    activeTaskAlert: "Ενεργό alert",
-    noCriticalAlert: "Χωρίς κρίσιμο alert",
-
-    formName: "Όνομα *",
-    formAddress: "Διεύθυνση *",
-    formCity: "Πόλη *",
-    formRegion: "Περιοχή / Νομός *",
-    formPostalCode: "Ταχυδρομικός κώδικας *",
-    formCountry: "Χώρα *",
-    formType: "Τύπος *",
-    formStatus: "Κατάσταση *",
-    formBedrooms: "Υπνοδωμάτια",
-    formBathrooms: "Μπάνια",
-    formMaxGuests: "Μέγιστοι επισκέπτες",
-    formDefaultPartner: "Προεπιλεγμένος συνεργάτης",
-    formNotes: "Σημειώσεις",
-
-    placeholderName: "π.χ. Villa Marina",
-    placeholderAddress: "Οδός, αριθμός",
-    placeholderCity: "π.χ. Ηράκλειο",
-    placeholderRegion: "π.χ. Κρήτη",
-    placeholderPostalCode: "π.χ. 71307",
-    placeholderNotes: "Εσωτερικές σημειώσεις για το ακίνητο",
-
-    apartment: "Διαμέρισμα",
-    villa: "Βίλα",
-    studio: "Στούντιο",
-    house: "Μονοκατοικία",
-    maisonette: "Μεζονέτα",
-    loft: "Loft",
-    other: "Άλλο",
-    greece: "Ελλάδα",
-
-    statusActive: "Ενεργό",
-    statusInactive: "Ανενεργό",
-    statusMaintenance: "Σε συντήρηση",
-    statusArchived: "Αρχειοθετημένο",
-
-    noPartner: "Χωρίς συνεργάτη",
-    createTitle: "Νέο ακίνητο",
-    createSubtitle:
-      "Ο κωδικός του ακινήτου δημιουργείται αυτόματα από τον οργανισμό.",
-    close: "Κλείσιμο",
-    cancel: "Ακύρωση",
-    saveProperty: "Αποθήκευση ακινήτου",
-    saving: "Δημιουργία...",
-    createError: "Αποτυχία δημιουργίας ακινήτου.",
-
-    pageHint:
-      "Οι μετρητές λειτουργούν ως δυναμικά φίλτρα. Η λίστα μένει σκόπιμα καθαρή.",
-  }
-}
-
-function statusLabel(language: "el" | "en", status?: string | null) {
-  const value = (status || "").toLowerCase()
-
-  if (language === "en") {
-    switch (value) {
-      case "active":
-        return "Active"
-      case "inactive":
-        return "Inactive"
-      case "maintenance":
-        return "Maintenance"
-      case "archived":
-        return "Archived"
-      default:
-        return status || "—"
-    }
-  }
-
-  switch (value) {
-    case "active":
-      return "Ενεργό"
-    case "inactive":
-      return "Ανενεργό"
-    case "maintenance":
-      return "Σε συντήρηση"
-    case "archived":
-      return "Αρχειοθετημένο"
-    default:
-      return status || "—"
-  }
-}
-
-function typeLabel(language: "el" | "en", type?: string | null) {
-  if (!type) return "—"
-
-  const normalized = type.toLowerCase()
-
-  if (language === "en") {
-    switch (normalized) {
-      case "διαμέρισμα":
-      case "apartment":
-        return "Apartment"
-      case "βίλα":
-      case "villa":
-        return "Villa"
-      case "στούντιο":
-      case "studio":
-        return "Studio"
-      case "μονοκατοικία":
-      case "house":
-        return "House"
-      case "μεζονέτα":
-      case "maisonette":
-        return "Maisonette"
-      case "loft":
-        return "Loft"
-      case "άλλο":
-      case "other":
-        return "Other"
-      default:
-        return type
-    }
-  }
-
-  switch (normalized) {
-    case "apartment":
-    case "διαμέρισμα":
-      return "Διαμέρισμα"
-    case "villa":
-    case "βίλα":
-      return "Βίλα"
-    case "studio":
-    case "στούντιο":
-      return "Στούντιο"
-    case "house":
-    case "μονοκατοικία":
-      return "Μονοκατοικία"
-    case "maisonette":
-    case "μεζονέτα":
-      return "Μεζονέτα"
-    case "loft":
-      return "Loft"
-    case "other":
-    case "άλλο":
-      return "Άλλο"
-    default:
-      return type
-  }
-}
-
 function getOpenIssuesCount(property: PropertyListItem) {
-  return safeArray(property.issues).filter((issue) =>
-    ["open", "in_progress"].includes(String(issue.status || "").toLowerCase())
-  ).length
+  return safeArray(property.issues).filter((issue) => {
+    const status = normalizeIssueStatus(issue.status)
+    return status === "OPEN" || status === "IN_PROGRESS"
+  }).length
 }
 
 function isTaskStillOperationallyOpen(
   task: NonNullable<PropertyListItem["tasks"]>[number]
 ) {
-  const taskStatus = String(task?.status || "").toLowerCase()
+  const taskStatus = normalizeTaskStatus(task?.status)
   const assignmentStatus = String(task?.assignments?.[0]?.status || "").toLowerCase()
   const checklistStatus = String(task?.checklistRun?.status || "").toLowerCase()
 
-  if (["completed", "cancelled", "archived", "closed"].includes(taskStatus)) {
+  if (taskStatus === "COMPLETED" || taskStatus === "CANCELLED") {
     return false
   }
 
   if (
-    ["pending", "assigned", "accepted", "in_progress", "new"].includes(taskStatus)
+    [
+      "PENDING",
+      "ASSIGNED",
+      "WAITING_ACCEPTANCE",
+      "ACCEPTED",
+      "IN_PROGRESS",
+      "NEW",
+    ].includes(taskStatus)
   ) {
     return true
   }
@@ -583,11 +295,11 @@ function getNextUpcomingBooking(property: PropertyListItem) {
       }
     })
     .filter((booking) => {
-      const status = String(booking.status || "").toLowerCase()
+      const status = normalizeBookingStatus(booking.status)
       return (
         booking.checkInAt &&
         booking.checkInAt.getTime() >= now &&
-        ["confirmed", "pending"].includes(status)
+        (status === "CONFIRMED" || status === "PENDING")
       )
     })
     .sort((a, b) => {
@@ -624,143 +336,83 @@ function getPropertyReadinessDetails(
   property: PropertyListItem,
   language: "el" | "en"
 ) {
+  const texts = getPropertiesPageTexts(language)
   const openTasks = getOpenTasksCount(property)
   const openIssues = getOpenIssuesCount(property)
   const criticalAlert = hasCriticalCheckInAlert(property)
   const activeAlerts = getActiveAlertsCount(property)
   const ready = isPropertyOperationallyReady(property)
 
-  if (language === "en") {
-    if (ready) {
-      return {
-        label: "Ready",
-        detail: "No active operational alert",
-      }
-    }
-
-    if (activeAlerts > 0 && openTasks > 0 && openIssues > 0) {
-      return {
-        label: "Needs action",
-        detail: `${activeAlerts} alerts · ${openTasks} open tasks · ${openIssues} open issues`,
-      }
-    }
-
-    if (activeAlerts > 0 && openTasks > 0) {
-      return {
-        label: "Needs action",
-        detail: `${activeAlerts} alerts · ${openTasks} open tasks`,
-      }
-    }
-
-    if (activeAlerts > 0) {
-      return {
-        label: "Needs action",
-        detail: `${activeAlerts} active alerts`,
-      }
-    }
-
-    if (openTasks > 0 && openIssues > 0) {
-      return {
-        label: "Needs action",
-        detail: `${openTasks} open tasks · ${openIssues} open issues`,
-      }
-    }
-
-    if (openTasks > 0) {
-      return {
-        label: "Needs action",
-        detail: `${openTasks} open tasks`,
-      }
-    }
-
-    if (openIssues > 0) {
-      return {
-        label: "Needs action",
-        detail: `${openIssues} open issues`,
-      }
-    }
-
-    if (criticalAlert) {
-      return {
-        label: "Needs action",
-        detail: "Critical before check-in",
-      }
-    }
-
-    return {
-      label: "Needs action",
-      detail: "Operational action required",
-    }
-  }
-
   if (ready) {
     return {
-      label: "Έτοιμο",
-      detail: "Χωρίς ενεργό λειτουργικό alert",
-    }
-  }
-
-  if (activeAlerts > 0 && openTasks > 0 && openIssues > 0) {
-    return {
-      label: "Θέλει ενέργειες",
-      detail: `${activeAlerts} alert · ${openTasks} ανοιχτές εργασίες · ${openIssues} ανοιχτά θέματα`,
-    }
-  }
-
-  if (activeAlerts > 0 && openTasks > 0) {
-    return {
-      label: "Θέλει ενέργειες",
-      detail: `${activeAlerts} alert · ${openTasks} ανοιχτές εργασίες`,
-    }
-  }
-
-  if (activeAlerts > 0) {
-    return {
-      label: "Θέλει ενέργειες",
-      detail: `${activeAlerts} ενεργά alert`,
-    }
-  }
-
-  if (openTasks > 0 && openIssues > 0) {
-    return {
-      label: "Θέλει ενέργειες",
-      detail: `${openTasks} ανοιχτές εργασίες · ${openIssues} ανοιχτά θέματα`,
-    }
-  }
-
-  if (openTasks > 0) {
-    return {
-      label: "Θέλει ενέργειες",
-      detail: `${openTasks} ανοιχτές εργασίες`,
-    }
-  }
-
-  if (openIssues > 0) {
-    return {
-      label: "Θέλει ενέργειες",
-      detail: `${openIssues} ανοιχτά θέματα`,
+      label: texts.propertyReady,
+      detail: texts.readinessNoAlert,
     }
   }
 
   if (criticalAlert) {
     return {
-      label: "Θέλει ενέργειες",
-      detail: "Κρίσιμο πριν το check-in",
+      label: texts.propertyNeedsAction,
+      detail: texts.readinessCritical,
+    }
+  }
+
+  if (activeAlerts > 0 && openTasks > 0 && openIssues > 0) {
+    return {
+      label: texts.propertyNeedsAction,
+      detail: `${activeAlerts} ${texts.readinessAlerts} · ${openTasks} ${texts.readinessOpenTasks} · ${openIssues} ${texts.readinessOpenIssues}`,
+    }
+  }
+
+  if (activeAlerts > 0 && openTasks > 0) {
+    return {
+      label: texts.propertyNeedsAction,
+      detail: `${activeAlerts} ${texts.readinessAlerts} · ${openTasks} ${texts.readinessOpenTasks}`,
+    }
+  }
+
+  if (activeAlerts > 0) {
+    return {
+      label: texts.propertyNeedsAction,
+      detail: `${activeAlerts} ${texts.readinessAlerts}`,
+    }
+  }
+
+  if (openTasks > 0 && openIssues > 0) {
+    return {
+      label: texts.propertyNeedsAction,
+      detail: `${openTasks} ${texts.readinessOpenTasks} · ${openIssues} ${texts.readinessOpenIssues}`,
+    }
+  }
+
+  if (openTasks > 0) {
+    return {
+      label: texts.propertyNeedsAction,
+      detail: `${openTasks} ${texts.readinessOpenTasks}`,
+    }
+  }
+
+  if (openIssues > 0) {
+    return {
+      label: texts.propertyNeedsAction,
+      detail: `${openIssues} ${texts.readinessOpenIssues}`,
     }
   }
 
   return {
-    label: "Θέλει ενέργειες",
-    detail: "Απαιτείται επιχειρησιακή ενέργεια",
+    label: texts.propertyNeedsAction,
+    detail: texts.readinessFallback,
   }
 }
 
 function matchesMetricFilter(property: PropertyListItem, metricFilter: MetricFilter) {
+  const propertyStatus = normalizePropertyStatus(property.status)
+
   switch (metricFilter) {
     case "active":
-      return String(property.status || "").toLowerCase() === "active"
+      return propertyStatus === "ACTIVE"
     case "inactive":
-      return String(property.status || "").toLowerCase() === "inactive"
+      return propertyStatus === "INACTIVE"
     case "ready":
       return isPropertyOperationallyReady(property)
     case "requires_action":
@@ -771,6 +423,38 @@ function matchesMetricFilter(property: PropertyListItem, metricFilter: MetricFil
     default:
       return true
   }
+}
+
+function normalizeCountryForCreate(value: string, language: "el" | "en") {
+  const normalized = value.trim().toLowerCase()
+
+  if (language === "en") {
+    if (normalized === "ελλάδα" || normalized === "ελλαδα") return "Greece"
+    return value
+  }
+
+  if (normalized === "greece") return "Ελλάδα"
+  return value
+}
+
+function getDefaultCountry(language: "el" | "en") {
+  return language === "en" ? "Greece" : "Ελλάδα"
+}
+
+const initialCreateForm: CreatePropertyFormState = {
+  name: "",
+  address: "",
+  city: "",
+  region: "",
+  postalCode: "",
+  country: "Ελλάδα",
+  type: "apartment",
+  status: "active",
+  bedrooms: "0",
+  bathrooms: "0",
+  maxGuests: "0",
+  defaultPartnerId: "",
+  notes: "",
 }
 
 export default function PropertiesPage() {
@@ -794,7 +478,7 @@ export default function PropertiesPage() {
   const [createSubmitting, setCreateSubmitting] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
 
-  async function loadData() {
+  const loadData = useCallback(async () => {
     setLoading(true)
     setError(null)
 
@@ -831,12 +515,11 @@ export default function PropertiesPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [texts.loadError])
 
   useEffect(() => {
-    loadData()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    void loadData()
+  }, [loadData])
 
   const typeOptions = useMemo(() => {
     const values = Array.from(
@@ -854,11 +537,11 @@ export default function PropertiesPage() {
 
   const summary = useMemo(() => {
     const active = properties.filter(
-      (item) => String(item.status || "").toLowerCase() === "active"
+      (item) => normalizePropertyStatus(item.status) === "ACTIVE"
     ).length
 
     const inactive = properties.filter(
-      (item) => String(item.status || "").toLowerCase() === "inactive"
+      (item) => normalizePropertyStatus(item.status) === "INACTIVE"
     ).length
 
     const ready = properties.filter((item) =>
@@ -932,8 +615,9 @@ export default function PropertiesPage() {
     setCreateError(null)
     setCreateForm({
       ...initialCreateForm,
-      country: texts.greece,
-      type: texts.apartment,
+      country: getDefaultCountry(language),
+      type: "apartment",
+      status: "active",
     })
     setIsCreateOpen(true)
   }
@@ -966,7 +650,7 @@ export default function PropertiesPage() {
         city: createForm.city.trim(),
         region: createForm.region.trim(),
         postalCode: createForm.postalCode.trim(),
-        country: createForm.country.trim(),
+        country: normalizeCountryForCreate(createForm.country.trim(), language),
         type: createForm.type.trim(),
         status: createForm.status,
         bedrooms: Number(createForm.bedrooms || 0),
@@ -992,7 +676,10 @@ export default function PropertiesPage() {
 
       await loadData()
       setIsCreateOpen(false)
-      setCreateForm(initialCreateForm)
+      setCreateForm({
+        ...initialCreateForm,
+        country: getDefaultCountry(language),
+      })
     } catch (err) {
       console.error("Create property error:", err)
       setCreateError(err instanceof Error ? err.message : texts.createError)
@@ -1145,7 +832,7 @@ export default function PropertiesPage() {
                 <option value="all">{texts.allTypes}</option>
                 {typeOptions.map((type) => (
                   <option key={type} value={type}>
-                    {typeLabel(language, type)}
+                    {getPropertyTypeLabel(language, type)}
                   </option>
                 ))}
               </select>
@@ -1257,8 +944,8 @@ export default function PropertiesPage() {
                               {property.code}
                             </div>
                             <div className="mt-1 text-xs text-slate-500">
-                              {typeLabel(language, property.type)} ·{" "}
-                              {statusLabel(language, property.status)}
+                              {getPropertyTypeLabel(language, property.type)} ·{" "}
+                              {getPropertyStatusLabel(language, property.status)}
                             </div>
                           </td>
 
@@ -1350,7 +1037,7 @@ export default function PropertiesPage() {
                             property.status
                           )}`}
                         >
-                          {statusLabel(language, property.status)}
+                          {getPropertyStatusLabel(language, property.status)}
                         </span>
                       </div>
 
@@ -1480,13 +1167,11 @@ export default function PropertiesPage() {
                           onChange={(e) => updateCreateField("type", e.target.value)}
                           className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
                         >
-                          <option value={texts.apartment}>{texts.apartment}</option>
-                          <option value={texts.villa}>{texts.villa}</option>
-                          <option value={texts.studio}>{texts.studio}</option>
-                          <option value={texts.house}>{texts.house}</option>
-                          <option value={texts.maisonette}>{texts.maisonette}</option>
-                          <option value={texts.loft}>{texts.loft}</option>
-                          <option value={texts.other}>{texts.other}</option>
+                          {PROPERTY_TYPE_OPTIONS.map((type) => (
+                            <option key={type} value={type}>
+                              {getPropertyTypeLabel(language, type)}
+                            </option>
+                          ))}
                         </select>
                       </div>
 
@@ -1569,8 +1254,6 @@ export default function PropertiesPage() {
                         >
                           <option value="active">{texts.statusActive}</option>
                           <option value="inactive">{texts.statusInactive}</option>
-                          <option value="maintenance">{texts.statusMaintenance}</option>
-                          <option value="archived">{texts.statusArchived}</option>
                         </select>
                       </div>
 

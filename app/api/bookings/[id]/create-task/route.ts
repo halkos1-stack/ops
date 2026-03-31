@@ -1,13 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
-import { Prisma } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
 import { requireApiAppAccessWithDevBypass } from "@/lib/dev-api-access"
-import {
-  countActivePropertySupplies,
-  findPrimaryChecklistTemplate,
-  syncTaskChecklistRun,
-  syncTaskSupplyRun,
-} from "@/lib/tasks/task-run-sync"
+import { canAccessOrganization } from "@/lib/route-access"
 
 type RouteContext = {
   params: Promise<{
@@ -16,11 +10,6 @@ type RouteContext = {
 }
 
 type AppLanguage = "el" | "en"
-
-type AuthLike = {
-  systemRole?: "SUPER_ADMIN" | "USER"
-  organizationId?: string | null
-}
 
 function normalizeLanguage(value: unknown): AppLanguage {
   return value === "en" ? "en" : "el"
@@ -37,151 +26,107 @@ function toBooleanValue(value: unknown, fallback = false) {
   return Boolean(value)
 }
 
-function parseDateOnly(value: unknown, fallback?: Date | null) {
-  if (value === undefined || value === null || String(value).trim() === "") {
-    return fallback ?? null
-  }
+function parseDateOnly(value: unknown) {
+  const text = String(value ?? "").trim()
+  if (!text) return null
 
-  const date = new Date(String(value))
+  const date = new Date(`${text}T00:00:00`)
   if (Number.isNaN(date.getTime())) return null
+
   return date
 }
 
-function parseDateTimeValue(value: unknown) {
-  if (value === undefined || value === null || String(value).trim() === "") {
-    return null
-  }
+function parseDateTime(value: unknown) {
+  const text = String(value ?? "").trim()
+  if (!text) return null
 
-  const date = new Date(String(value))
+  const date = new Date(text)
   if (Number.isNaN(date.getTime())) return null
+
   return date
 }
 
-function formatDateOnly(value: Date) {
-  return value.toISOString().slice(0, 10)
+function normalizeTimeString(value: unknown) {
+  const text = String(value ?? "").trim()
+  if (!text) return null
+  if (!/^([01]\d|2[0-3]):([0-5]\d)$/.test(text)) return null
+  return text
 }
 
-function buildBookingWhere(auth: AuthLike, id: string): Prisma.BookingWhereInput {
-  if (auth.systemRole === "SUPER_ADMIN") {
-    return { id }
-  }
-
-  if (auth.organizationId) {
-    return {
-      id,
-      organizationId: auth.organizationId,
-    }
-  }
-
-  return {
-    id: "__no_results__",
-  }
-}
-
-function buildDefaultTaskTitle(params: {
+function buildDefaultTaskTitle(
+  taskType: string,
+  propertyName: string,
   language: AppLanguage
-  taskType: string
-  propertyName?: string | null
-  checkOutDate: Date
-}) {
-  const { language, taskType, propertyName, checkOutDate } = params
-  const fallbackLabel = propertyName || formatDateOnly(checkOutDate)
+) {
+  const normalizedTaskType = String(taskType || "").trim().toLowerCase()
 
   if (language === "en") {
-    if (taskType === "cleaning") {
-      return `Cleaning after check-out - ${fallbackLabel}`
+    if (normalizedTaskType === "cleaning") {
+      return `Cleaning after check-out - ${propertyName}`
     }
 
-    if (taskType === "inspection") {
-      return `Property inspection - ${fallbackLabel}`
+    if (normalizedTaskType === "inspection") {
+      return `Inspection after check-out - ${propertyName}`
     }
 
-    if (taskType === "maintenance") {
-      return `Maintenance task - ${fallbackLabel}`
+    if (normalizedTaskType === "maintenance") {
+      return `Maintenance after check-out - ${propertyName}`
     }
 
-    if (taskType === "repair") {
-      return `Repair task - ${fallbackLabel}`
-    }
-
-    if (taskType === "damage") {
-      return `Damage check - ${fallbackLabel}`
-    }
-
-    if (taskType === "supplies") {
-      return `Supplies task - ${fallbackLabel}`
-    }
-
-    return `Task from booking - ${fallbackLabel}`
+    return `Task after check-out - ${propertyName}`
   }
 
-  if (taskType === "cleaning") {
-    return `Καθαρισμός μετά από check-out - ${fallbackLabel}`
+  if (normalizedTaskType === "cleaning") {
+    return `Καθαρισμός μετά από check-out - ${propertyName}`
   }
 
-  if (taskType === "inspection") {
-    return `Επιθεώρηση ακινήτου - ${fallbackLabel}`
+  if (normalizedTaskType === "inspection") {
+    return `Επιθεώρηση μετά από check-out - ${propertyName}`
   }
 
-  if (taskType === "maintenance") {
-    return `Τεχνική εργασία - ${fallbackLabel}`
+  if (normalizedTaskType === "maintenance") {
+    return `Συντήρηση μετά από check-out - ${propertyName}`
   }
 
-  if (taskType === "repair") {
-    return `Βλάβη - ${fallbackLabel}`
-  }
-
-  if (taskType === "damage") {
-    return `Έλεγχος ζημιάς - ${fallbackLabel}`
-  }
-
-  if (taskType === "supplies") {
-    return `Εργασία αναλωσίμων - ${fallbackLabel}`
-  }
-
-  return `Εργασία από κράτηση - ${fallbackLabel}`
+  return `Εργασία μετά από check-out - ${propertyName}`
 }
 
-function buildDefaultTaskDescription(params: {
-  language: AppLanguage
-  sourcePlatform: string
-  externalBookingId: string
-  guestName?: string | null
-  checkInDate: Date
-  checkOutDate: Date
-}) {
-  const {
-    language,
-    sourcePlatform,
-    externalBookingId,
-    guestName,
-    checkInDate,
-    checkOutDate,
-  } = params
+async function findPrimaryChecklistTemplate(propertyId: string) {
+  return prisma.propertyChecklistTemplate.findFirst({
+    where: {
+      propertyId,
+      isActive: true,
+      templateType: "main",
+      isPrimary: true,
+    },
+    orderBy: [{ isPrimary: "desc" }, { updatedAt: "desc" }, { createdAt: "desc" }],
+    select: {
+      id: true,
+      title: true,
+      isPrimary: true,
+      templateType: true,
+      isActive: true,
+    },
+  })
+}
 
-  if (language === "en") {
-    return [
-      "Task created manually from booking.",
-      `Source: ${sourcePlatform}`,
-      `Booking code: ${externalBookingId}`,
-      guestName ? `Guest: ${guestName}` : null,
-      `Check-in: ${formatDateOnly(checkInDate)}`,
-      `Check-out: ${formatDateOnly(checkOutDate)}`,
-    ]
-      .filter(Boolean)
-      .join("\n")
-  }
+async function countActivePropertySupplies(propertyId: string) {
+  return prisma.propertySupply.count({
+    where: {
+      propertyId,
+      isActive: true,
+    },
+  })
+}
 
-  return [
-    "Εργασία που δημιουργήθηκε χειροκίνητα από κράτηση.",
-    `Πηγή: ${sourcePlatform}`,
-    `Κωδικός κράτησης: ${externalBookingId}`,
-    guestName ? `Επισκέπτης: ${guestName}` : null,
-    `Άφιξη: ${formatDateOnly(checkInDate)}`,
-    `Αναχώρηση: ${formatDateOnly(checkOutDate)}`,
-  ]
-    .filter(Boolean)
-    .join("\n")
+function getActorName(auth: Record<string, unknown>) {
+  const name = toNullableString(auth.name)
+  if (name) return name
+
+  const email = toNullableString(auth.email)
+  if (email) return email
+
+  return "System"
 }
 
 export async function POST(req: NextRequest, context: RouteContext) {
@@ -190,18 +135,55 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
   try {
     const { id } = await context.params
-    const body = await req.json()
+    const body = await req.json().catch(() => ({}))
 
     const language = normalizeLanguage(body.language)
+    const taskType = String(body.taskType || "cleaning").trim().toLowerCase()
 
-    const booking = await prisma.booking.findFirst({
-      where: buildBookingWhere(access.auth, id),
-      include: {
+    const booking = await prisma.booking.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        organizationId: true,
+        propertyId: true,
+        externalBookingId: true,
+        externalListingName: true,
+        externalListingId: true,
+        checkOutDate: true,
+        checkOutTime: true,
+        notes: true,
+        needsMapping: true,
         property: {
           select: {
             id: true,
             name: true,
-            organizationId: true,
+            code: true,
+            defaultPartner: {
+              select: {
+                id: true,
+                code: true,
+                name: true,
+                email: true,
+                specialty: true,
+                status: true,
+              },
+            },
+          },
+        },
+        tasks: {
+          where: {
+            status: {
+              not: "cancelled",
+            },
+          },
+          select: {
+            id: true,
+            status: true,
+            title: true,
+            createdAt: true,
+          },
+          orderBy: {
+            createdAt: "desc",
           },
         },
       },
@@ -210,12 +192,21 @@ export async function POST(req: NextRequest, context: RouteContext) {
     if (!booking) {
       return NextResponse.json(
         {
-          error:
-            language === "en"
-              ? "Booking was not found."
-              : "Η κράτηση δεν βρέθηκε.",
+          error: language === "en" ? "Booking not found." : "Η κράτηση δεν βρέθηκε.",
         },
         { status: 404 }
+      )
+    }
+
+    if (!canAccessOrganization(access.auth, booking.organizationId)) {
+      return NextResponse.json(
+        {
+          error:
+            language === "en"
+              ? "You do not have access to this booking."
+              : "Δεν έχεις πρόσβαση σε αυτή την κράτηση.",
+        },
+        { status: 403 }
       )
     }
 
@@ -224,205 +215,244 @@ export async function POST(req: NextRequest, context: RouteContext) {
         {
           error:
             language === "en"
-              ? "The booking is not matched with a property."
-              : "Η κράτηση δεν έχει αντιστοιχιστεί σε ακίνητο.",
+              ? "This booking has no mapped property yet."
+              : "Αυτή η κράτηση δεν έχει ακόμα αντιστοιχισμένο ακίνητο.",
         },
         { status: 400 }
       )
     }
 
-    if (booking.status === "cancelled") {
+    const property = booking.property
+    const defaultPartner = property.defaultPartner
+
+    const existingOpenTask = booking.tasks.find((task) => {
+      const normalizedStatus = String(task.status || "").trim().toLowerCase()
+      return normalizedStatus !== "completed"
+    })
+
+    if (existingOpenTask) {
       return NextResponse.json(
         {
           error:
             language === "en"
-              ? "A task cannot be created from a cancelled booking."
-              : "Δεν μπορεί να δημιουργηθεί εργασία από ακυρωμένη κράτηση.",
+              ? "An open task already exists for this booking."
+              : "Υπάρχει ήδη ανοιχτή εργασία για αυτή την κράτηση.",
+          taskId: existingOpenTask.id,
         },
         { status: 400 }
       )
     }
 
-    const taskType = String(body.taskType || "cleaning").trim().toLowerCase()
-    const priority = String(body.priority || "normal").trim().toLowerCase()
-    const isCleaningTask = taskType === "cleaning"
+    const scheduledDate =
+      parseDateOnly(body.scheduledDate) || new Date(booking.checkOutDate)
 
-    const primaryTemplate = await findPrimaryChecklistTemplate(
-      booking.organizationId,
-      booking.property.id
-    )
+    const scheduledStartTime =
+      normalizeTimeString(body.scheduledStartTime) ||
+      normalizeTimeString(booking.checkOutTime)
 
-    const activeSuppliesCount = await countActivePropertySupplies(
-      booking.property.id
-    )
-
-    const sendCleaningChecklist = toBooleanValue(
-      body.sendCleaningChecklist,
-      isCleaningTask && Boolean(primaryTemplate)
-    )
-
-    const sendSuppliesChecklist = toBooleanValue(
-      body.sendSuppliesChecklist,
-      isCleaningTask && activeSuppliesCount > 0
-    )
-
-    const requiresPhotos = toBooleanValue(body.requiresPhotos, false)
-    const requiresApproval = toBooleanValue(body.requiresApproval, false)
-
-    const scheduledDate = parseDateOnly(body.scheduledDate, booking.checkOutDate)
-    if (!scheduledDate) {
-      return NextResponse.json(
-        {
-          error:
-            language === "en"
-              ? "Invalid task date."
-              : "Μη έγκυρη ημερομηνία εργασίας.",
-        },
-        { status: 400 }
-      )
-    }
-
-    const dueDate = parseDateOnly(body.dueDate, booking.checkOutDate)
-    if (!dueDate) {
-      return NextResponse.json(
-        {
-          error:
-            language === "en"
-              ? "Invalid due date."
-              : "Μη έγκυρη προθεσμία εργασίας.",
-        },
-        { status: 400 }
-      )
-    }
-
+    const scheduledEndTime = normalizeTimeString(body.scheduledEndTime)
+    const dueDate = parseDateOnly(body.dueDate)
     const alertEnabled = toBooleanValue(body.alertEnabled, false)
-    const alertAt = alertEnabled ? parseDateTimeValue(body.alertAt) : null
+    const alertAt = alertEnabled ? parseDateTime(body.alertAt) : null
 
-    if (alertEnabled && !alertAt) {
-      return NextResponse.json(
-        {
-          error:
-            language === "en"
-              ? "Alert is enabled but no alert time was provided."
-              : "Έχεις ενεργοποιήσει alert αλλά δεν έχεις ορίσει ώρα ειδοποίησης.",
-        },
-        { status: 400 }
-      )
-    }
+    const priority =
+      String(body.priority || "normal").trim().toLowerCase() || "normal"
 
     const title =
       toNullableString(body.title) ||
-      buildDefaultTaskTitle({
-        language,
-        taskType,
-        propertyName: booking.property.name,
-        checkOutDate: booking.checkOutDate,
-      })
+      buildDefaultTaskTitle(taskType, property.name, language)
 
-    const description =
-      toNullableString(body.description) ||
-      buildDefaultTaskDescription({
-        language,
-        sourcePlatform: booking.sourcePlatform,
-        externalBookingId: booking.externalBookingId,
-        guestName: booking.guestName,
-        checkInDate: booking.checkInDate,
-        checkOutDate: booking.checkOutDate,
-      })
+    const description = toNullableString(body.description)
+    const notes = toNullableString(body.notes) ?? booking.notes ?? null
 
-    const task = await prisma.task.create({
-      data: {
-        organizationId: booking.organizationId,
-        propertyId: booking.property.id,
-        bookingId: booking.id,
-        title,
-        description,
-        taskType,
-        source: "booking",
-        priority,
-        status: "pending",
-        scheduledDate,
-        scheduledStartTime:
-          toNullableString(body.scheduledStartTime) ?? booking.checkOutTime,
-        scheduledEndTime: toNullableString(body.scheduledEndTime),
-        dueDate,
-        requiresPhotos,
-        requiresChecklist: sendCleaningChecklist,
-        requiresApproval,
-        sendCleaningChecklist,
-        sendSuppliesChecklist,
-        usesCustomizedCleaningChecklist: false,
-        alertEnabled,
-        alertAt,
-        notes: toNullableString(body.notes) ?? booking.notes,
-      },
-    })
+    let sendCleaningChecklist = toBooleanValue(body.sendCleaningChecklist, true)
+    let sendSuppliesChecklist = toBooleanValue(body.sendSuppliesChecklist, true)
 
-    await syncTaskChecklistRun({
-      taskId: task.id,
-      organizationId: booking.organizationId,
-      propertyId: booking.property.id,
-      sendCleaningChecklist,
-    })
+    const primaryChecklistTemplate = await findPrimaryChecklistTemplate(property.id)
+    const activeSuppliesCount = await countActivePropertySupplies(property.id)
 
-    await syncTaskSupplyRun({
-      taskId: task.id,
-      propertyId: booking.property.id,
-      sendSuppliesChecklist,
-    })
+    if (!primaryChecklistTemplate) {
+      sendCleaningChecklist = false
+    }
 
-    await prisma.booking.update({
-      where: {
-        id: booking.id,
-      },
-      data: {
-        lastProcessedAt: new Date(),
-        lastError: null,
-      },
-    })
+    if (activeSuppliesCount === 0) {
+      sendSuppliesChecklist = false
+    }
 
-    await prisma.bookingSyncEvent.create({
-      data: {
-        bookingId: booking.id,
-        organizationId: booking.organizationId,
-        eventType: "TASK_CREATED_FROM_BOOKING",
-        sourcePlatform: booking.sourcePlatform,
-        resultStatus: booking.syncStatus,
-        message:
-          language === "en"
-            ? `Task ${task.title} was created.`
-            : `Δημιουργήθηκε εργασία ${task.title}.`,
-        payload: {
-          taskId: task.id,
-          taskType: task.taskType,
-          title: task.title,
-          scheduledDate: task.scheduledDate.toISOString(),
-          scheduledStartTime: task.scheduledStartTime,
-          scheduledEndTime: task.scheduledEndTime,
-          dueDate: task.dueDate ? task.dueDate.toISOString() : null,
-          alertEnabled: task.alertEnabled,
-          alertAt: task.alertAt ? task.alertAt.toISOString() : null,
-          language,
+    const actorName = getActorName(access.auth as Record<string, unknown>)
+
+    const task = await prisma.$transaction(async (tx) => {
+      const createdTask = await tx.task.create({
+        data: {
+          organizationId: booking.organizationId,
+          propertyId: property.id,
+          bookingId: booking.id,
+          title,
+          description,
+          taskType,
+          source: "booking",
+          priority,
+          status: "pending",
+          scheduledDate,
+          scheduledStartTime,
+          scheduledEndTime,
+          dueDate,
+          alertEnabled,
+          alertAt,
+          notes,
+          requiresPhotos: false,
+          requiresChecklist: sendCleaningChecklist,
+          requiresApproval: false,
+          sendCleaningChecklist,
+          sendSuppliesChecklist,
+          usesCustomizedCleaningChecklist: false,
         },
-      },
+        select: {
+          id: true,
+          organizationId: true,
+          propertyId: true,
+          bookingId: true,
+          title: true,
+          taskType: true,
+          status: true,
+          scheduledDate: true,
+          scheduledStartTime: true,
+          scheduledEndTime: true,
+          dueDate: true,
+          alertEnabled: true,
+          alertAt: true,
+          sendCleaningChecklist: true,
+          sendSuppliesChecklist: true,
+          createdAt: true,
+        },
+      })
+
+      if (sendCleaningChecklist && primaryChecklistTemplate) {
+        await tx.taskChecklistRun.create({
+          data: {
+            taskId: createdTask.id,
+            templateId: primaryChecklistTemplate.id,
+            status: "pending",
+          },
+        })
+      }
+
+      if (sendSuppliesChecklist) {
+        await tx.taskSupplyRun.create({
+          data: {
+            taskId: createdTask.id,
+            status: "pending",
+          },
+        })
+      }
+
+      if (defaultPartner?.id) {
+        await tx.taskAssignment.create({
+          data: {
+            taskId: createdTask.id,
+            partnerId: defaultPartner.id,
+            status: "assigned",
+            notes:
+              language === "en"
+                ? "Automatically assigned from the property's default partner."
+                : "Αυτόματη ανάθεση από τον προεπιλεγμένο συνεργάτη του ακινήτου.",
+          },
+        })
+
+        await tx.task.update({
+          where: { id: createdTask.id },
+          data: {
+            status: "assigned",
+          },
+        })
+      }
+
+      await tx.activityLog.create({
+        data: {
+          organizationId: booking.organizationId,
+          propertyId: property.id,
+          bookingId: booking.id,
+          taskId: createdTask.id,
+          entityType: "task",
+          entityId: createdTask.id,
+          action: "task_created_from_booking",
+          message:
+            language === "en"
+              ? `Task created from booking ${booking.externalBookingId}.`
+              : `Δημιουργήθηκε εργασία από την κράτηση ${booking.externalBookingId}.`,
+          actorType: "user",
+          actorName,
+          metadata: {
+            bookingId: booking.id,
+            externalBookingId: booking.externalBookingId,
+            propertyId: property.id,
+            propertyName: property.name,
+            taskType,
+            sendCleaningChecklist,
+            sendSuppliesChecklist,
+          },
+        },
+      })
+
+      return tx.task.findUnique({
+        where: { id: createdTask.id },
+        select: {
+          id: true,
+          title: true,
+          taskType: true,
+          status: true,
+          source: true,
+          priority: true,
+          scheduledDate: true,
+          scheduledStartTime: true,
+          scheduledEndTime: true,
+          dueDate: true,
+          alertEnabled: true,
+          alertAt: true,
+          createdAt: true,
+          assignments: {
+            select: {
+              id: true,
+              status: true,
+              assignedAt: true,
+              acceptedAt: true,
+              partner: {
+                select: {
+                  id: true,
+                  code: true,
+                  name: true,
+                  email: true,
+                  specialty: true,
+                  status: true,
+                },
+              },
+            },
+            orderBy: {
+              assignedAt: "desc",
+            },
+            take: 1,
+          },
+        },
+      })
     })
 
     return NextResponse.json(
       {
         success: true,
+        message:
+          language === "en"
+            ? "Task created successfully."
+            : "Η εργασία δημιουργήθηκε επιτυχώς.",
         task,
       },
       { status: 201 }
     )
   } catch (error) {
-    console.error("Create task from booking POST error:", error)
+    console.error("Booking create-task POST error:", error)
 
     return NextResponse.json(
       {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Αποτυχία δημιουργίας εργασίας από κράτηση.",
+        error: "Αποτυχία δημιουργίας εργασίας.",
       },
       { status: 500 }
     )

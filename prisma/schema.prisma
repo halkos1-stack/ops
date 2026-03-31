@@ -129,35 +129,40 @@ model Property {
 }
 
 model Booking {
-  id                  String            @id @default(cuid())
-  organizationId      String
-  propertyId          String?
-  sourcePlatform      String
-  externalBookingId   String
-  externalListingId   String?
-  externalListingName String?
-  guestName           String?
-  guestPhone          String?
-  guestEmail          String?
-  checkInDate         DateTime
-  checkOutDate        DateTime
-  checkInTime         String?
-  checkOutTime        String?
-  adults              Int               @default(1)
-  children            Int               @default(0)
-  infants             Int               @default(0)
-  status              String            @default("confirmed")
-  syncStatus          BookingSyncStatus @default(PENDING_MATCH)
-  needsMapping        Boolean           @default(true)
-  isManual            Boolean           @default(false)
-  sourceUpdatedAt     DateTime?
-  rawPayload          Json?
-  lastProcessedAt     DateTime?
-  lastError           String?
-  notes               String?
-  importedAt          DateTime          @default(now())
-  createdAt           DateTime          @default(now())
-  updatedAt           DateTime          @updatedAt
+  id                          String            @id @default(cuid())
+  organizationId              String
+  propertyId                  String?
+  sourcePlatform              String
+  externalBookingId           String
+  externalListingId           String?
+  externalListingName         String?
+  externalPropertyAddress     String?
+  externalPropertyCity        String?
+  externalPropertyRegion      String?
+  externalPropertyPostalCode  String?
+  externalPropertyCountry     String?
+  guestName                   String?
+  guestPhone                  String?
+  guestEmail                  String?
+  checkInDate                 DateTime
+  checkOutDate                DateTime
+  checkInTime                 String?
+  checkOutTime                String?
+  adults                      Int               @default(1)
+  children                    Int               @default(0)
+  infants                     Int               @default(0)
+  status                      String            @default("confirmed")
+  syncStatus                  BookingSyncStatus @default(PENDING_MATCH)
+  needsMapping                Boolean           @default(true)
+  isManual                    Boolean           @default(false)
+  sourceUpdatedAt             DateTime?
+  rawPayload                  Json?
+  lastProcessedAt             DateTime?
+  lastError                   String?
+  notes                       String?
+  importedAt                  DateTime          @default(now())
+  createdAt                   DateTime          @default(now())
+  updatedAt                   DateTime          @updatedAt
 
   organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   property     Property?          @relation(fields: [propertyId], references: [id], onDelete: SetNull)

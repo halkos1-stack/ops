@@ -4,7 +4,7 @@ import Link from "next/link"
 import LanguageSwitcher from "@/components/i18n/LanguageSwitcher"
 import { useAppLanguage } from "@/components/i18n/LanguageProvider"
 import {
-  getDashboardShellTexts,
+  getDashboardLayoutTexts,
   getRoleLabel,
 } from "@/lib/i18n/translations"
 
@@ -33,12 +33,19 @@ export default function DashboardLayoutShell({
 }: DashboardLayoutShellProps) {
   const { language } = useAppLanguage()
 
-  const texts = getDashboardShellTexts(language)
+  const texts = getDashboardLayoutTexts(language)
   const isSuperAdmin = systemRole === "SUPER_ADMIN"
   const roleLabel = getRoleLabel(language, {
     systemRole,
     organizationRole,
   })
+
+  const brand = "OPS"
+  const title = language === "en" ? "Dashboard" : "Πίνακας ελέγχου"
+  const superAdminDescription =
+    language === "en"
+      ? "Central access to the OPS core and organization management."
+      : "Κεντρική πρόσβαση στον πυρήνα του OPS και στη διαχείριση οργανισμών."
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -52,10 +59,10 @@ export default function DashboardLayoutShell({
                 aria-label={texts.dashboardHrefLabel}
               >
                 <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">
-                  {texts.brand}
+                  {brand}
                 </div>
                 <div className="truncate text-2xl font-bold tracking-tight text-slate-950">
-                  {texts.title}
+                  {title}
                 </div>
               </Link>
 
@@ -64,7 +71,7 @@ export default function DashboardLayoutShell({
               <div className="hidden min-w-0 lg:block">
                 {isSuperAdmin ? (
                   <p className="text-sm text-slate-600">
-                    {texts.superAdminDescription}
+                    {superAdminDescription}
                   </p>
                 ) : (
                   <p className="text-sm text-slate-600">
@@ -116,7 +123,7 @@ export default function DashboardLayoutShell({
                 {texts.superAdminBannerPrefix}{" "}
                 <span className="font-semibold">
                   {texts.superAdminBannerRole}
-                </span>
+                </span>{" "}
                 {texts.superAdminBannerSuffix}{" "}
                 <span className="font-semibold">
                   {texts.superAdminBannerManagement}

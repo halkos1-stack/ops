@@ -22,6 +22,7 @@ export async function GET() {
       },
       include: {
         property: true,
+        booking: true,
         assignments: {
           where: {
             partnerId: auth.partnerId,
@@ -33,12 +34,31 @@ export async function GET() {
             partner: true,
           },
         },
-        checklistRuns: {
-          orderBy: {
-            createdAt: "desc",
-          },
+        checklistRun: {
           include: {
+            template: {
+              include: {
+                items: {
+                  orderBy: {
+                    sortOrder: "asc",
+                  },
+                },
+              },
+            },
             answers: true,
+          },
+        },
+        supplyRun: {
+          include: {
+            answers: {
+              include: {
+                propertySupply: {
+                  include: {
+                    supplyItem: true,
+                  },
+                },
+              },
+            },
           },
         },
         issues: {

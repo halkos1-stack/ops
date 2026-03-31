@@ -3,20 +3,59 @@ import { prisma } from "@/lib/prisma"
 
 type RouteContext = {
   params: Promise<{
+    taskId: string
     id: string
   }>
 }
 
+function toNullableString(value: unknown) {
+  if (value === undefined || value === null) return null
+  const text = String(value).trim()
+  return text === "" ? null : text
+}
+
+function toNullableNumber(value: unknown) {
+  if (value === undefined || value === null || value === "") return null
+  const num = Number(value)
+  return Number.isFinite(num) ? num : null
+}
+
+function toNullableBoolean(value: unknown) {
+  if (typeof value === "boolean") return value
+  if (value === undefined || value === null || value === "") return null
+  return null
+}
+
+function toPhotoUrls(value: unknown) {
+  if (!Array.isArray(value)) return undefined
+
+  const urls = value
+    .map((item) => String(item ?? "").trim())
+    .filter(Boolean)
+
+  return urls.length > 0 ? urls : []
+}
+
 export async function PATCH(req: NextRequest, context: RouteContext) {
   try {
-    const { id } = await context.params
-    const body = await req.json()
+    const { taskId, id } = await context.params
+    const body = await req.json().catch(() => ({}))
 
-    const action = body.action?.trim()
+    const action = String(body.action ?? "").trim().toLowerCase()
     const answers = Array.isArray(body.answers) ? body.answers : []
 
-    const run = await prisma.taskChecklistRun.findUnique({
-      where: { id },
+    if (action !== "save" && action !== "submit") {
+      return NextResponse.json(
+        { error: "Μη έγκυρη ενέργεια." },
+        { status: 400 }
+      )
+    }
+
+    const run = await prisma.taskChecklistRun.findFirst({
+      where: {
+        id,
+        taskId,
+      },
       include: {
         task: true,
         template: {
@@ -43,46 +82,30 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       )
     }
 
-    if (action !== "save" && action !== "submit") {
-      return NextResponse.json(
-        { error: "Μη έγκυρη ενέργεια." },
-        { status: 400 }
-      )
-    }
-
     for (const answer of answers) {
-      const answerId = answer.id?.trim()
-
+      const answerId = String(answer?.id ?? "").trim()
       if (!answerId) continue
 
       await prisma.taskChecklistAnswer.update({
         where: { id: answerId },
         data: {
-          booleanValue:
-            typeof answer.booleanValue === "boolean"
-              ? answer.booleanValue
-              : null,
-          textValue:
-            typeof answer.textValue === "string"
-              ? answer.textValue.trim() || null
-              : null,
-          numberValue:
-            answer.numberValue !== null &&
-            answer.numberValue !== undefined &&
-            answer.numberValue !== ""
-              ? Number(answer.numberValue)
-              : null,
-          notes:
-            typeof answer.notes === "string"
-              ? answer.notes.trim() || null
-              : null,
-          completedAt: new Date(),
+          valueBoolean: toNullableBoolean(answer.booleanValue),
+          valueText: toNullableString(answer.textValue),
+          valueNumber: toNullableNumber(answer.numberValue),
+          valueSelect: toNullableString(answer.selectValue ?? answer.valueSelect),
+          notes: toNullableString(answer.notes),
+          ...(toPhotoUrls(answer.photoUrls) !== undefined
+            ? { photoUrls: toPhotoUrls(answer.photoUrls) }
+            : {}),
         },
       })
     }
 
-    const refreshedRun = await prisma.taskChecklistRun.findUnique({
-      where: { id },
+    const refreshedRun = await prisma.taskChecklistRun.findFirst({
+      where: {
+        id,
+        taskId,
+      },
       include: {
         task: true,
         template: {
@@ -119,7 +142,8 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       const savedRun = await prisma.taskChecklistRun.update({
         where: { id },
         data: {
-          status: refreshedRun.status === "submitted" ? "submitted" : "in_progress",
+          status:
+            refreshedRun.status === "completed" ? "completed" : "in_progress",
           startedAt: refreshedRun.startedAt ?? new Date(),
         },
         include: {
@@ -149,13 +173,14 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
 
       await prisma.activityLog.create({
         data: {
+          organizationId: refreshedRun.task.organizationId,
           propertyId: refreshedRun.task.propertyId,
           taskId: refreshedRun.task.id,
-          entityType: "task_checklist_run",
+          entityType: "TASK_CHECKLIST_RUN",
           entityId: refreshedRun.id,
-          action: "checklist_saved",
+          action: "CHECKLIST_SAVED",
           message: `Έγινε προσωρινή αποθήκευση checklist για την εργασία "${refreshedRun.task.title}"`,
-          actorType: "partner",
+          actorType: "PARTNER",
           actorName: "Partner User",
           metadata: {
             runId: refreshedRun.id,
@@ -171,18 +196,27 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       if (!answer.templateItem.isRequired) return false
 
       if (answer.templateItem.itemType === "boolean") {
-        return answer.booleanValue === null
+        return answer.valueBoolean === null
       }
 
       if (answer.templateItem.itemType === "text") {
-        return !answer.textValue || answer.textValue.trim() === ""
+        return !answer.valueText || answer.valueText.trim() === ""
       }
 
       if (answer.templateItem.itemType === "number") {
-        return answer.numberValue === null || answer.numberValue === undefined
+        return (
+          answer.valueNumber === null || answer.valueNumber === undefined
+        )
       }
 
-      return true
+      if (
+        answer.templateItem.itemType === "select" ||
+        answer.templateItem.itemType === "choice"
+      ) {
+        return !answer.valueSelect || answer.valueSelect.trim() === ""
+      }
+
+      return false
     })
 
     if (invalidRequiredItems.length > 0) {
@@ -198,9 +232,9 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     const submittedRun = await prisma.taskChecklistRun.update({
       where: { id },
       data: {
-        status: "submitted",
+        status: "completed",
         startedAt: refreshedRun.startedAt ?? new Date(),
-        submittedAt: new Date(),
+        completedAt: new Date(),
       },
       include: {
         task: true,
@@ -229,13 +263,14 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
 
     await prisma.activityLog.create({
       data: {
+        organizationId: refreshedRun.task.organizationId,
         propertyId: refreshedRun.task.propertyId,
         taskId: refreshedRun.task.id,
-        entityType: "task_checklist_run",
+        entityType: "TASK_CHECKLIST_RUN",
         entityId: refreshedRun.id,
-        action: "checklist_submitted",
+        action: "CHECKLIST_SUBMITTED",
         message: `Υποβλήθηκε checklist για την εργασία "${refreshedRun.task.title}"`,
-        actorType: "partner",
+        actorType: "PARTNER",
         actorName: "Partner User",
         metadata: {
           runId: refreshedRun.id,
@@ -249,7 +284,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     console.error("Update checklist run error:", error)
 
     return NextResponse.json(
-      { error: "Failed to update checklist run" },
+      { error: "Αποτυχία ενημέρωσης checklist run." },
       { status: 500 }
     )
   }
