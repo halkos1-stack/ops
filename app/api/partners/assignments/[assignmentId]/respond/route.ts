@@ -101,6 +101,12 @@ export async function POST(req: NextRequest, context: RouteContext) {
             status: true,
             propertyId: true,
             title: true,
+            checklistRun: {
+              select: { id: true },
+            },
+            supplyRun: {
+              select: { id: true },
+            },
           },
         },
         partner: {
@@ -117,6 +123,13 @@ export async function POST(req: NextRequest, context: RouteContext) {
       return NextResponse.json(
         { error: "Η ανάθεση δεν βρέθηκε." },
         { status: 404 }
+      )
+    }
+
+    if (String(existingAssignment.status || "").toLowerCase() !== "assigned") {
+      return NextResponse.json(
+        { error: "Η ανάθεση δεν είναι διαθέσιμη για νέα απάντηση." },
+        { status: 409 }
       )
     }
 
@@ -137,13 +150,13 @@ export async function POST(req: NextRequest, context: RouteContext) {
         data:
           action === "ACCEPTED"
             ? {
-                status: "ACCEPTED",
+                status: "accepted",
                 acceptedAt: now,
                 rejectedAt: null,
                 rejectionReason: null,
               }
             : {
-                status: "REJECTED",
+                status: "rejected",
                 acceptedAt: null,
                 rejectedAt: now,
                 rejectionReason,
@@ -155,9 +168,25 @@ export async function POST(req: NextRequest, context: RouteContext) {
           id: existingAssignment.taskId,
         },
         data: {
-          status: action === "ACCEPTED" ? "ACCEPTED" : "PENDING",
+          status: action === "ACCEPTED" ? "accepted" : "pending",
         },
       })
+
+      if (action === "REJECTED") {
+        if (existingAssignment.task.checklistRun) {
+          await tx.taskChecklistRun.update({
+            where: { id: existingAssignment.task.checklistRun.id },
+            data: { status: "pending", startedAt: null, completedAt: null },
+          })
+        }
+
+        if (existingAssignment.task.supplyRun) {
+          await tx.taskSupplyRun.update({
+            where: { id: existingAssignment.task.supplyRun.id },
+            data: { status: "pending", startedAt: null, completedAt: null },
+          })
+        }
+      }
 
       await tx.activityLog.create({
         data: {
