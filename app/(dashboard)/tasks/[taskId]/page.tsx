@@ -11,7 +11,6 @@ import {
   getChecklistStatusLabel,
   getPriorityLabel,
   getPropertyStatusLabel,
-  getSupplyLevelLabel,
   getTaskStatusLabel,
   getTaskTypeLabel,
 } from "@/lib/i18n/labels"
@@ -961,6 +960,46 @@ function getChecklistResponseCount(run?: TaskChecklistRun | null) {
   return run.answers.filter((answer) => answerHasData(answer)).length
 }
 
+function getSupplyLevelLabel(
+  value: unknown,
+  texts: ReturnType<typeof getTaskDetailsPageTexts>
+) {
+  const normalized = String(value ?? "").trim().toLowerCase()
+
+  if (
+    normalized === "missing" ||
+    normalized === "low" ||
+    normalized === "έλλειψη" ||
+    normalized === "λειπει" ||
+    normalized === "λείπει"
+  ) {
+    return texts.supplyLevels.missing
+  }
+
+  if (
+    normalized === "medium" ||
+    normalized === "moderate" ||
+    normalized === "μέτρια" ||
+    normalized === "μεσαία" ||
+    normalized === "μετρια"
+  ) {
+    return texts.supplyLevels.medium
+  }
+
+  if (
+    normalized === "full" ||
+    normalized === "ok" ||
+    normalized === "good" ||
+    normalized === "πλήρης" ||
+    normalized === "πληρης" ||
+    normalized === "γεμάτο" ||
+    normalized === "γεματο"
+  ) {
+    return texts.supplyLevels.full
+  }
+
+  return texts.supplyLevels.unknown
+}
 
 function answerValueLabel(
   answer: TaskChecklistAnswer,
@@ -972,7 +1011,7 @@ function answerValueLabel(
   }
 
   if (answer.valueSelect) {
-    return getSupplyLevelLabel(language, answer.valueSelect)
+    return getSupplyLevelLabel(answer.valueSelect, texts)
   }
 
   if (answer.valueNumber !== null && answer.valueNumber !== undefined) {
@@ -3248,6 +3287,7 @@ export default function TaskDetailsPage() {
 
       <Modal
         open={openSuppliesAnswersModal}
+       
         onClose={() => setOpenSuppliesAnswersModal(false)}
         title={texts.answers.modalSuppliesAnswersTitle}
         description={texts.answers.modalSuppliesAnswersDescription}
