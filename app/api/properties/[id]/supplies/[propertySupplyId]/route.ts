@@ -203,13 +203,15 @@ async function syncSupplyTemplate(propertyId: string, organizationId: string) {
       (item) => item.linkedSupplyItemId === row.supplyItemId
     )
 
+    const supplyDisplayName = row.supplyItem.nameEl ?? row.supplyItem.name
+
     const label =
-      preset?.checklistLabelEl || buildSupplyChecklistLabel(row.supplyItem.name)
+      preset?.checklistLabelEl || buildSupplyChecklistLabel(supplyDisplayName)
 
     const description =
       preset
-        ? `Κατάσταση αναλωσίμου: ${row.supplyItem.name}`
-        : `Κατάσταση custom αναλωσίμου: ${row.supplyItem.name}`
+        ? `Κατάσταση αναλωσίμου: ${supplyDisplayName}`
+        : `Κατάσταση custom αναλωσίμου: ${supplyDisplayName}`
 
     const data = {
       label,
@@ -437,8 +439,8 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       },
       data: {
         ...(currentStock !== null ? { currentStock } : {}),
-        ...(targetStock !== null ? { targetStock } : {}),
-        ...(reorderThreshold !== null ? { reorderThreshold } : {}),
+        ...(targetStock !== null ? { targetStock, targetLevel: targetStock } : {}),
+        ...(reorderThreshold !== null ? { reorderThreshold, minimumThreshold: reorderThreshold } : {}),
         ...(notes !== undefined ? { notes } : {}),
         lastUpdatedAt: new Date(),
       },
