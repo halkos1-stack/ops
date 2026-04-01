@@ -21,6 +21,7 @@ import {
   normalizePriority,
 } from "@/lib/i18n/normalizers"
 import { getTaskDetailsPageTexts } from "@/lib/i18n/translations"
+import { resolveSupplyDisplayName } from "@/lib/supply-display"
 
 type PropertySummary = {
   id: string
@@ -170,6 +171,8 @@ type PropertyLists = {
         id: string
         code?: string | null
         name: string
+        nameEl?: string | null
+        nameEn?: string | null
         category?: string | null
         unit?: string | null
       }
@@ -1701,13 +1704,13 @@ export default function TaskDetailsPage() {
     return (
       task?.propertyLists?.supplies?.items?.map((item, index) => ({
         id: item.id || `supply-${index}`,
-        label: item.supplyItem.name,
+        label: resolveSupplyDisplayName(language, item.supplyItem),
         description: item.supplyItem.category || "",
         category: item.supplyItem.category || "",
         itemType: "select",
       })) || []
     )
-  }, [suppliesRun?.items, task?.propertyLists?.supplies?.items])
+  }, [suppliesRun?.items, task?.propertyLists?.supplies?.items, language])
 
   const cleaningListTitle = useMemo(() => {
     return normalizeChecklistTitleForUi(

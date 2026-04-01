@@ -4,7 +4,7 @@ import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
 import { useParams } from "next/navigation"
 import { useAppLanguage } from "@/components/i18n/LanguageProvider"
-import { getSupplyPresetByCode } from "@/lib/supply-presets"
+import { resolveSupplyDisplayName } from "@/lib/supply-display"
 
 type Language = "el" | "en"
 type SupplyFilter = "all" | "missing" | "medium" | "full"
@@ -14,6 +14,8 @@ type SupplyItem = {
   id: string
   code: string
   name: string
+  nameEl?: string | null
+  nameEn?: string | null
   category: string
   unit: string
   minimumStock?: number | null
@@ -27,6 +29,8 @@ type PropertySupply = {
   currentStock: number
   targetStock?: number | null
   reorderThreshold?: number | null
+  targetLevel?: number | null
+  minimumThreshold?: number | null
   notes?: string | null
   updatedAt?: string | null
   lastUpdatedAt?: string | null
@@ -51,6 +55,8 @@ type CustomCatalogRow = {
   id: string
   code: string
   name: string
+  nameEl?: string | null
+  nameEn?: string | null
   category: string
   unit: string
   minimumStock?: number | null
@@ -191,26 +197,22 @@ function getTexts(language: Language) {
 
 function getSupplyDisplayName(
   language: Language,
-  supplyItem?: { code?: string | null; name?: string | null } | null
+  supplyItem?: { code?: string | null; name?: string | null; nameEl?: string | null; nameEn?: string | null } | null
 ) {
-  const fallback = String(supplyItem?.name || "").trim() || "—"
-  const preset = getSupplyPresetByCode(supplyItem?.code)
-
-  if (!preset) return fallback
-
-  return language === "en" ? preset.nameEn : preset.nameEl
+  return resolveSupplyDisplayName(language, supplyItem)
 }
 
 function getSupplyState(row: PropertySupply): SupplyState {
   const current = Number(row.currentStock || 0)
+  const rawTarget = row.targetLevel ?? row.targetStock
   const target =
-    typeof row.targetStock === "number" && Number.isFinite(row.targetStock)
-      ? row.targetStock
+    typeof rawTarget === "number" && Number.isFinite(rawTarget)
+      ? rawTarget
       : null
+  const rawThreshold = row.minimumThreshold ?? row.reorderThreshold
   const threshold =
-    typeof row.reorderThreshold === "number" &&
-    Number.isFinite(row.reorderThreshold)
-      ? row.reorderThreshold
+    typeof rawThreshold === "number" && Number.isFinite(rawThreshold)
+      ? rawThreshold
       : row.supplyItem?.minimumStock ?? null
 
   if (current <= 0) return "missing"
@@ -260,15 +262,16 @@ function computeStockForState(row: PropertySupply, state: SupplyState) {
       ? row.currentStock
       : 0
 
+  const rawTarget = row.targetLevel ?? row.targetStock
   const target =
-    typeof row.targetStock === "number" && Number.isFinite(row.targetStock)
-      ? row.targetStock
+    typeof rawTarget === "number" && Number.isFinite(rawTarget)
+      ? rawTarget
       : null
 
+  const rawThreshold = row.minimumThreshold ?? row.reorderThreshold
   const threshold =
-    typeof row.reorderThreshold === "number" &&
-    Number.isFinite(row.reorderThreshold)
-      ? row.reorderThreshold
+    typeof rawThreshold === "number" && Number.isFinite(rawThreshold)
+      ? rawThreshold
       : row.supplyItem?.minimumStock ?? null
 
   const minimum =
@@ -859,7 +862,7 @@ export default function PropertySuppliesPage() {
                     <div key={row.id} className="rounded-2xl border border-slate-200 p-4">
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <div className="font-semibold text-slate-900">{row.name}</div>
+                          <div className="font-semibold text-slate-900">{resolveSupplyDisplayName(lang, row)}</div>
                           <div className="mt-1 text-sm text-slate-500">{row.code}</div>
                         </div>
 

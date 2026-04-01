@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { use, useEffect, useState } from "react"
 import { useAppLanguage } from "@/components/i18n/LanguageProvider"
+import { resolveSupplyDisplayName } from "@/lib/supply-display"
 
 type PageParams = Promise<{
   propertyId: string
@@ -20,6 +21,8 @@ type SupplyCatalogItem = {
   id: string
   code?: string | null
   name: string
+  nameEl?: string | null
+  nameEn?: string | null
   category?: string | null
   unit?: string | null
   minimumStock?: number | null
@@ -996,7 +999,7 @@ export default function PropertyChecklistTemplateDetailPage({
                             <option value="">{t.noLinkedSupply}</option>
                             {activeSupplies.map((row) => (
                               <option key={row.supplyItem.id} value={row.supplyItem.id}>
-                                {row.supplyItem.name}
+                                {resolveSupplyDisplayName(language, row.supplyItem)}
                               </option>
                             ))}
                           </select>
