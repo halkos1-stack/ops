@@ -117,6 +117,17 @@ export type NormalizedActorType =
   | "ADMIN"
   | "UNKNOWN"
 
+export type NormalizedTrackingMode =
+  | "FILL_LEVEL"
+  | "QUANTITY"
+  | "UNKNOWN"
+
+export type NormalizedReadinessStatus =
+  | "READY"
+  | "NEEDS_ATTENTION"
+  | "NOT_READY"
+  | "UNKNOWN"
+
 function normalizeRaw(value: unknown) {
   return String(value ?? "")
     .trim()
@@ -993,4 +1004,52 @@ export function normalizeTaskDescriptionText(
     .replace(/\bGuest:/gi, "Επισκέπτης:")
     .replace(/\bCheck-in:/gi, "Άφιξη:")
     .replace(/\bCheck-out:/gi, "Αναχώρηση:")
+}
+
+export function normalizeTrackingMode(value: unknown): NormalizedTrackingMode {
+  const raw = normalizeRaw(value)
+  const loose = normalizeLoose(value)
+
+  if (raw === "FILL_LEVEL" || loose === "fill_level" || loose === "fill level") {
+    return "FILL_LEVEL"
+  }
+
+  if (raw === "QUANTITY" || loose === "quantity" || loose === "ποσότητα" || loose === "ποσοτητα") {
+    return "QUANTITY"
+  }
+
+  return "UNKNOWN"
+}
+
+export function normalizeReadinessStatus(
+  value: unknown
+): NormalizedReadinessStatus {
+  const raw = normalizeRaw(value)
+  const loose = normalizeLoose(value)
+
+  if (raw === "READY" || loose === "ready" || loose === "έτοιμο" || loose === "ετοιμο") {
+    return "READY"
+  }
+
+  if (
+    raw === "NEEDS_ATTENTION" ||
+    loose === "needs_attention" ||
+    loose === "needs attention" ||
+    loose === "απαιτεί προσοχή" ||
+    loose === "απαιτει προσοχη"
+  ) {
+    return "NEEDS_ATTENTION"
+  }
+
+  if (
+    raw === "NOT_READY" ||
+    loose === "not_ready" ||
+    loose === "not ready" ||
+    loose === "μη έτοιμο" ||
+    loose === "μη ετοιμο"
+  ) {
+    return "NOT_READY"
+  }
+
+  return "UNKNOWN"
 }

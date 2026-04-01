@@ -12,9 +12,11 @@ import {
   NormalizedPartnerStatus,
   NormalizedPriority,
   NormalizedPropertyStatus,
+  NormalizedReadinessStatus,
   NormalizedSupplyLevel,
   NormalizedTaskStatus,
   NormalizedTaskType,
+  NormalizedTrackingMode,
   detectChecklistKind,
   normalizeActorType,
   normalizeAssignmentStatus,
@@ -28,9 +30,11 @@ import {
   normalizePartnerStatus,
   normalizePriority,
   normalizePropertyStatus,
+  normalizeReadinessStatus,
   normalizeSupplyLevel,
   normalizeTaskStatus,
   normalizeTaskType,
+  normalizeTrackingMode,
 } from "@/lib/i18n/normalizers"
 
 function unknownLabel(language: AppLanguage) {
@@ -560,4 +564,44 @@ export function getSafeLabel(
   const text = String(value ?? "").trim()
   if (text) return text
   return fallback?.trim() || unknownLabel(language)
+}
+
+export function getTrackingModeLabel(language: AppLanguage, value: unknown) {
+  const normalized = normalizeTrackingMode(value)
+
+  const labels: Record<NormalizedTrackingMode, string> =
+    language === "en"
+      ? {
+          FILL_LEVEL: "Fill level",
+          QUANTITY: "Quantity",
+          UNKNOWN: "Unknown mode",
+        }
+      : {
+          FILL_LEVEL: "Επίπεδο πλήρωσης",
+          QUANTITY: "Ποσότητα",
+          UNKNOWN: "Άγνωστη λειτουργία",
+        }
+
+  return labels[normalized]
+}
+
+export function getReadinessStatusLabel(language: AppLanguage, value: unknown) {
+  const normalized = normalizeReadinessStatus(value)
+
+  const labels: Record<NormalizedReadinessStatus, string> =
+    language === "en"
+      ? {
+          READY: "Ready",
+          NEEDS_ATTENTION: "Needs attention",
+          NOT_READY: "Not ready",
+          UNKNOWN: "Unknown status",
+        }
+      : {
+          READY: "Έτοιμο",
+          NEEDS_ATTENTION: "Απαιτεί προσοχή",
+          NOT_READY: "Μη έτοιμο",
+          UNKNOWN: "Άγνωστη κατάσταση",
+        }
+
+  return labels[normalized]
 }
