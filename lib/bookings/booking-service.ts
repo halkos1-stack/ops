@@ -63,6 +63,8 @@ export async function upsertBookingFromNormalizedInput(
     matched: match.matched,
   })
 
+  const importedAt = existingBooking?.importedAt ?? new Date()
+
   const commonData = {
     externalListingId: input.externalListingId ?? null,
     externalListingName: input.externalListingName ?? null,
@@ -122,7 +124,7 @@ export async function upsertBookingFromNormalizedInput(
             : {}),
           sourcePlatform: input.sourcePlatform,
           externalBookingId: input.externalBookingId,
-          importedAt: existingBooking?.importedAt ?? new Date(),
+          importedAt,
           ...commonData,
         },
       })

@@ -6,9 +6,9 @@ import {
 } from "@/lib/readiness/property-condition-mappers";
 
 type RouteContext = {
-  params: {
+  params: Promise<{
     id: string;
-  };
+  }>;
 };
 
 type PropertyConditionStatusValue =
@@ -314,7 +314,7 @@ function parseOptionalBoolean(value: string | null): boolean | null {
 
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
-    const propertyId = context.params.id;
+    const { id: propertyId } = await context.params;
 
     if (!isValidId(propertyId)) {
       return NextResponse.json(
@@ -491,7 +491,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
-    const propertyId = context.params.id;
+    const { id: propertyId } = await context.params;
 
     if (!isValidId(propertyId)) {
       return NextResponse.json(

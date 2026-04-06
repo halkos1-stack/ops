@@ -312,11 +312,25 @@ type ChecklistUiState = {
   sent: boolean
   submitted: boolean
   inProgress: boolean
+  tone: string
 }
 
-type AnswerLike =
+type AnswerLike = (
   | NonNullable<ChecklistRunLite["answers"]>[number]
   | NonNullable<IssueRunLite["answers"]>[number]
+) & {
+  valueBoolean?: boolean | null
+  valueText?: string | null
+  valueSelect?: string | null
+  valueNumber?: number | null
+  note?: string | null
+  notes?: string | null
+  title?: string | null
+  description?: string | null
+  locationText?: string | null
+  photoUrls?: string[] | null
+  createdIssueId?: string | null
+}
 
 type SupplyRowView = NonNullable<PropertyDetail["propertySupplies"]>[number] & {
   derivedState: "missing" | "medium" | "full"
@@ -860,17 +874,17 @@ function isChecklistActuallySent(params: { task: NonNullable<PropertyDetail["tas
 function resolveChecklistUiState(params: { task: NonNullable<PropertyDetail["tasks"]>[number]; run?: ChecklistRunLite | IssueRunLite | null; enabled: boolean }): ChecklistUiState {
   const { task, run, enabled } = params
   if (!enabled) {
-    return { key: "inactive", enabled: false, sent: false, submitted: false, inProgress: false }
+    return { key: "inactive", enabled: false, sent: false, submitted: false, inProgress: false, tone: "bg-slate-100 text-slate-700 ring-1 ring-slate-200" }
   }
 
   const sent = isChecklistActuallySent({ task, run, enabled })
   const submitted = isChecklistRunSubmitted(run)
   const inProgress = isChecklistRunInProgress(run)
 
-  if (!sent) return { key: "not_sent", enabled: true, sent: false, submitted, inProgress }
-  if (submitted) return { key: "submitted", enabled: true, sent: true, submitted: true, inProgress: false }
-  if (inProgress) return { key: "in_progress", enabled: true, sent: true, submitted: false, inProgress: true }
-  return { key: "sent_pending", enabled: true, sent: true, submitted: false, inProgress: false }
+  if (!sent) return { key: "not_sent", enabled: true, sent: false, submitted, inProgress, tone: "bg-slate-100 text-slate-700 ring-1 ring-slate-200" }
+  if (submitted) return { key: "submitted", enabled: true, sent: true, submitted: true, inProgress: false, tone: "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200" }
+  if (inProgress) return { key: "in_progress", enabled: true, sent: true, submitted: false, inProgress: true, tone: "bg-sky-50 text-sky-700 ring-1 ring-sky-200" }
+  return { key: "sent_pending", enabled: true, sent: true, submitted: false, inProgress: false, tone: "bg-amber-50 text-amber-700 ring-1 ring-amber-200" }
 }
 
 function getChecklistStateLabel(language: "el" | "en", state: ChecklistUiState, notSentLabel: string) {

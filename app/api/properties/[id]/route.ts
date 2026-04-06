@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireApiAppAccess, canAccessOrganization } from "@/lib/route-access";
 import {
+  filterCanonicalOperationalTasks,
+  getOperationalTaskValidity,
+} from "@/lib/tasks/ops-task-contract";
+import {
   computePropertyReadiness,
   getReadinessStatusLabel,
   type ReadinessConditionInput,
@@ -615,6 +619,7 @@ async function getFullProperty(id: string) {
         take: 50,
         select: {
           id: true,
+          bookingId: true,
           title: true,
           description: true,
           taskType: true,
@@ -1101,8 +1106,12 @@ async function getFullProperty(id: string) {
 
   if (!property) return null;
 
-  const normalizedTasks = safeArray((property as any).tasks).map((task: any) =>
+  const allNormalizedTasks = safeArray((property as any).tasks).map((task: any) =>
     mapTaskForPropertyPage(task)
+  );
+  const normalizedTasks = filterCanonicalOperationalTasks(allNormalizedTasks);
+  const invalidOperationalTasks = allNormalizedTasks.filter(
+    (task: any) => getOperationalTaskValidity(task).isCanonicalOperational !== true
   );
 
   const normalizedIssues = safeArray((property as any).issues).map((issue: any) =>
@@ -1237,6 +1246,9 @@ async function getFullProperty(id: string) {
     bookingsWithoutTask,
     bookingsWithoutTaskCount: bookingsWithoutTask.length,
     tasks: normalizedTasks,
+    auditSummary: {
+      invalidOperationalTaskCount: invalidOperationalTasks.length,
+    },
     issues: normalizedIssues,
     propertySupplies: normalizedSupplies,
 

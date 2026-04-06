@@ -145,6 +145,13 @@ export async function POST(req: NextRequest, context: RouteContext) {
       )
     }
 
+    if (!checklistRun.template) {
+      return NextResponse.json(
+        { error: "Checklist template not found for this task." },
+        { status: 400 }
+      )
+    }
+
     const formData = await req.formData()
     const templateItemId = String(formData.get("templateItemId") || "").trim()
     const file = formData.get("file")

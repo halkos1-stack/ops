@@ -125,8 +125,15 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
     const requestedRole =
       body?.organizationRole !== undefined
-        ? normalizeOrganizationRole(body.organizationRole)
+        ? normalizeOrganizationRole(body.organizationRole) ?? undefined
         : undefined
+
+    if (body?.organizationRole !== undefined && requestedRole === undefined) {
+      return NextResponse.json(
+        { error: "Μη έγκυρος ρόλος οργανισμού." },
+        { status: 400 }
+      )
+    }
 
     const requestedIsActive =
       body?.isActive !== undefined ? Boolean(body.isActive) : undefined
@@ -187,7 +194,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       }
     }
 
-    const nextRole =
+    const nextRole: OrganizationRole =
       membership.isPrimaryOrgAdmin
         ? membership.role
         : requestedRole !== undefined

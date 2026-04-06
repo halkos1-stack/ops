@@ -6,9 +6,9 @@ import {
 } from "@/lib/readiness/property-condition-mappers";
 
 type RouteContext = {
-  params: {
+  params: Promise<{
     conditionId: string;
-  };
+  }>;
 };
 
 type PropertyConditionStatusValue =
@@ -289,7 +289,7 @@ function mapDbConditionToRawRecord(condition: {
 
 export async function GET(_request: NextRequest, context: RouteContext) {
   try {
-    const conditionId = context.params.conditionId;
+    const { conditionId } = await context.params;
 
     if (!isValidId(conditionId)) {
       return NextResponse.json(
@@ -405,7 +405,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
   try {
-    const conditionId = context.params.conditionId;
+    const { conditionId } = await context.params;
 
     if (!isValidId(conditionId)) {
       return NextResponse.json(

@@ -108,7 +108,7 @@ export async function POST(req: NextRequest) {
 
     const title = toStringValue(body.title)
     const description = toNullableString(body.description)
-    const type = normalizeEventType(body.type)
+    const eventType = normalizeEventType(body.type)
     const status = normalizeEventStatus(body.status)
     const propertyId = toNullableString(body.propertyId)
     const taskId = toNullableString(body.taskId)
@@ -235,7 +235,7 @@ export async function POST(req: NextRequest) {
         organizationId,
         title,
         description,
-        type,
+        eventType,
         status,
         propertyId,
         taskId,

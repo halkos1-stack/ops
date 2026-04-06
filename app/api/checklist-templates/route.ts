@@ -130,6 +130,7 @@ export async function POST(req: NextRequest) {
 
     const template = await prisma.propertyChecklistTemplate.create({
       data: {
+        organizationId: property.organizationId,
         propertyId,
         title,
         description,

@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { buildTenantWhere } from "@/lib/route-access"
 import { requireApiAppAccessWithDevBypass } from "@/lib/dev-api-access"
+import {
+  filterCanonicalOperationalTasks,
+  getOperationalTaskValidity,
+} from "@/lib/tasks/ops-task-contract"
 
 function parseDateParam(value: string | null) {
   if (!value) return null
@@ -205,6 +209,7 @@ export async function GET(req: NextRequest) {
         tasks: {
           select: {
             id: true,
+            bookingId: true,
             title: true,
             taskType: true,
             status: true,
@@ -330,7 +335,13 @@ export async function GET(req: NextRequest) {
           )
         : null
 
-      const latestTask = booking.tasks[0] || null
+      const canonicalTasks = filterCanonicalOperationalTasks(booking.tasks).map(
+        (task) => ({
+          ...task,
+          opsValidity: getOperationalTaskValidity(task),
+        })
+      )
+      const latestTask = canonicalTasks[0] || null
       const taskStatus = deriveTaskCoverageStatus(latestTask)
 
       return {
@@ -385,10 +396,10 @@ export async function GET(req: NextRequest) {
             }
           : null,
 
-        tasks: booking.tasks,
+        tasks: canonicalTasks,
         syncEvents: booking.syncEvents,
 
-        hasTasks: booking.tasks.length > 0,
+        hasTasks: canonicalTasks.length > 0,
         taskStatus,
 
         workWindow: {

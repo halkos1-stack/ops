@@ -3,6 +3,10 @@ import { Prisma } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
 import { requireApiAppAccess, canAccessOrganization } from "@/lib/route-access"
 import {
+  filterCanonicalOperationalTasks,
+  getOperationalTaskValidity,
+} from "@/lib/tasks/ops-task-contract"
+import {
   buildPropertyConditionSnapshot,
   type RawPropertyConditionRecord,
 } from "@/lib/readiness/property-condition-mappers"
@@ -1377,6 +1381,7 @@ function shapeTaskForResponse(task: Prisma.TaskGetPayload<{ include: typeof task
 
   return {
     ...task,
+    opsValidity: getOperationalTaskValidity(task),
     latestAssignment: task.assignments[0] ?? null,
     cleaningChecklistRun: task.checklistRun,
     suppliesChecklistRun: task.supplyRun,
@@ -1401,9 +1406,24 @@ export async function GET(req: NextRequest) {
       include: taskDetailsInclude,
     })
 
+    const includeInvalidTasks =
+      req.nextUrl.searchParams.get("view") === "audit" ||
+      req.nextUrl.searchParams.get("includeInvalid") === "true"
+    const invalidOnly = req.nextUrl.searchParams.get("invalidOnly") === "true"
     const shapedTasks = tasks.map(shapeTaskForResponse)
+    const canonicalTasks = filterCanonicalOperationalTasks(shapedTasks)
 
-    return NextResponse.json(shapedTasks)
+    if (invalidOnly) {
+      return NextResponse.json(
+        shapedTasks.filter((task) => task.opsValidity.isCanonicalOperational !== true)
+      )
+    }
+
+    if (includeInvalidTasks) {
+      return NextResponse.json(shapedTasks)
+    }
+
+    return NextResponse.json(canonicalTasks)
   } catch (error) {
     console.error("Tasks GET error:", error)
 
@@ -1443,6 +1463,8 @@ export async function POST(req: NextRequest) {
     }
 
     const propertyId = String(body.propertyId || "").trim()
+    const bookingId = toNullableString(body.bookingId)
+    const taskSource = (toNullableString(body.source) || "manual").toLowerCase()
     const title = String(body.title || "").trim()
     const taskType = String(body.taskType || "").trim()
     const scheduledDateValue = toRequiredDate(body.scheduledDate)
@@ -1473,6 +1495,16 @@ export async function POST(req: NextRequest) {
         {
           error:
             "Το πεδίο scheduledDate είναι υποχρεωτικό και πρέπει να είναι έγκυρο.",
+        },
+        { status: 400 }
+      )
+    }
+
+    if (String(taskSource).trim().toLowerCase() === "booking" && !bookingId) {
+      return NextResponse.json(
+        {
+          error:
+            'Οι εργασίες με source "booking" απαιτούν έγκυρο bookingId.',
         },
         { status: 400 }
       )
@@ -1534,6 +1566,29 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    if (bookingId) {
+      const booking = await prisma.booking.findFirst({
+        where: {
+          id: bookingId,
+          organizationId,
+          propertyId,
+        },
+        select: {
+          id: true,
+        },
+      })
+
+      if (!booking) {
+        return NextResponse.json(
+          {
+            error:
+              "Η κράτηση δεν βρέθηκε ή δεν ανήκει στο ίδιο ακίνητο και οργανισμό.",
+          },
+          { status: 400 }
+        )
+      }
+    }
+
     if (sendCleaningChecklist) {
       const primaryTemplate = await findPrimaryCleaningTemplate(
         organizationId,
@@ -1585,11 +1640,11 @@ export async function POST(req: NextRequest) {
       data: {
         organizationId,
         propertyId,
-        bookingId: toNullableString(body.bookingId),
+        bookingId,
         title,
         description: toNullableString(body.description),
         taskType,
-        source: toNullableString(body.source) || "manual",
+        source: taskSource,
         priority: toNullableString(body.priority) || "normal",
         status: toNullableString(body.status) || "pending",
         scheduledDate: scheduledDateValue,

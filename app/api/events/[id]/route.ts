@@ -142,7 +142,7 @@ export async function PUT(req: NextRequest, context: RouteContext) {
 
     const title = toStringValue(body.title)
     const description = toNullableString(body.description)
-    const type = normalizeEventType(body.type)
+    const eventType = normalizeEventType(body.type)
     const status = normalizeEventStatus(body.status)
 
     if (!title) {
@@ -157,7 +157,7 @@ export async function PUT(req: NextRequest, context: RouteContext) {
       data: {
         title,
         description,
-        type,
+        eventType,
         status,
       },
       include: {
@@ -229,7 +229,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     }
 
     if (body.type !== undefined) {
-      data.type = normalizeEventType(body.type)
+      data.eventType = normalizeEventType(body.type)
     }
 
     if (body.status !== undefined) {

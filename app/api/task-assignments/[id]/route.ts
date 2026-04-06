@@ -255,7 +255,7 @@ export async function PUT(request: NextRequest, context: RouteContext) {
 
     const status =
       body.status !== undefined
-        ? normalizeAssignmentStatus(body.status)
+        ? normalizeAssignmentStatus(body.status) ?? undefined
         : undefined
 
     const rejectionReason =
@@ -266,7 +266,7 @@ export async function PUT(request: NextRequest, context: RouteContext) {
     const notes =
       body.notes !== undefined ? toNullableString(body.notes) : undefined
 
-    if (body.status !== undefined && !status) {
+    if (body.status !== undefined && status === undefined) {
       return NextResponse.json(
         { error: "Μη έγκυρη κατάσταση ανάθεσης." },
         { status: 400 }

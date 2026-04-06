@@ -1,172 +1,14 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { requireApiAppAccess, canAccessOrganization } from "@/lib/route-access"
+import {
+  filterCanonicalOperationalTasks,
+  getOperationalTaskValidity,
+} from "@/lib/tasks/ops-task-contract"
 
 type RouteContext = {
   params: Promise<{
     id: string
-  }>
-}
-
-type PropertyTaskRecord = {
-  id: string
-  organizationId: string
-  propertyId: string
-  bookingId: string | null
-  title: string
-  description: string | null
-  taskType: string
-  source: string
-  priority: string
-  status: string
-  scheduledDate: Date
-  scheduledStartTime: string | null
-  scheduledEndTime: string | null
-  dueDate: Date | null
-  completedAt: Date | null
-  requiresPhotos: boolean
-  requiresChecklist: boolean
-  requiresApproval: boolean
-  sendCleaningChecklist: boolean
-  sendSuppliesChecklist: boolean
-  usesCustomizedCleaningChecklist: boolean
-  alertEnabled: boolean
-  alertAt: Date | null
-  notes: string | null
-  resultNotes: string | null
-  createdAt: Date
-  updatedAt: Date
-  booking: {
-    id: string
-    guestName: string | null
-    checkInDate: Date
-    checkOutDate: Date
-    status: string
-  } | null
-  assignments: Array<{
-    id: string
-    taskId: string
-    partnerId: string
-    assignedAt: Date
-    acceptedAt: Date | null
-    rejectedAt: Date | null
-    startedAt: Date | null
-    completedAt: Date | null
-    status: string
-    rejectionReason: string | null
-    notes: string | null
-    responseToken: string | null
-    responseTokenExpiresAt: Date | null
-    checklistToken: string | null
-    checklistTokenExpiresAt: Date | null
-    assignmentEmailSentAt: Date | null
-    checklistEmailSentAt: Date | null
-    createdAt: Date
-    updatedAt: Date
-    partner: {
-      id: string
-      code: string
-      name: string
-      email: string
-      phone: string | null
-      specialty: string
-      status: string
-    }
-  }>
-  checklistRun: {
-    id: string
-    taskId: string
-    templateId: string
-    status: string
-    startedAt: Date | null
-    completedAt: Date | null
-    createdAt: Date
-    updatedAt: Date
-    template: {
-      id: string
-      title: string
-      description: string | null
-      templateType: string
-      isPrimary: boolean
-      isActive: boolean
-    }
-    answers: Array<{
-      id: string
-      issueCreated: boolean
-      createdAt: Date
-    }>
-  } | null
-  supplyRun: {
-    id: string
-    taskId: string
-    status: string
-    startedAt: Date | null
-    completedAt: Date | null
-    createdAt: Date
-    updatedAt: Date
-    answers: Array<{
-      id: string
-      taskSupplyRunId: string
-      propertySupplyId: string
-      fillLevel: string
-      notes: string | null
-      createdAt: Date
-      updatedAt: Date
-      propertySupply: {
-        id: string
-        propertyId: string
-        supplyItemId: string
-        isActive: boolean
-        fillLevel: string
-        currentStock: number
-        targetStock: number | null
-        reorderThreshold: number | null
-        lastUpdatedAt: Date
-        notes: string | null
-        createdAt: Date
-        updatedAt: Date
-        supplyItem: {
-          id: string
-          code: string
-          name: string
-          category: string
-          unit: string
-        }
-      }
-    }>
-  } | null
-  issues: Array<{
-    id: string
-    issueType: string
-    title: string
-    description: string | null
-    severity: string
-    status: string
-    reportedBy: string | null
-    resolutionNotes: string | null
-    resolvedAt: Date | null
-    createdAt: Date
-    updatedAt: Date
-    task: {
-      id: string
-      title: string
-      status: string
-    } | null
-  }>
-  taskPhotos: Array<{
-    id: string
-    category: string
-    fileUrl: string
-    fileName: string | null
-    uploadedAt: Date
-  }>
-  activityLogs: Array<{
-    id: string
-    action: string
-    message: string | null
-    actorType: string | null
-    actorName: string | null
-    createdAt: Date
   }>
 }
 
@@ -238,9 +80,17 @@ async function countActivePropertySupplies(propertyId: string) {
   })
 }
 
-function normalizeTaskForUi(task: PropertyTaskRecord) {
+function normalizeTaskForUi<
+  T extends {
+    source: string
+    bookingId: string | null
+    checklistRun: unknown
+    supplyRun: unknown
+  },
+>(task: T) {
   return {
     ...task,
+    opsValidity: getOperationalTaskValidity(task),
     cleaningChecklistRun: task.checklistRun ?? null,
     suppliesChecklistRun: task.supplyRun ?? null,
     checklistRun: task.checklistRun ?? null,
@@ -367,7 +217,7 @@ async function getPropertyTasksPayload(propertyId: string) {
     take: 50,
   })
 
-  const rawTasks: PropertyTaskRecord[] = await prisma.task.findMany({
+  const rawTasks = await prisma.task.findMany({
     where: {
       propertyId,
     },
@@ -490,7 +340,11 @@ async function getPropertyTasksPayload(propertyId: string) {
     },
   })
 
-  const tasks = rawTasks.map(normalizeTaskForUi)
+  const allTasks = rawTasks.map(normalizeTaskForUi)
+  const tasks = filterCanonicalOperationalTasks(allTasks)
+  const invalidOperationalTasks = allTasks.filter(
+    (task) => task.opsValidity.isCanonicalOperational !== true
+  )
 
   const property = {
     ...propertyBase,
@@ -507,6 +361,9 @@ async function getPropertyTasksPayload(propertyId: string) {
     issues,
     bookings,
     tasks,
+    auditSummary: {
+      invalidOperationalTaskCount: invalidOperationalTasks.length,
+    },
   }
 }
 
@@ -630,6 +487,8 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
     const alertEnabled = Boolean(body.alertEnabled)
     const alertAt = alertEnabled ? parseOptionalDateTime(body.alertAt) : null
+    const bookingId = toNullableText(body.bookingId)
+    const taskSource = toText(body.source || "manual").toLowerCase()
 
     if (alertEnabled && !alertAt) {
       return NextResponse.json(
@@ -693,7 +552,12 @@ export async function POST(req: NextRequest, context: RouteContext) {
       }
     }
 
-    const bookingId = toNullableText(body.bookingId)
+    if (taskSource === "booking" && !bookingId) {
+      return NextResponse.json(
+        { error: 'Οι εργασίες με source "booking" απαιτούν έγκυρο bookingId.' },
+        { status: 400 }
+      )
+    }
 
     if (bookingId) {
       const booking = await prisma.booking.findFirst({
@@ -724,7 +588,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
           title,
           description: toNullableText(body.description),
           taskType,
-          source: toText(body.source || "manual"),
+          source: taskSource,
           priority: toText(body.priority || "normal"),
           status: toText(body.status || "pending"),
           scheduledDate,

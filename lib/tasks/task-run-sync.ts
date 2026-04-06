@@ -176,6 +176,26 @@ export async function syncTaskSupplyRun(params: {
     },
     select: {
       id: true,
+      supplyItemId: true,
+      fillLevel: true,
+      currentStock: true,
+      targetStock: true,
+      reorderThreshold: true,
+      targetLevel: true,
+      minimumThreshold: true,
+      trackingMode: true,
+      isCritical: true,
+      warningThreshold: true,
+      notes: true,
+      supplyItem: {
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          category: true,
+          unit: true,
+        },
+      },
     },
     orderBy: [
       {
@@ -226,18 +246,60 @@ export async function syncTaskSupplyRun(params: {
     }))
 
   const existingAnswerMap = new Map(
-    run.answers.map((answer) => [answer.propertySupplyId, answer])
+    run.answers
+      .filter((answer) => Boolean(answer.propertySupplyId))
+      .map((answer) => [String(answer.propertySupplyId), answer])
   )
 
   const activePropertySupplyIds = new Set(propertySupplies.map((row) => row.id))
 
   for (const propertySupply of propertySupplies) {
     const existingAnswer = existingAnswerMap.get(propertySupply.id)
+    let runItem = await prisma.taskSupplyRunItem.findFirst({
+      where: {
+        taskSupplyRunId: run.id,
+        propertySupplyId: propertySupply.id,
+      },
+      select: {
+        id: true,
+      },
+    })
+
+    if (!runItem) {
+      runItem = await prisma.taskSupplyRunItem.create({
+        data: {
+          taskSupplyRunId: run.id,
+          propertySupplyId: propertySupply.id,
+          supplyItemId: propertySupply.supplyItemId,
+          propertySupplyCode: propertySupply.supplyItem.code,
+          label: propertySupply.supplyItem.name,
+          labelEn: null,
+          category: propertySupply.supplyItem.category,
+          unit: propertySupply.supplyItem.unit,
+          fillLevel: propertySupply.fillLevel,
+          currentStock: propertySupply.currentStock,
+          targetStock: propertySupply.targetStock,
+          reorderThreshold: propertySupply.reorderThreshold,
+          targetLevel: propertySupply.targetLevel,
+          minimumThreshold: propertySupply.minimumThreshold,
+          trackingMode: propertySupply.trackingMode,
+          isCritical: propertySupply.isCritical,
+          warningThreshold: propertySupply.warningThreshold,
+          sortOrder: Array.from(activePropertySupplyIds).indexOf(propertySupply.id),
+          isRequired: true,
+          notes: propertySupply.notes,
+        },
+        select: {
+          id: true,
+        },
+      })
+    }
 
     if (!existingAnswer) {
       await prisma.taskSupplyAnswer.create({
         data: {
           taskSupplyRunId: run.id,
+          runItemId: runItem.id,
           propertySupplyId: propertySupply.id,
           fillLevel: "full",
           notes: null,
@@ -247,7 +309,7 @@ export async function syncTaskSupplyRun(params: {
   }
 
   for (const answer of run.answers) {
-    if (!activePropertySupplyIds.has(answer.propertySupplyId)) {
+    if (!answer.propertySupplyId || !activePropertySupplyIds.has(answer.propertySupplyId)) {
       await prisma.taskSupplyAnswer.delete({
         where: {
           id: answer.id,

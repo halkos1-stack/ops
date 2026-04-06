@@ -12,9 +12,9 @@ import {
 } from "@/lib/readiness/property-condition-mappers";
 
 type RouteContext = {
-  params: {
+  params: Promise<{
     id: string;
-  };
+  }>;
 };
 
 function isValidId(value: string): boolean {
@@ -161,7 +161,7 @@ function mapRawConditionToReadinessInput(
 
 export async function GET(_request: NextRequest, context: RouteContext) {
   try {
-    const propertyId = context.params.id;
+    const { id: propertyId } = await context.params;
 
     if (!isValidId(propertyId)) {
       return NextResponse.json(

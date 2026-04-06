@@ -2,7 +2,7 @@ import { prisma } from "@/lib/prisma"
 
 export type PropertyReadinessStatus =
   | "READY"
-  | "NEEDS_ATTENTION"
+  | "BORDERLINE"
   | "NOT_READY"
   | "UNKNOWN"
 
@@ -38,6 +38,15 @@ const OPEN_TASK_STATUSES = [
 const OPEN_ISSUE_STATUSES = ["open", "in_progress"]
 
 const BLOCKING_FILL_LEVELS = new Set(["missing", "low"])
+const CANONICAL_OPERATIONAL_TASK_WHERE = {
+  NOT: {
+    source: {
+      equals: "booking",
+      mode: "insensitive" as const,
+    },
+    bookingId: null,
+  },
+}
 
 function normalizeLoose(value: unknown) {
   return String(value ?? "")
@@ -198,6 +207,7 @@ export async function computePropertyReadinessSnapshot(
         where: {
           organizationId: input.organizationId,
           propertyId: input.propertyId,
+          ...CANONICAL_OPERATIONAL_TASK_WHERE,
           status: {
             in: OPEN_TASK_STATUSES,
           },
@@ -216,6 +226,7 @@ export async function computePropertyReadinessSnapshot(
         where: {
           organizationId: input.organizationId,
           propertyId: input.propertyId,
+          ...CANONICAL_OPERATIONAL_TASK_WHERE,
           alertEnabled: true,
           alertAt: {
             lte: now,
@@ -284,7 +295,7 @@ export async function computePropertyReadinessSnapshot(
   } else if (hasUpcomingCheckInWithin3Hours) {
     readinessStatus = "NOT_READY"
   } else {
-    readinessStatus = "NEEDS_ATTENTION"
+    readinessStatus = "BORDERLINE"
   }
 
   return {

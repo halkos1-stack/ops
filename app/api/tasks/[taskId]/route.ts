@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { requireApiAppAccessWithDevBypass } from "@/lib/dev-api-access"
+import { getOperationalTaskValidity } from "@/lib/tasks/ops-task-contract"
 import {
   buildPropertyConditionSnapshot,
   type RawPropertyConditionRecord,
@@ -1574,6 +1575,7 @@ async function getTaskPayload(taskId: string, auth: AuthContext) {
 
   const shapedTask = {
     id: task.id,
+    opsValidity: getOperationalTaskValidity(task),
     title: task.title,
     description: task.description,
     taskType: task.taskType,
@@ -1711,6 +1713,10 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       },
       select: {
         id: true,
+        organizationId: true,
+        propertyId: true,
+        bookingId: true,
+        source: true,
       },
     })
 
@@ -1773,6 +1779,14 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       data.resultNotes = toNullableString(body.resultNotes)
     }
 
+    if (hasOwn(body, "source")) {
+      data.source = toRequiredString(body.source, "source").toLowerCase()
+    }
+
+    if (hasOwn(body, "bookingId")) {
+      data.bookingId = toNullableString(body.bookingId)
+    }
+
     if (hasOwn(body, "alertEnabled")) {
       data.alertEnabled = toOptionalBoolean(body.alertEnabled)
     }
@@ -1815,6 +1829,45 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
 
     if (hasOwn(body, "usesCustomizedIssuesChecklist")) {
       data.usesCustomizedIssuesChecklist = toOptionalBoolean(body.usesCustomizedIssuesChecklist)
+    }
+
+    const finalSource = String(data.source ?? existingTask.source ?? "manual")
+      .trim()
+      .toLowerCase()
+    const finalBookingId =
+      data.bookingId !== undefined ? data.bookingId : existingTask.bookingId
+
+    if (finalSource === "booking" && !finalBookingId) {
+      return NextResponse.json(
+        {
+          error:
+            'Οι εργασίες με source "booking" απαιτούν έγκυρο bookingId.',
+        },
+        { status: 400 }
+      )
+    }
+
+    if (finalBookingId) {
+      const booking = await prisma.booking.findFirst({
+        where: {
+          id: finalBookingId,
+          organizationId: existingTask.organizationId,
+          propertyId: existingTask.propertyId,
+        },
+        select: {
+          id: true,
+        },
+      })
+
+      if (!booking) {
+        return NextResponse.json(
+          {
+            error:
+              "Η κράτηση δεν βρέθηκε ή δεν ανήκει στο ίδιο ακίνητο και οργανισμό.",
+          },
+          { status: 400 }
+        )
+      }
     }
 
     await prisma.task.update({

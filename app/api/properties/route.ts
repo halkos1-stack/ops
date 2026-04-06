@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { requireApiAppAccess } from "@/lib/route-access"
 import { refreshPropertyReadinessSnapshot } from "@/lib/properties/readiness-snapshot"
+import {
+  filterCanonicalOperationalTasks,
+  getOperationalTaskValidity,
+} from "@/lib/tasks/ops-task-contract"
 
 function toNullableString(value: unknown) {
   if (value === undefined || value === null) return null
@@ -127,6 +131,8 @@ async function getFullPropertyList(where: Record<string, unknown>) {
       tasks: {
         select: {
           id: true,
+          bookingId: true,
+          source: true,
           status: true,
           priority: true,
           taskType: true,
@@ -226,6 +232,22 @@ async function getFullPropertyList(where: Record<string, unknown>) {
   })
 }
 
+function shapePropertyForOperationalViews(property: any) {
+  const allTasks = Array.isArray(property?.tasks) ? property.tasks : []
+  const tasks = filterCanonicalOperationalTasks(allTasks)
+  const invalidOperationalTaskCount = allTasks.filter(
+    (task: any) => getOperationalTaskValidity(task).isCanonicalOperational !== true
+  ).length
+
+  return {
+    ...property,
+    tasks,
+    auditSummary: {
+      invalidOperationalTaskCount,
+    },
+  }
+}
+
 export async function GET(req: NextRequest) {
   try {
     const access = await requireApiAppAccess()
@@ -279,7 +301,9 @@ export async function GET(req: NextRequest) {
       ]
     }
 
-    const properties = await getFullPropertyList(where)
+    const properties = (await getFullPropertyList(where)).map(
+      shapePropertyForOperationalViews
+    )
 
     return NextResponse.json(properties)
   } catch (error) {
@@ -470,6 +494,8 @@ export async function POST(req: NextRequest) {
         tasks: {
           select: {
             id: true,
+            bookingId: true,
+            source: true,
             status: true,
             priority: true,
             taskType: true,
@@ -582,10 +608,14 @@ export async function POST(req: NextRequest) {
       },
     })
 
+    const shapedProperty = property
+      ? shapePropertyForOperationalViews(property)
+      : property
+
     return NextResponse.json(
       {
         success: true,
-        property,
+        property: shapedProperty,
       },
       { status: 201 }
     )

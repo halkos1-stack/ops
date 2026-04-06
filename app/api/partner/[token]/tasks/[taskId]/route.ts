@@ -471,30 +471,32 @@ export async function GET(_req: NextRequest, context: RouteContext) {
                 id: answer.id,
                 fillLevel: answer.fillLevel,
                 notes: answer.notes,
-                propertySupply: {
-                  id: answer.propertySupply.id,
-                  fillLevel: mapSupplyFillLevel({
-                    currentStock: answer.propertySupply.currentStock,
-                    targetStock: answer.propertySupply.targetStock,
-                    reorderThreshold: answer.propertySupply.reorderThreshold,
-                    minimumStock:
-                      answer.propertySupply.supplyItem?.minimumStock ?? null,
-                  }),
-                  lastUpdatedAt: answer.propertySupply.lastUpdatedAt,
-                  notes: answer.propertySupply.notes,
-                  supplyItem: answer.propertySupply.supplyItem
-                    ? {
-                        id: answer.propertySupply.supplyItem.id,
-                        code: answer.propertySupply.supplyItem.code,
-                        name: answer.propertySupply.supplyItem.name,
-                        category: answer.propertySupply.supplyItem.category,
-                        unit: answer.propertySupply.supplyItem.unit,
+                propertySupply: answer.propertySupply
+                  ? {
+                      id: answer.propertySupply.id,
+                      fillLevel: mapSupplyFillLevel({
+                        currentStock: answer.propertySupply.currentStock,
+                        targetStock: answer.propertySupply.targetStock,
+                        reorderThreshold: answer.propertySupply.reorderThreshold,
                         minimumStock:
-                          answer.propertySupply.supplyItem.minimumStock,
-                        isActive: answer.propertySupply.supplyItem.isActive,
-                      }
-                    : null,
-                },
+                          answer.propertySupply.supplyItem?.minimumStock ?? null,
+                      }),
+                      lastUpdatedAt: answer.propertySupply.lastUpdatedAt,
+                      notes: answer.propertySupply.notes,
+                      supplyItem: answer.propertySupply.supplyItem
+                        ? {
+                            id: answer.propertySupply.supplyItem.id,
+                            code: answer.propertySupply.supplyItem.code,
+                            name: answer.propertySupply.supplyItem.name,
+                            category: answer.propertySupply.supplyItem.category,
+                            unit: answer.propertySupply.supplyItem.unit,
+                            minimumStock:
+                              answer.propertySupply.supplyItem.minimumStock,
+                            isActive: answer.propertySupply.supplyItem.isActive,
+                          }
+                        : null,
+                    }
+                  : null,
               })),
             }
           : null,

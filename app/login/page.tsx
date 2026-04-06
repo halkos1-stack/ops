@@ -2,7 +2,7 @@
 
 import { signIn, getSession } from "next-auth/react"
 import { useSearchParams } from "next/navigation"
-import { FormEvent, useState } from "react"
+import { FormEvent, Suspense, useState } from "react"
 
 type SessionUser = {
   id?: string
@@ -13,7 +13,7 @@ type SessionUser = {
   organizationRole?: "ORG_ADMIN" | "MANAGER" | "PARTNER" | null
 }
 
-export default function LoginPage() {
+function LoginPageContent() {
   const searchParams = useSearchParams()
   const callbackUrl = searchParams.get("callbackUrl")
 
@@ -129,5 +129,13 @@ export default function LoginPage() {
         </form>
       </div>
     </div>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginPageContent />
+    </Suspense>
   )
 }

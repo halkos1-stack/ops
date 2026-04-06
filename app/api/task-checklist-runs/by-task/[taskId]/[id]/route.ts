@@ -193,25 +193,27 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     }
 
     const invalidRequiredItems = refreshedRun.answers.filter((answer) => {
-      if (!answer.templateItem.isRequired) return false
+      const templateItem = answer.templateItem
 
-      if (answer.templateItem.itemType === "boolean") {
+      if (!templateItem?.isRequired) return false
+
+      if (templateItem.itemType === "boolean") {
         return answer.valueBoolean === null
       }
 
-      if (answer.templateItem.itemType === "text") {
+      if (templateItem.itemType === "text") {
         return !answer.valueText || answer.valueText.trim() === ""
       }
 
-      if (answer.templateItem.itemType === "number") {
+      if (templateItem.itemType === "number") {
         return (
           answer.valueNumber === null || answer.valueNumber === undefined
         )
       }
 
       if (
-        answer.templateItem.itemType === "select" ||
-        answer.templateItem.itemType === "choice"
+        templateItem.itemType === "select" ||
+        templateItem.itemType === "choice"
       ) {
         return !answer.valueSelect || answer.valueSelect.trim() === ""
       }

@@ -444,6 +444,11 @@ const taskAssignmentWithChecklistArgs =
                   },
                 },
               },
+              items: {
+                orderBy: {
+                  sortOrder: "asc",
+                },
+              },
               answers: true,
             },
           },
@@ -598,6 +603,13 @@ export async function POST(req: NextRequest, context: RouteContext) {
       )
     }
 
+    if (!checklistRun.template) {
+      return NextResponse.json(
+        { error: "Checklist template not found for this task." },
+        { status: 400 }
+      )
+    }
+
     const templateItems: ChecklistItemWithRules[] = checklistRun.template.items.map(
       (item) => ({
         id: item.id,
@@ -623,6 +635,23 @@ export async function POST(req: NextRequest, context: RouteContext) {
     if (!templateItems.length) {
       return NextResponse.json(
         { error: "Η checklist δεν έχει στοιχεία προς συμπλήρωση." },
+        { status: 400 }
+      )
+    }
+
+    const runItemsByTemplateItemId = new Map(
+      checklistRun.items
+        .filter((runItem) => Boolean(runItem.propertyTemplateItemId))
+        .map((runItem) => [String(runItem.propertyTemplateItemId), runItem])
+    )
+
+    for (const item of templateItems) {
+      if (runItemsByTemplateItemId.has(item.id)) continue
+
+      return NextResponse.json(
+        {
+          error: `Missing checklist run item for template item "${item.label}".`,
+        },
         { status: 400 }
       )
     }
@@ -719,6 +748,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
       for (const item of templateItems) {
         const incoming = answersMap.get(item.id)
+        const runItem = runItemsByTemplateItemId.get(item.id)
 
         const existing = checklistRun.answers.find(
           (answer) => answer.templateItemId === item.id
@@ -766,6 +796,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
           savedAnswer = await tx.taskChecklistAnswer.create({
             data: {
               checklistRunId: checklistRun.id,
+              runItemId: runItem!.id,
               templateItemId: item.id,
               ...answerData,
             },

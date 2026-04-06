@@ -162,6 +162,7 @@ const taskAssignmentWithSupplyArgs =
           },
           supplyRun: {
             include: {
+              items: true,
               answers: true,
             },
           },
@@ -310,6 +311,23 @@ export async function POST(req: NextRequest, context: RouteContext) {
       )
     }
 
+    const runItemsByPropertySupplyId = new Map(
+      supplyRun.items
+        .filter((runItem) => Boolean(runItem.propertySupplyId))
+        .map((runItem) => [String(runItem.propertySupplyId), runItem])
+    )
+
+    for (const propertySupply of activeSupplies) {
+      if (runItemsByPropertySupplyId.has(propertySupply.id)) continue
+
+      return NextResponse.json(
+        {
+          error: `Missing supply run item for property supply "${propertySupply.supplyItem?.name || propertySupply.id}".`,
+        },
+        { status: 400 }
+      )
+    }
+
     const answerMap = new Map<string, IncomingSupplyAnswer>()
 
     for (const answer of incomingAnswers) {
@@ -369,6 +387,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
       for (const propertySupply of activeSupplies) {
         const incoming = answerMap.get(propertySupply.id)
+        const runItem = runItemsByPropertySupplyId.get(propertySupply.id)
 
         if (!incoming?.fillLevel) {
           continue
@@ -392,6 +411,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
           await tx.taskSupplyAnswer.create({
             data: {
               taskSupplyRunId: supplyRun.id,
+              runItemId: runItem!.id,
               propertySupplyId: propertySupply.id,
               fillLevel: incoming.fillLevel,
               notes: incoming.notes || null,
