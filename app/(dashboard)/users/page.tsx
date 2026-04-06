@@ -144,7 +144,7 @@ function getTexts(language: "el" | "en") {
       primaryOrgAdminBadge: "Primary organization admin",
       primaryOrgAdminTitle: "Main user management owner",
       primaryOrgAdminDescription:
-        "The primary admin permanently keeps the Organization Admin role, cannot change role, cannot be disabled and does not show invitation or temporary password actions.",
+        "The primary admin permanently keeps the Organization Admin role and cannot be disabled, but you can still edit their details and resend the activation invitation.",
       active: "Active",
       inactive: "Inactive",
       role: "Role",
@@ -267,7 +267,7 @@ function getTexts(language: "el" | "en") {
     primaryOrgAdminBadge: "Βασικός διαχειριστής οργανισμού",
     primaryOrgAdminTitle: "Κύριος υπεύθυνος διαχείρισης χρηστών",
     primaryOrgAdminDescription:
-      "Ο βασικός διαχειριστής έχει μόνιμα ρόλο «Διαχειριστής οργανισμού», δεν αλλάζει ρόλο, δεν απενεργοποιείται και δεν εμφανίζει ενέργειες πρόσκλησης ή προσωρινού κωδικού.",
+      "Ο βασικός διαχειριστής έχει μόνιμα ρόλο «Διαχειριστής οργανισμού» και δεν απενεργοποιείται, αλλά μπορείς να επεξεργαστείς τα στοιχεία του και να ξαναστείλεις πρόσκληση ενεργοποίησης.",
     active: "Ενεργός",
     inactive: "Ανενεργός",
     role: "Ρόλος",
@@ -942,6 +942,14 @@ export default function OrganizationUsersPage() {
                     className="inline-flex rounded-xl border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {texts.editDetails}
+                  </button>
+
+                  <button
+                    onClick={() => handleSendInvite(primaryOrgAdmin)}
+                    disabled={updatingUserId === primaryOrgAdmin.userId}
+                    className="inline-flex rounded-xl border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {texts.invite}
                   </button>
                 </div>
               </div>

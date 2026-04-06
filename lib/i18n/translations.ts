@@ -1439,6 +1439,10 @@ export function getTaskDetailsPageTexts(language: AppLanguage) {
         sectionTitle: "Assignment",
         sectionHelp:
           "Here you can see which partner has this task, when it was assigned, when it was accepted and the notes for this specific task.",
+        currentPartnerHelp:
+          "Ο συνεργάτης που είναι αυτή τη στιγμή συνδεδεμένος με την εργασία.",
+        currentAssignmentStatusHelp:
+          "Η τρέχουσα κατάσταση της πιο πρόσφατης ενεργής ανάθεσης.",
         noAssignmentYet: "There is no active assignment yet.",
         noAssignmentHint: "Assign a partner to continue the task.",
         assignPartner: "Assign partner",
@@ -1467,6 +1471,12 @@ export function getTaskDetailsPageTexts(language: AppLanguage) {
           "Here you can see which lists apply to this task. Cleaning can be customized only for this task, while supplies come from the property's active supplies.",
         cleaningListTitle: "Cleaning list",
         suppliesListTitle: "Supplies list",
+        cleaningCardHelp:
+          "This section concerns only the cleaning list of this task.",
+        suppliesCardHelp:
+          "This section concerns only the supplies list of this task.",
+        statusBadgeHelp:
+          "Shows the current state of the list: active/inactive and whether it has been submitted.",
         sentAfterAcceptance: "Sent after acceptance",
         sentAfterAcceptanceHelp:
           "The list is considered sent when the task has been accepted and the section is active.",
@@ -1542,6 +1552,10 @@ export function getTaskDetailsPageTexts(language: AppLanguage) {
       answers: {
         sectionTitle: "Responses",
         sectionHelp: "Here you can see only what the partner has already submitted for this task.",
+        cleaningSubmissionHelp:
+          "Shows whether the partner has submitted the cleaning list for this task.",
+        suppliesSubmissionHelp:
+          "Shows whether the partner has submitted the supplies list for this task.",
         cleaningSubmittedTitle: "Submitted cleaning list",
         suppliesSubmittedTitle: "Submitted supplies list",
         noCleaningSubmission: "There is no submission yet for the cleaning list.",
@@ -1655,6 +1669,10 @@ export function getTaskDetailsPageTexts(language: AppLanguage) {
       sectionTitle: "Ανάθεση",
       sectionHelp:
         "Εδώ βλέπετε τον συνεργάτη που έχει τη συγκεκριμένη εργασία, πότε έγινε η ανάθεση, πότε έγινε η αποδοχή και τις σημειώσεις της συγκεκριμένης εργασίας.",
+      currentPartnerHelp:
+        "Ο συνεργάτης που είναι αυτή τη στιγμή συνδεδεμένος με την εργασία.",
+      currentAssignmentStatusHelp:
+        "Η τρέχουσα κατάσταση της πιο πρόσφατης ενεργής ανάθεσης.",
       noAssignmentYet: "Δεν υπάρχει ακόμη ενεργή ανάθεση.",
       noAssignmentHint: "Αναθέστε συνεργάτη για να συνεχιστεί η εργασία.",
       assignPartner: "Ανάθεση συνεργάτη",
@@ -1683,6 +1701,12 @@ export function getTaskDetailsPageTexts(language: AppLanguage) {
         "Από εδώ βλέπετε ποιες λίστες ισχύουν για τη συγκεκριμένη εργασία. Η καθαριότητα μπορεί να προσαρμοστεί μόνο για αυτή την εργασία, ενώ τα αναλώσιμα προέρχονται από τα ενεργά αναλώσιμα του ακινήτου.",
       cleaningListTitle: "Λίστα καθαριότητας",
       suppliesListTitle: "Λίστα αναλωσίμων",
+      cleaningCardHelp:
+        "Αυτή η ενότητα αφορά μόνο τη λίστα καθαριότητας της συγκεκριμένης εργασίας.",
+      suppliesCardHelp:
+        "Αυτή η ενότητα αφορά μόνο τη λίστα αναλωσίμων της συγκεκριμένης εργασίας.",
+      statusBadgeHelp:
+        "Δείχνει την τρέχουσα κατάσταση της λίστας: αν είναι ενεργή και αν έχει υποβληθεί.",
       sentAfterAcceptance: "Αποστολή μετά την αποδοχή",
       sentAfterAcceptanceHelp:
         "Η λίστα θεωρείται αποσταλμένη όταν η εργασία έχει γίνει αποδεκτή και η ενότητα είναι ενεργή.",
@@ -1758,6 +1782,10 @@ export function getTaskDetailsPageTexts(language: AppLanguage) {
     answers: {
       sectionTitle: "Απαντήσεις",
       sectionHelp: "Εδώ βλέπετε μόνο ό,τι έχει ήδη υποβάλει ο συνεργάτης για τη συγκεκριμένη εργασία.",
+      cleaningSubmissionHelp:
+        "Δείχνει αν ο συνεργάτης έχει υποβάλει τη λίστα καθαριότητας για αυτή την εργασία.",
+      suppliesSubmissionHelp:
+        "Δείχνει αν ο συνεργάτης έχει υποβάλει τη λίστα αναλωσίμων για αυτή την εργασία.",
       cleaningSubmittedTitle: "Λίστα καθαριότητας που υποβλήθηκε",
       suppliesSubmittedTitle: "Λίστα αναλωσίμων που υποβλήθηκε",
       noCleaningSubmission: "Δεν υπάρχει ακόμη υποβολή για τη λίστα καθαριότητας.",
@@ -1811,6 +1839,7 @@ export function getTaskDetailsPageTexts(language: AppLanguage) {
     },
   }
 }
+
 export function getPropertyChecklistManagementTexts(language: AppLanguage) {
   if (language === "en") {
     return {

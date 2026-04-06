@@ -4,6 +4,7 @@ import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useAppLanguage } from "@/components/i18n/LanguageProvider"
+import { isTaskAlertActive } from "@/components/tasks/task-ui"
 import {
   getAssignmentStatusLabel,
   getChecklistStatusLabel,
@@ -50,6 +51,8 @@ type TaskRow = {
   scheduledDate?: string | null
   scheduledStartTime?: string | null
   scheduledEndTime?: string | null
+  alertEnabled?: boolean | null
+  alertAt?: string | null
   property?: {
     id: string
     code: string
@@ -1187,11 +1190,16 @@ export default function TasksPage() {
               const showSupplies = Boolean(task.sendSuppliesChecklist || suppliesRun)
 
               const taskState = getTaskRowStateBlock(task, language)
+              const alertActive = isTaskAlertActive(task)
 
               return (
                 <article
                   key={task.id}
-                  className="rounded-3xl border border-slate-200 bg-white p-4"
+                  className={`rounded-3xl border p-4 ${
+                    alertActive
+                      ? "border-red-200 bg-red-50/70"
+                      : "border-slate-200 bg-white"
+                  }`}
                 >
                   <div className="space-y-4">
                     <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
@@ -1212,6 +1220,12 @@ export default function TasksPage() {
                           <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200">
                             {taskType}
                           </span>
+
+                          {alertActive ? (
+                            <span className="rounded-full border border-red-200 bg-red-100 px-2.5 py-1 text-xs font-semibold text-red-700">
+                              {texts.tasksWithAlerts}
+                            </span>
+                          ) : null}
                         </div>
 
                         <div className="mt-2 text-sm text-slate-500">
@@ -1223,7 +1237,11 @@ export default function TasksPage() {
                       <div className="flex flex-wrap gap-2">
                         <Link
                           href={`/tasks/${task.id}`}
-                          className="inline-flex items-center justify-center rounded-2xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                          className={`inline-flex items-center justify-center rounded-2xl border px-4 py-2.5 text-sm font-medium ${
+                            alertActive
+                              ? "border-red-200 bg-white text-red-700 hover:bg-red-50"
+                              : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                          }`}
                         >
                           {texts.viewTask}
                         </Link>

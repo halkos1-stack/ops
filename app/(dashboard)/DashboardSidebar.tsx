@@ -24,28 +24,24 @@ export default function DashboardSidebar() {
   const items: NavItem[] =
     language === "en"
       ? [
-          { label: "Dashboard", href: "/dashboard" },
           { label: "AI assistant", href: "/ai-assistant" },
-          { label: "Properties", href: "/properties" },
+          { label: "Task control board", href: "/dashboard" },
           { label: "Bookings", href: "/bookings" },
+          { label: "Properties", href: "/properties" },
           { label: "Tasks", href: "/tasks" },
-          { label: "Partners", href: "/partners" },
-          { label: "Organization users", href: "/users" },
           { label: "Calendar", href: "/calendar" },
-          { label: "Checklists", href: "/checklists" },
+          { label: "Partners", href: "/partners" },
           { label: "My account", href: "/account" },
           { label: "Settings", href: "/settings" },
         ]
       : [
-          { label: "Πίνακας ελέγχου", href: "/dashboard" },
           { label: "AI βοηθός", href: "/ai-assistant" },
-          { label: "Ακίνητα", href: "/properties" },
+          { label: "Πίνακας ελέγχου εργασιών", href: "/dashboard" },
           { label: "Κρατήσεις", href: "/bookings" },
+          { label: "Ακίνητα", href: "/properties" },
           { label: "Εργασίες", href: "/tasks" },
-          { label: "Συνεργάτες", href: "/partners" },
-          { label: "Χρήστες οργανισμού", href: "/users" },
           { label: "Ημερολόγιο", href: "/calendar" },
-          { label: "Λίστες ελέγχου", href: "/checklists" },
+          { label: "Συνεργάτες", href: "/partners" },
           { label: "Ο λογαριασμός μου", href: "/account" },
           { label: "Ρυθμίσεις", href: "/settings" },
         ]

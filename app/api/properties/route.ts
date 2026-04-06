@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { requireApiAppAccess } from "@/lib/route-access"
+import { refreshPropertyReadinessSnapshot } from "@/lib/properties/readiness-snapshot"
 
 function toNullableString(value: unknown) {
   if (value === undefined || value === null) return null
@@ -132,6 +133,8 @@ async function getFullPropertyList(where: Record<string, unknown>) {
           scheduledDate: true,
           alertEnabled: true,
           alertAt: true,
+          sendCleaningChecklist: true,
+          sendSuppliesChecklist: true,
 
           assignments: {
             orderBy: {
@@ -155,6 +158,15 @@ async function getFullPropertyList(where: Record<string, unknown>) {
               completedAt: true,
             },
           },
+
+          supplyRun: {
+            select: {
+              id: true,
+              status: true,
+              startedAt: true,
+              completedAt: true,
+            },
+          },
         },
         orderBy: {
           scheduledDate: "desc",
@@ -167,11 +179,48 @@ async function getFullPropertyList(where: Record<string, unknown>) {
           id: true,
           status: true,
           severity: true,
+          issueType: true,
+          requiresImmediateAction: true,
         },
         orderBy: {
           createdAt: "desc",
         },
         take: 20,
+      },
+
+      propertySupplies: {
+        select: {
+          id: true,
+          isActive: true,
+          fillLevel: true,
+          currentStock: true,
+          targetStock: true,
+          reorderThreshold: true,
+          targetLevel: true,
+          minimumThreshold: true,
+          trackingMode: true,
+          isCritical: true,
+          warningThreshold: true,
+          lastUpdatedAt: true,
+          updatedAt: true,
+          supplyItem: {
+            select: {
+              id: true,
+              code: true,
+              name: true,
+              nameEl: true,
+              nameEn: true,
+              category: true,
+              unit: true,
+              minimumStock: true,
+              isActive: true,
+            },
+          },
+        },
+        orderBy: {
+          updatedAt: "desc",
+        },
+        take: 50,
       },
     },
   })
@@ -192,6 +241,7 @@ export async function GET(req: NextRequest) {
     const status = searchParams.get("status")
     const city = searchParams.get("city")
     const type = searchParams.get("type")
+    const readinessStatus = searchParams.get("readinessStatus")
     const search = searchParams.get("search")
 
     let organizationId: string | null = null
@@ -211,6 +261,9 @@ export async function GET(req: NextRequest) {
       ...(status && status !== "all" ? { status } : {}),
       ...(city && city !== "all" ? { city } : {}),
       ...(type && type !== "all" ? { type } : {}),
+      ...(readinessStatus && readinessStatus !== "all"
+        ? { readinessStatus }
+        : {}),
     }
 
     if (search && search.trim()) {
@@ -371,6 +424,18 @@ export async function POST(req: NextRequest) {
       },
     })
 
+    try {
+      await refreshPropertyReadinessSnapshot({
+        propertyId: created.id,
+        organizationId,
+      })
+    } catch (readinessError) {
+      console.error(
+        "Properties POST readiness snapshot refresh error:",
+        readinessError
+      )
+    }
+
     const property = await prisma.property.findUnique({
       where: {
         id: created.id,
@@ -411,6 +476,8 @@ export async function POST(req: NextRequest) {
             scheduledDate: true,
             alertEnabled: true,
             alertAt: true,
+            sendCleaningChecklist: true,
+            sendSuppliesChecklist: true,
 
             assignments: {
               orderBy: {
@@ -434,6 +501,15 @@ export async function POST(req: NextRequest) {
                 completedAt: true,
               },
             },
+
+            supplyRun: {
+              select: {
+                id: true,
+                status: true,
+                startedAt: true,
+                completedAt: true,
+              },
+            },
           },
           orderBy: {
             scheduledDate: "desc",
@@ -446,11 +522,62 @@ export async function POST(req: NextRequest) {
             id: true,
             status: true,
             severity: true,
+            issueType: true,
+            requiresImmediateAction: true,
           },
           orderBy: {
             createdAt: "desc",
           },
           take: 20,
+        },
+
+        propertySupplies: {
+          select: {
+            id: true,
+            isActive: true,
+            fillLevel: true,
+            currentStock: true,
+            targetStock: true,
+            reorderThreshold: true,
+            targetLevel: true,
+            minimumThreshold: true,
+            trackingMode: true,
+            isCritical: true,
+            warningThreshold: true,
+            lastUpdatedAt: true,
+            updatedAt: true,
+            supplyItem: {
+              select: {
+                id: true,
+                code: true,
+                name: true,
+                nameEl: true,
+                nameEn: true,
+                category: true,
+                unit: true,
+                minimumStock: true,
+                isActive: true,
+              },
+            },
+          },
+          orderBy: {
+            updatedAt: "desc",
+          },
+          take: 50,
+        },
+
+        issueTemplates: {
+          include: {
+            items: {
+              orderBy: {
+                sortOrder: "asc",
+              },
+            },
+          },
+          orderBy: {
+            updatedAt: "desc",
+          },
+          take: 10,
         },
       },
     })

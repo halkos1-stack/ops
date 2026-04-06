@@ -1,8 +1,11 @@
 "use client"
 
 import Link from "next/link"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useMemo, useState } from "react"
 import { useAppLanguage } from "@/components/i18n/LanguageProvider"
+import { TaskAlertPanel } from "@/components/tasks/TaskAlertPanel"
+import { TaskChecklistPanel } from "@/components/tasks/TaskChecklistPanel"
 import { getBookingsModuleTexts } from "@/lib/i18n/translations"
 import {
   getPriorityLabel,
@@ -79,7 +82,7 @@ type WorkWindowRow = {
   hasTask: boolean
 }
 
-type ModeKey = "active" | "history"
+type ModeKey = "active" | "with_task" | "without_task"
 type CalendarViewMode = "month" | "day"
 
 type TaskCreateModalState = {
@@ -96,10 +99,11 @@ type PartnerOption = {
   specialty?: string | null
 }
 
-function isValidDate(value?: string | null) {
-  if (!value) return false
-  const date = new Date(value)
-  return !Number.isNaN(date.getTime())
+function normalizeModeQuery(value: string | null): ModeKey {
+  if (value === "with_task") return "with_task"
+  if (value === "without_task") return "without_task"
+  if (value === "history") return "with_task"
+  return "active"
 }
 
 function isValidTimeString(value?: string | null) {
@@ -116,13 +120,6 @@ function combineDateTime(dateValue: string, timeValue?: string | null) {
   const datePart = new Date(dateValue).toISOString().slice(0, 10)
   const timePart = formatTime(timeValue) || "00:00"
   return new Date(`${datePart}T${timePart}:00`)
-}
-
-function formatDate(value: string | Date | null | undefined, locale: string) {
-  if (!value) return "-"
-  const date = value instanceof Date ? value : new Date(value)
-  if (Number.isNaN(date.getTime())) return "-"
-  return date.toLocaleDateString(locale)
 }
 
 function formatDateTime(
@@ -143,6 +140,27 @@ function formatDateTime(
   })
 }
 
+function isOpenTaskStatus(status: string | null | undefined) {
+  return [
+    "new",
+    "pending",
+    "assigned",
+    "waiting_acceptance",
+    "accepted",
+    "in_progress",
+  ].includes(String(status || "").trim().toLowerCase())
+}
+
+function isTaskAlertActive(task: BookingTask | null | undefined) {
+  if (!task?.alertEnabled || !task.alertAt) return false
+  if (!isOpenTaskStatus(task.status)) return false
+
+  const alertDate = new Date(task.alertAt)
+  if (Number.isNaN(alertDate.getTime())) return false
+
+  return alertDate.getTime() <= Date.now()
+}
+
 function toDateInputValue(value?: string | Date | null) {
   if (!value) return ""
   const date = value instanceof Date ? value : new Date(value)
@@ -152,6 +170,7 @@ function toDateInputValue(value?: string | Date | null) {
 
 function toTimeInputValue(value?: string | Date | null) {
   if (!value) return ""
+
   if (typeof value === "string") {
     return formatTime(value)
   }
@@ -220,6 +239,33 @@ function getWeekdayLabels(language: "el" | "en") {
   return language === "en"
     ? ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     : ["Δευ", "Τρι", "Τετ", "Πεμ", "Παρ", "Σαβ", "Κυρ"]
+}
+
+function normalizeDateOnlyValue(value?: string | Date | null) {
+  if (!value) return null
+
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return null
+    return value.toISOString().slice(0, 10)
+  }
+
+  const text = String(value).slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return null
+  return text
+}
+
+function isDateInRange(
+  targetDate?: string | Date | null,
+  fromDate?: string,
+  toDate?: string
+) {
+  const normalizedTarget = normalizeDateOnlyValue(targetDate)
+  if (!normalizedTarget) return false
+
+  if (fromDate && normalizedTarget < fromDate) return false
+  if (toDate && normalizedTarget > toDate) return false
+
+  return true
 }
 
 function isCancelledBooking(status: string) {
@@ -386,26 +432,12 @@ function buildWorkWindows(
   })
 }
 
-function doesWindowOverlapDay(windowRow: WorkWindowRow, day: Date) {
-  const dayStart = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, 0, 0, 0)
-  const dayEnd = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 23, 59, 59, 999)
-
-  const start = windowRow.windowStartDateTime
-  const end = windowRow.windowEndDateTime
-
-  if (!end) {
-    return start <= dayEnd
-  }
-
-  return start <= dayEnd && end >= dayStart
-}
-
 function getWindowDurationLabel(
   durationMinutes: number | null | undefined,
   language: "el" | "en"
 ) {
   if (!durationMinutes || durationMinutes <= 0) {
-    return language === "en" ? "No duration" : "Χωρίς διάρκεια"
+    return language === "en" ? "Open window" : "Ανοικτό παράθυρο"
   }
 
   const totalHours = durationMinutes / 60
@@ -537,32 +569,65 @@ function getPriorityDisplay(
 function getLocalTexts(language: "el" | "en") {
   if (language === "en") {
     return {
-      title: "Booking work windows",
+      title: "Bookings calendar",
       description:
-        "The calendar shows the real available work period from check-out date/time until the next check-in date/time.",
-      active: "Active",
-      history: "History",
+        "The calendar shows clean operational work windows from check-out until the next check-in. Open-ended windows are shown only on their start day, so the month stays readable.",
       monthView: "Month view",
       dayView: "Day view",
       noSelection: "Select a window from the calendar.",
       noResults: "No windows found.",
       propertyCounters: "Window counters by property",
+      propertyCountersHelp:
+        "Counts the filtered work windows per property after search and date filters.",
       allProperties: "All properties",
       selectedWindow: "Selected window",
+      selectedWindowHelp:
+        "Shows the operational details of the currently selected work window without repeating the same information twice.",
       selectedDay: "Selected day",
       searchPlaceholder: "Search by property, guest, listing, booking...",
-      openCreateTask: "Create task",
+      searchHelp:
+        "Search by property, guest, listing or booking code.",
+      createTask: "Create task",
+      createTaskHelp:
+        "Create a new task for this work window.",
       viewBooking: "View booking",
+      viewBookingHelp:
+        "Open the details page of the booking that generated this window.",
+      viewProperty: "View property",
+      viewPropertyHelp:
+        "Open the mapped property of this booking.",
+      viewPropertyTasks: "View property tasks",
+      viewPropertyTasksHelp:
+        "Open the global tasks page filtered only for this property.",
       checkoutDateTime: "Check-out",
+      checkoutDateTimeHelp:
+        "The exact check-out date and time that starts this work window.",
       nextCheckinDateTime: "Next check-in",
-      timeRange: "Window period",
+      nextCheckinDateTimeHelp:
+        "The next check-in that closes this work window. If there is none, the window remains open.",
+      duration: "Duration",
+      durationHelp:
+        "The total available time between check-out and the next check-in.",
+      systemProperty: "Property in system",
+      systemPropertyHelp:
+        "The property currently linked to this booking inside the OPS system.",
+      rangeTitle: "Window period",
+      rangeTitleHelp:
+        "The exact operational range from the start of the window until its closing check-in.",
+      from: "From",
+      fromHelp:
+        "The start of the work window.",
+      to: "To",
+      toHelp:
+        "The end of the work window or an open state when no next check-in exists.",
       noNextCheckin: "No next check-in",
-      viewOnlySelected:
-        "The list below shows only the window selected from the calendar.",
-      historyHint:
-        "History shows windows where a task has already been created.",
+      openWindowShort: "Open window",
       activeHint:
-        "Active shows only windows where no task has been created yet.",
+        "All visible operational windows after the current filters.",
+      withTaskHint:
+        "Filtered windows that already have a linked task.",
+      withoutTaskHint:
+        "Filtered windows that still do not have a linked task.",
       assignNowTitle: "Immediate assignment",
       assignNowDescription:
         "Optionally assign the task directly to a partner during creation.",
@@ -570,43 +635,95 @@ function getLocalTexts(language: "el" | "en") {
       partnerLabel: "Partner",
       defaultPartnerHint: "Default property partner selected automatically.",
       noPartners: "No partners found.",
-      taskCreatedBadge: "Task created",
-      taskNotCreatedBadge: "No task yet",
-      duration: "Duration",
-      from: "From",
-      to: "To",
-      dayWindows: "Windows for selected day",
-      allWindows: "All windows",
+      withTaskBadge: "With task",
+      withoutTaskBadge: "No task yet",
+      needsMappingBadge: "Needs mapping",
+      backToBookings: "Back to bookings",
+      dateFrom: "From date",
+      dateTo: "To date",
+      dateRangeHelp:
+        "Filter windows by check-out date.",
+      propertyFilter: "Property",
+      propertyFilterHelp:
+        "Filter the calendar and the selected window by property.",
+      clearFilters: "Clear filters",
+      clearFiltersHelp:
+        "Reset search, property filter and date range.",
+      monthViewHelp:
+        "Month view shows each window only on its check-out day, so the calendar stays clean.",
+      dayViewHelp:
+        "Day view shows only the windows that start on the selected day.",
+      allWindowsCounter: "Active windows",
+      withTaskCounter: "Windows with task",
+      withoutTaskCounter: "Windows without task",
+      listTaskTitle: "Linked task",
+      noPropertyMessage:
+        "This booking is not mapped to a property yet.",
+      viewSelectedOnly:
+        "The panel below shows only the selected window.",
     }
   }
 
   return {
-    title: "Ιστορικό παραθύρων κρατήσεων",
+    title: "Ημερολόγιο κρατήσεων",
     description:
-      "Το ημερολόγιο δείχνει το πραγματικό διαθέσιμο διάστημα εργασίας από την ημερομηνία/ώρα check-out μέχρι την επόμενη ημερομηνία/ώρα check-in.",
-    active: "Ενεργές",
-    history: "Ιστορικό",
+      "Το ημερολόγιο δείχνει καθαρά τα λειτουργικά παράθυρα εργασίας από το check-out μέχρι το επόμενο check-in. Τα ανοιχτά παράθυρα εμφανίζονται μόνο στην ημέρα εκκίνησης ώστε ο μήνας να μένει καθαρός.",
     monthView: "Προβολή μήνα",
     dayView: "Προβολή ημέρας",
     noSelection: "Επίλεξε ένα παράθυρο από το ημερολόγιο.",
     noResults: "Δεν βρέθηκαν παράθυρα.",
     propertyCounters: "Μετρητής παραθύρων ανά ακίνητο",
+    propertyCountersHelp:
+      "Μετρά τα φιλτραρισμένα παράθυρα εργασίας ανά ακίνητο μετά την αναζήτηση και τα φίλτρα ημερομηνίας.",
     allProperties: "Όλα τα ακίνητα",
     selectedWindow: "Επιλεγμένο παράθυρο",
+    selectedWindowHelp:
+      "Δείχνει τα λειτουργικά στοιχεία του παραθύρου που έχεις επιλέξει χωρίς διπλές πληροφορίες.",
     selectedDay: "Επιλεγμένη ημέρα",
     searchPlaceholder: "Αναζήτηση με ακίνητο, επισκέπτη, listing, κράτηση...",
-    openCreateTask: "Δημιουργία εργασίας",
+    searchHelp:
+      "Αναζήτηση με ακίνητο, επισκέπτη, listing ή κωδικό κράτησης.",
+    createTask: "Δημιουργία εργασίας",
+    createTaskHelp:
+      "Δημιουργεί νέα εργασία για αυτό το παράθυρο εργασίας.",
     viewBooking: "Προβολή κράτησης",
+    viewBookingHelp:
+      "Ανοίγει τη σελίδα λεπτομερειών της κράτησης που δημιούργησε αυτό το παράθυρο.",
+    viewProperty: "Προβολή ακινήτου",
+    viewPropertyHelp:
+      "Ανοίγει το αντιστοιχισμένο ακίνητο αυτής της κράτησης.",
+    viewPropertyTasks: "Προβολή εργασιών ακινήτου",
+    viewPropertyTasksHelp:
+      "Ανοίγει τη global σελίδα εργασιών φιλτραρισμένη μόνο για το συγκεκριμένο ακίνητο.",
     checkoutDateTime: "Check-out",
+    checkoutDateTimeHelp:
+      "Η ακριβής ημερομηνία και ώρα check-out που ξεκινά αυτό το παράθυρο εργασίας.",
     nextCheckinDateTime: "Επόμενο check-in",
-    timeRange: "Διάστημα παραθύρου",
+    nextCheckinDateTimeHelp:
+      "Το επόμενο check-in που κλείνει αυτό το παράθυρο εργασίας. Αν δεν υπάρχει, το παράθυρο παραμένει ανοιχτό.",
+    duration: "Διάρκεια",
+    durationHelp:
+      "Ο συνολικός διαθέσιμος χρόνος ανάμεσα στο check-out και το επόμενο check-in.",
+    systemProperty: "Ακίνητο στο σύστημα",
+    systemPropertyHelp:
+      "Το ακίνητο που είναι σήμερα συνδεδεμένο με αυτή την κράτηση μέσα στο OPS.",
+    rangeTitle: "Διάστημα παραθύρου",
+    rangeTitleHelp:
+      "Το ακριβές λειτουργικό διάστημα από την έναρξη του παραθύρου μέχρι το check-in που το κλείνει.",
+    from: "Από",
+    fromHelp:
+      "Η αρχή του παραθύρου εργασίας.",
+    to: "Έως",
+    toHelp:
+      "Το τέλος του παραθύρου ή κατάσταση ανοιχτού παραθύρου όταν δεν υπάρχει επόμενο check-in.",
     noNextCheckin: "Δεν υπάρχει επόμενο check-in",
-    viewOnlySelected:
-      "Η λίστα κάτω δείχνει μόνο το παράθυρο που επιλέγεται από το ημερολόγιο.",
-    historyHint:
-      "Το Ιστορικό δείχνει παράθυρα για τα οποία έχει ήδη δημιουργηθεί εργασία.",
+    openWindowShort: "Ανοιχτό παράθυρο",
     activeHint:
-      "Οι Ενεργές δείχνουν μόνο παράθυρα για τα οποία δεν έχει δημιουργηθεί ακόμα εργασία.",
+      "Όλα τα ορατά λειτουργικά παράθυρα μετά τα τρέχοντα φίλτρα.",
+    withTaskHint:
+      "Τα φιλτραρισμένα παράθυρα που έχουν ήδη συνδεδεμένη εργασία.",
+    withoutTaskHint:
+      "Τα φιλτραρισμένα παράθυρα που δεν έχουν ακόμη συνδεδεμένη εργασία.",
     assignNowTitle: "Άμεση ανάθεση",
     assignNowDescription:
       "Προαιρετικά μπορείς να αναθέσεις απευθείας την εργασία σε συνεργάτη κατά τη δημιουργία.",
@@ -615,13 +732,32 @@ function getLocalTexts(language: "el" | "en") {
     defaultPartnerHint:
       "Ο προεπιλεγμένος συνεργάτης του ακινήτου επιλέχθηκε αυτόματα.",
     noPartners: "Δεν βρέθηκαν συνεργάτες.",
-    taskCreatedBadge: "Η εργασία δημιουργήθηκε",
-    taskNotCreatedBadge: "Χωρίς εργασία",
-    duration: "Διάρκεια",
-    from: "Από",
-    to: "Έως",
-    dayWindows: "Παράθυρα επιλεγμένης ημέρας",
-    allWindows: "Όλα τα παράθυρα",
+    withTaskBadge: "Με εργασία",
+    withoutTaskBadge: "Χωρίς εργασία",
+    needsMappingBadge: "Χρειάζεται αντιστοίχιση",
+    backToBookings: "Επιστροφή στις κρατήσεις",
+    dateFrom: "Από ημερομηνία",
+    dateTo: "Έως ημερομηνία",
+    dateRangeHelp:
+      "Φιλτράρει τα παράθυρα με βάση την ημερομηνία check-out.",
+    propertyFilter: "Ακίνητο",
+    propertyFilterHelp:
+      "Φιλτράρει ημερολόγιο και επιλεγμένο παράθυρο ανά ακίνητο.",
+    clearFilters: "Καθαρισμός φίλτρων",
+    clearFiltersHelp:
+      "Καθαρίζει αναζήτηση, φίλτρο ακινήτου και εύρος ημερομηνιών.",
+    monthViewHelp:
+      "Η προβολή μήνα δείχνει κάθε παράθυρο μόνο στην ημέρα του check-out ώστε το ημερολόγιο να μένει καθαρό.",
+    dayViewHelp:
+      "Η προβολή ημέρας δείχνει μόνο τα παράθυρα που ξεκινούν την επιλεγμένη ημέρα.",
+    allWindowsCounter: "Ενεργά παράθυρα",
+    withTaskCounter: "Παράθυρα με εργασία",
+    withoutTaskCounter: "Παράθυρα χωρίς εργασία",
+    listTaskTitle: "Συνδεδεμένη εργασία",
+    noPropertyMessage:
+      "Η κράτηση δεν έχει αντιστοιχιστεί ακόμη με ακίνητο.",
+    viewSelectedOnly:
+      "Το κάτω πεδίο δείχνει μόνο το παράθυρο που επιλέγεται από το ημερολόγιο.",
   }
 }
 
@@ -631,17 +767,30 @@ export default function BookingsHistoryPage() {
   const ui = getLocalTexts(language)
   const locale = language === "en" ? "en-GB" : "el-GR"
 
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const currentQuery = searchParams.toString()
+
   const [bookings, setBookings] = useState<BookingRow[]>([])
   const [partners, setPartners] = useState<PartnerOption[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
-  const [search, setSearch] = useState("")
+  const [search, setSearch] = useState(searchParams.get("search") || "")
   const [monthCursor, setMonthCursor] = useState(() => new Date())
   const [selectedDay, setSelectedDay] = useState<Date | null>(new Date())
-  const [mode, setMode] = useState<ModeKey>("active")
-  const [calendarViewMode, setCalendarViewMode] = useState<CalendarViewMode>("month")
-  const [selectedPropertyFilterKey, setSelectedPropertyFilterKey] = useState("all")
+  const [mode, setMode] = useState<ModeKey>(
+    normalizeModeQuery(searchParams.get("mode"))
+  )
+  const [calendarViewMode, setCalendarViewMode] = useState<CalendarViewMode>(
+    (searchParams.get("view") as CalendarViewMode) || "month"
+  )
+  const [selectedPropertyFilterKey, setSelectedPropertyFilterKey] = useState(
+    searchParams.get("propertyId") || "all"
+  )
   const [selectedWindowId, setSelectedWindowId] = useState<string | null>(null)
+  const [dateFrom, setDateFrom] = useState(searchParams.get("dateFrom") || "")
+  const [dateTo, setDateTo] = useState(searchParams.get("dateTo") || "")
 
   const [modal, setModal] = useState<TaskCreateModalState>({
     open: false,
@@ -665,6 +814,48 @@ export default function BookingsHistoryPage() {
 
   const [assignImmediately, setAssignImmediately] = useState(false)
   const [assignPartnerId, setAssignPartnerId] = useState("")
+
+  useEffect(() => {
+    setSearch(searchParams.get("search") || "")
+    setMode(normalizeModeQuery(searchParams.get("mode")))
+    setCalendarViewMode(
+      (searchParams.get("view") as CalendarViewMode) || "month"
+    )
+    setSelectedPropertyFilterKey(searchParams.get("propertyId") || "all")
+    setDateFrom(searchParams.get("dateFrom") || "")
+    setDateTo(searchParams.get("dateTo") || "")
+  }, [currentQuery, searchParams])
+
+  useEffect(() => {
+    const params = new URLSearchParams()
+
+    if (search.trim()) params.set("search", search.trim())
+    if (mode !== "active") params.set("mode", mode)
+    if (calendarViewMode !== "month") params.set("view", calendarViewMode)
+    if (selectedPropertyFilterKey !== "all") {
+      params.set("propertyId", selectedPropertyFilterKey)
+    }
+    if (dateFrom) params.set("dateFrom", dateFrom)
+    if (dateTo) params.set("dateTo", dateTo)
+
+    const nextQuery = params.toString()
+
+    if (nextQuery !== currentQuery) {
+      router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, {
+        scroll: false,
+      })
+    }
+  }, [
+    search,
+    mode,
+    calendarViewMode,
+    selectedPropertyFilterKey,
+    dateFrom,
+    dateTo,
+    pathname,
+    router,
+    currentQuery,
+  ])
 
   async function loadBookings() {
     setLoading(true)
@@ -716,20 +907,26 @@ export default function BookingsHistoryPage() {
     [bookings, texts.list.propertyNotMapped]
   )
 
-  const modeWindows = useMemo(() => {
-    return allWindows.filter((windowRow) => {
-      if (isCancelledBooking(windowRow.booking.status)) return false
-      return mode === "active" ? !windowRow.hasTask : windowRow.hasTask
-    })
-  }, [allWindows, mode])
+  const nonCancelledWindows = useMemo(() => {
+    return allWindows.filter((windowRow) => !isCancelledBooking(windowRow.booking.status))
+  }, [allWindows])
 
   const searchedWindows = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase()
 
-    return modeWindows.filter((windowRow) => {
+    return nonCancelledWindows.filter((windowRow) => {
+      const booking = windowRow.booking
+
+      const matchesDate = isDateInRange(
+        booking.checkOutDate,
+        dateFrom || undefined,
+        dateTo || undefined
+      )
+
+      if (!matchesDate) return false
+
       if (!normalizedSearch) return true
 
-      const booking = windowRow.booking
       const haystack = [
         booking.externalBookingId,
         booking.externalListingId,
@@ -748,7 +945,7 @@ export default function BookingsHistoryPage() {
 
       return haystack.includes(normalizedSearch)
     })
-  }, [modeWindows, search])
+  }, [nonCancelledWindows, search, dateFrom, dateTo])
 
   const propertyCounters = useMemo(() => {
     const map = new Map<
@@ -786,15 +983,35 @@ export default function BookingsHistoryPage() {
     )
   }, [searchedWindows, selectedPropertyFilterKey])
 
-  const calendarFilteredWindows = useMemo(() => {
-    if (calendarViewMode === "day" && selectedDay) {
-      return propertyFilteredWindows.filter((windowRow) =>
-        doesWindowOverlapDay(windowRow, selectedDay)
-      )
+  const modeCounts = useMemo(() => {
+    return {
+      active: propertyFilteredWindows.length,
+      with_task: propertyFilteredWindows.filter((row) => row.hasTask).length,
+      without_task: propertyFilteredWindows.filter((row) => !row.hasTask).length,
+    }
+  }, [propertyFilteredWindows])
+
+  const modeFilteredWindows = useMemo(() => {
+    if (mode === "with_task") {
+      return propertyFilteredWindows.filter((row) => row.hasTask)
+    }
+
+    if (mode === "without_task") {
+      return propertyFilteredWindows.filter((row) => !row.hasTask)
     }
 
     return propertyFilteredWindows
-  }, [propertyFilteredWindows, calendarViewMode, selectedDay])
+  }, [propertyFilteredWindows, mode])
+
+  const calendarFilteredWindows = useMemo(() => {
+    if (calendarViewMode === "day" && selectedDay) {
+      return modeFilteredWindows.filter((windowRow) =>
+        sameDate(windowRow.windowStartDateTime, selectedDay)
+      )
+    }
+
+    return modeFilteredWindows
+  }, [modeFilteredWindows, calendarViewMode, selectedDay])
 
   useEffect(() => {
     if (calendarFilteredWindows.length === 0) {
@@ -805,6 +1022,7 @@ export default function BookingsHistoryPage() {
     const exists = calendarFilteredWindows.some((row) => row.id === selectedWindowId)
     if (!exists) {
       setSelectedWindowId(calendarFilteredWindows[0].id)
+      setSelectedDay(calendarFilteredWindows[0].windowStartDateTime)
     }
   }, [calendarFilteredWindows, selectedWindowId])
 
@@ -819,27 +1037,10 @@ export default function BookingsHistoryPage() {
   const monthWindowsMap = useMemo(() => {
     const map = new Map<string, WorkWindowRow[]>()
 
-    for (const windowRow of propertyFilteredWindows) {
-      const cursor = new Date(
-        monthCursor.getFullYear(),
-        monthCursor.getMonth(),
-        1
-      )
-      const monthEnd = new Date(
-        monthCursor.getFullYear(),
-        monthCursor.getMonth() + 1,
-        0
-      )
-
-      while (cursor <= monthEnd) {
-        if (doesWindowOverlapDay(windowRow, cursor)) {
-          const key = cursor.toISOString().slice(0, 10)
-          if (!map.has(key)) map.set(key, [])
-          map.get(key)!.push(windowRow)
-        }
-
-        cursor.setDate(cursor.getDate() + 1)
-      }
+    for (const windowRow of modeFilteredWindows) {
+      const key = windowRow.windowStartDateTime.toISOString().slice(0, 10)
+      if (!map.has(key)) map.set(key, [])
+      map.get(key)!.push(windowRow)
     }
 
     for (const entry of map.values()) {
@@ -849,14 +1050,14 @@ export default function BookingsHistoryPage() {
     }
 
     return map
-  }, [propertyFilteredWindows, monthCursor])
+  }, [modeFilteredWindows])
 
   const selectedDayWindows = useMemo(() => {
     if (!selectedDay) return []
-    return propertyFilteredWindows.filter((windowRow) =>
-      doesWindowOverlapDay(windowRow, selectedDay)
+    return modeFilteredWindows.filter((windowRow) =>
+      sameDate(windowRow.windowStartDateTime, selectedDay)
     )
-  }, [propertyFilteredWindows, selectedDay])
+  }, [modeFilteredWindows, selectedDay])
 
   function openCreateTaskModal(windowRow: WorkWindowRow) {
     const booking = windowRow.booking
@@ -939,7 +1140,7 @@ export default function BookingsHistoryPage() {
 
       closeCreateTaskModal()
       await loadBookings()
-      setMode("history")
+      setMode("with_task")
       alert(texts.list.taskCreatedSuccess)
     } catch (err) {
       alert(err instanceof Error ? err.message : texts.list.createTaskError)
@@ -958,7 +1159,7 @@ export default function BookingsHistoryPage() {
             href="/bookings"
             className="mb-4 inline-flex items-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-slate-950"
           >
-            {texts.common.backToBookings}
+            {ui.backToBookings}
           </Link>
 
           <h1 className="text-2xl font-semibold tracking-tight text-slate-950">
@@ -972,36 +1173,67 @@ export default function BookingsHistoryPage() {
 
       <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
         <div className="flex flex-col gap-4 border-b border-slate-200 p-5">
+          <div className="grid gap-4 lg:grid-cols-3">
+            <button
+              type="button"
+              title={ui.activeHint}
+              onClick={() => setMode("active")}
+              className={
+                mode === "active"
+                  ? "rounded-3xl border border-slate-950 bg-slate-950 p-5 text-left text-white shadow-sm"
+                  : "rounded-3xl border border-slate-200 bg-white p-5 text-left text-slate-900 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
+              }
+            >
+              <div className="text-sm font-medium opacity-80">
+                {ui.allWindowsCounter}
+              </div>
+              <div className="mt-3 text-3xl font-semibold tracking-tight">
+                {modeCounts.active}
+              </div>
+            </button>
+
+            <button
+              type="button"
+              title={ui.withTaskHint}
+              onClick={() => setMode("with_task")}
+              className={
+                mode === "with_task"
+                  ? "rounded-3xl border border-slate-950 bg-slate-950 p-5 text-left text-white shadow-sm"
+                  : "rounded-3xl border border-slate-200 bg-white p-5 text-left text-slate-900 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
+              }
+            >
+              <div className="text-sm font-medium opacity-80">
+                {ui.withTaskCounter}
+              </div>
+              <div className="mt-3 text-3xl font-semibold tracking-tight">
+                {modeCounts.with_task}
+              </div>
+            </button>
+
+            <button
+              type="button"
+              title={ui.withoutTaskHint}
+              onClick={() => setMode("without_task")}
+              className={
+                mode === "without_task"
+                  ? "rounded-3xl border border-slate-950 bg-slate-950 p-5 text-left text-white shadow-sm"
+                  : "rounded-3xl border border-slate-200 bg-white p-5 text-left text-slate-900 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
+              }
+            >
+              <div className="text-sm font-medium opacity-80">
+                {ui.withoutTaskCounter}
+              </div>
+              <div className="mt-3 text-3xl font-semibold tracking-tight">
+                {modeCounts.without_task}
+              </div>
+            </button>
+          </div>
+
           <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={() => setMode("active")}
-                className={
-                  mode === "active"
-                    ? "rounded-2xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm"
-                    : "rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-                }
-              >
-                {ui.active}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setMode("history")}
-                className={
-                  mode === "history"
-                    ? "rounded-2xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm"
-                    : "rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-                }
-              >
-                {ui.history}
-              </button>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
+                title={ui.monthViewHelp}
                 onClick={() => setCalendarViewMode("month")}
                 className={
                   calendarViewMode === "month"
@@ -1014,6 +1246,7 @@ export default function BookingsHistoryPage() {
 
               <button
                 type="button"
+                title={ui.dayViewHelp}
                 onClick={() => setCalendarViewMode("day")}
                 className={
                   calendarViewMode === "day"
@@ -1024,9 +1257,7 @@ export default function BookingsHistoryPage() {
                 {ui.dayView}
               </button>
             </div>
-          </div>
 
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -1056,8 +1287,16 @@ export default function BookingsHistoryPage() {
                 →
               </button>
             </div>
+          </div>
 
-            <div className="w-full xl:w-[360px]">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            <div className="xl:col-span-2">
+              <label
+                className="mb-1 block text-sm font-medium text-slate-700"
+                title={ui.searchHelp}
+              >
+                {language === "en" ? "Search" : "Αναζήτηση"}
+              </label>
               <input
                 className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400"
                 placeholder={ui.searchPlaceholder}
@@ -1065,24 +1304,98 @@ export default function BookingsHistoryPage() {
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
+
+            <div>
+              <label
+                className="mb-1 block text-sm font-medium text-slate-700"
+                title={ui.propertyFilterHelp}
+              >
+                {ui.propertyFilter}
+              </label>
+              <select
+                value={selectedPropertyFilterKey}
+                onChange={(e) => setSelectedPropertyFilterKey(e.target.value)}
+                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-slate-400"
+              >
+                <option value="all">{ui.allProperties}</option>
+                {propertyCounters.map((item) => (
+                  <option key={item.key} value={item.key}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label
+                className="mb-1 block text-sm font-medium text-slate-700"
+                title={ui.dateRangeHelp}
+              >
+                {ui.dateFrom}
+              </label>
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-slate-400"
+              />
+            </div>
+
+            <div>
+              <label
+                className="mb-1 block text-sm font-medium text-slate-700"
+                title={ui.dateRangeHelp}
+              >
+                {ui.dateTo}
+              </label>
+              <input
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-slate-400"
+              />
+            </div>
           </div>
 
           <div className="flex flex-col gap-3 rounded-3xl border border-slate-200 bg-slate-50 p-4">
             <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
               <div>
-                <div className="text-sm font-semibold text-slate-950">
+                <div
+                  className="text-sm font-semibold text-slate-950"
+                  title={ui.propertyCountersHelp}
+                >
                   {ui.propertyCounters}
                 </div>
                 <div className="mt-1 text-xs text-slate-600">
-                  {mode === "active" ? ui.activeHint : ui.historyHint}
+                  {mode === "active"
+                    ? ui.activeHint
+                    : mode === "with_task"
+                      ? ui.withTaskHint
+                      : ui.withoutTaskHint}
                 </div>
               </div>
 
-              {selectedDay ? (
-                <div className="text-xs font-medium text-slate-500">
-                  {ui.selectedDay}: {selectedDay.toLocaleDateString(locale)}
-                </div>
-              ) : null}
+              <div className="flex items-center gap-3">
+                {selectedDay ? (
+                  <div className="text-xs font-medium text-slate-500">
+                    {ui.selectedDay}: {selectedDay.toLocaleDateString(locale)}
+                  </div>
+                ) : null}
+
+                <button
+                  type="button"
+                  title={ui.clearFiltersHelp}
+                  onClick={() => {
+                    setSearch("")
+                    setSelectedPropertyFilterKey("all")
+                    setDateFrom("")
+                    setDateTo("")
+                  }}
+                  className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  {ui.clearFilters}
+                </button>
+              </div>
             </div>
 
             <div className="flex flex-wrap gap-2">
@@ -1158,6 +1471,15 @@ export default function BookingsHistoryPage() {
                     <div className="mt-3 space-y-2">
                       {dayWindows.slice(0, 2).map((windowRow) => {
                         const isWindowSelected = selectedWindowId === windowRow.id
+                        const firstTask = windowRow.booking.tasks[0] || null
+                        const hasActiveAlert = isTaskAlertActive(firstTask)
+                        const tone = windowRow.booking.needsMapping
+                          ? "border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100"
+                          : hasActiveAlert
+                            ? "border-red-200 bg-red-50 text-red-800 hover:bg-red-100"
+                          : windowRow.hasTask
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
+                            : "border-sky-200 bg-sky-50 text-sky-800 hover:bg-sky-100"
 
                         return (
                           <button
@@ -1170,9 +1492,7 @@ export default function BookingsHistoryPage() {
                             className={
                               isWindowSelected
                                 ? "w-full rounded-xl border border-slate-900 bg-slate-900 px-2 py-2 text-left text-[11px] font-medium text-white transition"
-                                : mode === "active"
-                                  ? "w-full rounded-xl border border-sky-200 bg-sky-50 px-2 py-2 text-left text-[11px] font-medium text-sky-800 transition hover:bg-sky-100"
-                                  : "w-full rounded-xl border border-emerald-200 bg-emerald-50 px-2 py-2 text-left text-[11px] font-medium text-emerald-800 transition hover:bg-emerald-100"
+                                : `w-full rounded-xl border px-2 py-2 text-left text-[11px] font-medium transition ${tone}`
                             }
                             title={getWindowCalendarLabel(windowRow, locale, language)}
                           >
@@ -1183,20 +1503,33 @@ export default function BookingsHistoryPage() {
                                 windowRow.booking.externalListingId ||
                                 texts.list.propertyNotMapped}
                             </div>
+                            {hasActiveAlert ? (
+                              <div className="mt-1 truncate text-[10px] font-semibold">
+                                {language === "en" ? "Active alert" : "Ενεργο alert"}
+                              </div>
+                            ) : null}
                             <div className="mt-1 truncate">
                               {windowRow.windowStartDateTime.toLocaleTimeString(locale, {
                                 hour: "2-digit",
                                 minute: "2-digit",
-                              })}{" "}
-                              →{" "}
-                              {windowRow.windowEndDateTime
-                                ? windowRow.windowEndDateTime.toLocaleString(locale, {
+                              })}
+                              {windowRow.windowEndDateTime ? (
+                                <>
+                                  {" "}
+                                  →{" "}
+                                  {windowRow.windowEndDateTime.toLocaleString(locale, {
                                     day: "2-digit",
                                     month: "2-digit",
                                     hour: "2-digit",
                                     minute: "2-digit",
-                                  })
-                                : ui.noNextCheckin}
+                                  })}
+                                </>
+                              ) : (
+                                <>
+                                  {" "}
+                                  · {ui.openWindowShort}
+                                </>
+                              )}
                             </div>
                           </button>
                         )
@@ -1218,7 +1551,9 @@ export default function BookingsHistoryPage() {
             <div className="mb-4 flex items-center justify-between">
               <div>
                 <div className="text-lg font-semibold text-slate-950">
-                  {ui.dayWindows}
+                  {language === "en"
+                    ? "Windows of selected day"
+                    : "Παράθυρα επιλεγμένης ημέρας"}
                 </div>
                 <div className="mt-1 text-sm text-slate-600">
                   {selectedDay
@@ -1288,14 +1623,17 @@ export default function BookingsHistoryPage() {
         )}
       </section>
 
-      <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+      <section
+        className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm"
+        title={ui.selectedWindowHelp}
+      >
         <div className="flex flex-col gap-4 border-b border-slate-200 p-5 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h2 className="text-lg font-semibold text-slate-950">
               {ui.selectedWindow}
             </h2>
             <p className="mt-1 text-sm leading-6 text-slate-600">
-              {ui.viewOnlySelected}
+              {ui.viewSelectedOnly}
             </p>
           </div>
         </div>
@@ -1310,7 +1648,6 @@ export default function BookingsHistoryPage() {
           <div className="divide-y divide-slate-200">
             {selectedWindowArray.map((windowRow) => {
               const booking = windowRow.booking
-              const nextBooking = windowRow.nextBooking
               const firstTask = booking.tasks[0] || null
 
               const syncBadgeClass = booking.needsMapping
@@ -1319,69 +1656,183 @@ export default function BookingsHistoryPage() {
                   ? getBadgeClassName("danger")
                   : getBadgeClassName("success")
 
+              const propertyDisplay = booking.property
+                ? `${booking.property.code} · ${booking.property.name}`
+                : ui.noPropertyMessage
+
               return (
-                <article key={windowRow.id} className="space-y-4 p-5">
-                  <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                    <div className="min-w-0 flex-1 space-y-3">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <div className="text-lg font-semibold text-slate-950">
-                          {booking.property?.name ||
-                            booking.externalListingName ||
-                            booking.externalListingId ||
-                            texts.list.propertyNotMapped}
+                <article key={windowRow.id} className="p-5">
+                  <div className="space-y-5">
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="text-lg font-semibold text-slate-950">
+                            {booking.property?.name ||
+                              booking.externalListingName ||
+                              booking.externalListingId ||
+                              texts.list.propertyNotMapped}
+                          </div>
+
+                          <span className={getBadgeClassName("neutral")}>
+                            {normalizeSourcePlatform(booking.sourcePlatform, texts)}
+                          </span>
+
+                          <span className={syncBadgeClass}>
+                            {getSyncLabel(booking.syncStatus, booking.needsMapping, texts)}
+                          </span>
+
+                          <span
+                            className={
+                              booking.needsMapping
+                                ? getBadgeClassName("warning")
+                                : windowRow.hasTask
+                                  ? getBadgeClassName("success")
+                                  : getBadgeClassName("neutral")
+                            }
+                          >
+                            {booking.needsMapping
+                              ? ui.needsMappingBadge
+                              : windowRow.hasTask
+                                ? ui.withTaskBadge
+                                : ui.withoutTaskBadge}
+                          </span>
+
+                          {isTaskAlertActive(firstTask) ? (
+                            <span className={getBadgeClassName("danger")}>
+                              {language === "en" ? "Active alert" : "Ενεργο alert"}
+                            </span>
+                          ) : null}
                         </div>
-
-                        <span className={getBadgeClassName("neutral")}>
-                          {normalizeSourcePlatform(booking.sourcePlatform, texts)}
-                        </span>
-
-                        <span className={syncBadgeClass}>
-                          {getSyncLabel(booking.syncStatus, booking.needsMapping, texts)}
-                        </span>
-
-                        <span
-                          className={
-                            windowRow.hasTask
-                              ? getBadgeClassName("success")
-                              : getBadgeClassName("warning")
-                          }
-                        >
-                          {windowRow.hasTask
-                            ? ui.taskCreatedBadge
-                            : ui.taskNotCreatedBadge}
-                        </span>
                       </div>
 
-                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                        <div className="rounded-2xl bg-slate-50 p-3">
-                          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            {texts.labels.property}
-                          </div>
-                          <div className="mt-1 font-medium text-slate-900">
-                            {booking.property
-                              ? `${booking.property.code} · ${booking.property.name}`
-                              : texts.list.propertyNotMapped}
-                          </div>
-                        </div>
+                      <div className="flex flex-wrap gap-2 lg:justify-end">
+                        <Link
+                          href={`/bookings/${booking.id}`}
+                          title={ui.viewBookingHelp}
+                          className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-slate-950"
+                        >
+                          {ui.viewBooking}
+                        </Link>
 
-                        <div className="rounded-2xl bg-slate-50 p-3">
+                        {booking.property ? (
+                          <Link
+                            href={`/properties/${booking.property.id}`}
+                            title={ui.viewPropertyHelp}
+                            className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-slate-950"
+                          >
+                            {ui.viewProperty}
+                          </Link>
+                        ) : null}
+
+                        {booking.property ? (
+                          <Link
+                            href={`/tasks?propertyId=${booking.property.id}&scope=open`}
+                            title={ui.viewPropertyTasksHelp}
+                            className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-slate-950"
+                          >
+                            {ui.viewPropertyTasks}
+                          </Link>
+                        ) : null}
+
+                        {!windowRow.hasTask ? (
+                          <button
+                            type="button"
+                            title={ui.createTaskHelp}
+                            onClick={() => openCreateTaskModal(windowRow)}
+                            disabled={booking.needsMapping || isCancelledBooking(booking.status)}
+                            className="inline-flex items-center rounded-2xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                          >
+                            {ui.createTask}
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                      <div className="rounded-2xl bg-slate-50 p-4" title={ui.systemPropertyHelp}>
+                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          {ui.systemProperty}
+                        </div>
+                        <div className="mt-1 text-sm font-medium text-slate-900">
+                          {propertyDisplay}
+                        </div>
+                      </div>
+
+                      <div
+                        className="rounded-2xl bg-slate-50 p-4"
+                        title={ui.checkoutDateTimeHelp}
+                      >
+                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          {ui.checkoutDateTime}
+                        </div>
+                        <div className="mt-1 text-sm font-medium text-slate-900">
+                          {formatDateTime(
+                            windowRow.windowStartDateTime,
+                            locale,
+                            texts.common.notAvailable
+                          )}
+                        </div>
+                      </div>
+
+                      <div
+                        className="rounded-2xl bg-slate-50 p-4"
+                        title={ui.nextCheckinDateTimeHelp}
+                      >
+                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          {ui.nextCheckinDateTime}
+                        </div>
+                        <div className="mt-1 text-sm font-medium text-slate-900">
+                          {formatDateTime(
+                            windowRow.windowEndDateTime,
+                            locale,
+                            ui.noNextCheckin
+                          )}
+                        </div>
+                      </div>
+
+                      <div
+                        className="rounded-2xl bg-slate-50 p-4"
+                        title={ui.durationHelp}
+                      >
+                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          {ui.duration}
+                        </div>
+                        <div className="mt-1 text-sm font-medium text-slate-900">
+                          {getWindowDurationLabel(
+                            windowRow.windowDurationMinutes,
+                            language
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div
+                      className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                      title={ui.rangeTitleHelp}
+                    >
+                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        {ui.rangeTitle}
+                      </div>
+
+                      <div className="mt-3 grid gap-3 md:grid-cols-2">
+                        <div className="rounded-2xl bg-white p-3" title={ui.fromHelp}>
                           <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            {ui.checkoutDateTime}
+                            {ui.from}
                           </div>
-                          <div className="mt-1 font-medium text-slate-900">
+                          <div className="mt-1 text-sm font-medium text-slate-900">
                             {formatDateTime(
                               windowRow.windowStartDateTime,
                               locale,
-                              texts.common.notAvailable
+                              "-"
                             )}
                           </div>
                         </div>
 
-                        <div className="rounded-2xl bg-slate-50 p-3">
+                        <div className="rounded-2xl bg-white p-3" title={ui.toHelp}>
                           <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            {ui.nextCheckinDateTime}
+                            {ui.to}
                           </div>
-                          <div className="mt-1 font-medium text-slate-900">
+                          <div className="mt-1 text-sm font-medium text-slate-900">
                             {formatDateTime(
                               windowRow.windowEndDateTime,
                               locale,
@@ -1389,114 +1840,48 @@ export default function BookingsHistoryPage() {
                             )}
                           </div>
                         </div>
-
-                        <div className="rounded-2xl bg-slate-50 p-3">
-                          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            {ui.duration}
-                          </div>
-                          <div className="mt-1 font-medium text-slate-900">
-                            {getWindowDurationLabel(
-                              windowRow.windowDurationMinutes,
-                              language
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                          {ui.timeRange}
-                        </div>
-
-                        <div className="mt-3 grid gap-3 md:grid-cols-2">
-                          <div className="rounded-2xl bg-slate-50 p-3">
-                            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                              {ui.from}
-                            </div>
-                            <div className="mt-1 text-sm font-medium text-slate-900">
-                              {formatDateTime(
-                                windowRow.windowStartDateTime,
-                                locale,
-                                "-"
-                              )}
-                            </div>
-                          </div>
-
-                          <div className="rounded-2xl bg-slate-50 p-3">
-                            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                              {ui.to}
-                            </div>
-                            <div className="mt-1 text-sm font-medium text-slate-900">
-                              {formatDateTime(
-                                windowRow.windowEndDateTime,
-                                locale,
-                                ui.noNextCheckin
-                              )}
-                            </div>
-                          </div>
-                        </div>
                       </div>
                     </div>
 
-                    <div className="flex flex-wrap gap-2">
-                      <Link
-                        href={`/bookings/${booking.id}`}
-                        className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-slate-950"
-                      >
-                        {ui.viewBooking}
-                      </Link>
-
-                      {!windowRow.hasTask && (
-                        <button
-                          type="button"
-                          onClick={() => openCreateTaskModal(windowRow)}
-                          disabled={booking.needsMapping || isCancelledBooking(booking.status)}
-                          className="inline-flex items-center rounded-2xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-                        >
-                          {ui.openCreateTask}
-                        </button>
-                      )}
-
-                      {windowRow.hasTask && firstTask ? (
-                        <Link
-                          href={`/tasks/${firstTask.id}`}
-                          className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-slate-950"
-                        >
-                          {texts.common.viewTask}
-                        </Link>
-                      ) : null}
-                    </div>
-                  </div>
-
-                  {windowRow.hasTask && firstTask && (
-                    <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
-                      <div className="mb-3 text-sm font-semibold text-slate-950">
-                        {texts.list.linkedTasks}
-                      </div>
-
+                    {firstTask ? (
                       <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                        <div className="mb-3 text-sm font-semibold text-slate-950">
+                          {ui.listTaskTitle}
+                        </div>
+
                         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                           <div className="min-w-0 text-sm">
-                            <div className="font-semibold text-slate-950">
-                              {normalizeTaskTitle(firstTask.title, language)}
+                            <div className="flex flex-wrap items-center gap-2">
+                              <div className="font-semibold text-slate-950">
+                                {normalizeTaskTitle(firstTask.title, language)}
+                              </div>
+                              {isTaskAlertActive(firstTask) ? (
+                                <span className="rounded-full border border-red-200 bg-red-100 px-2.5 py-1 text-xs font-semibold text-red-700">
+                                  {language === "en" ? "Active alert" : "Ενεργο alert"}
+                                </span>
+                              ) : null}
                             </div>
                             <div className="mt-1 text-slate-600">
                               {getTaskTypeDisplay(firstTask.taskType, language, texts)} ·{" "}
                               {getTaskStatusDisplay(firstTask.status, language)} ·{" "}
                               {getPriorityDisplay(firstTask.priority, language)}
+                              {isTaskAlertActive(firstTask) && firstTask.alertAt
+                                ? ` Β· ${language === "en" ? "Alert" : "Alert"}: ${formatDateTime(firstTask.alertAt, locale, "-")}`
+                                : ""}
                             </div>
                           </div>
 
                           <Link
                             href={`/tasks/${firstTask.id}`}
-                            className="text-sm font-medium text-slate-700 underline underline-offset-4"
+                            title={ui.viewBookingHelp}
+                            className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
                           >
                             {texts.common.viewTask}
                           </Link>
                         </div>
                       </div>
-                    </div>
-                  )}
+                    ) : null}
+                  </div>
                 </article>
               )
             })}
@@ -1680,67 +2065,34 @@ export default function BookingsHistoryPage() {
                   />
                 </div>
 
-                <div className="md:col-span-2 rounded-3xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="mb-3 flex items-start justify-between gap-4">
-                    <div>
-                      <div className="font-semibold text-slate-950">
-                        {texts.modal.alertTitle}
-                      </div>
-                      <div className="mt-1 text-sm text-slate-600">
-                        {texts.modal.alertDescription}
-                      </div>
-                    </div>
+                <TaskAlertPanel
+                  className="md:col-span-2"
+                  title={texts.modal.alertTitle}
+                  description={texts.modal.alertDescription}
+                  enabledLabel={texts.modal.alertEnabled}
+                  timeLabel={texts.modal.alertAt}
+                  enabled={alertEnabled}
+                  value={alertAt}
+                  onEnabledChange={setAlertEnabled}
+                  onValueChange={setAlertAt}
+                />
 
-                    <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
-                      <input
-                        type="checkbox"
-                        checked={alertEnabled}
-                        onChange={(e) => setAlertEnabled(e.target.checked)}
-                      />
-                      {texts.modal.alertEnabled}
-                    </label>
-                  </div>
-
-                  {alertEnabled && (
-                    <div>
-                      <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                        {texts.modal.alertAt}
-                      </label>
-                      <input
-                        type="datetime-local"
-                        className="w-full rounded-2xl border border-slate-200 px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-slate-400"
-                        value={alertAt}
-                        onChange={(e) => setAlertAt(e.target.value)}
-                      />
-                    </div>
-                  )}
-                </div>
-
-                <div className="md:col-span-2 rounded-3xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="mb-3 font-semibold text-slate-950">
-                    {texts.modal.checklistsTitle}
-                  </div>
-
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <label className="flex items-center gap-2 text-sm text-slate-700">
-                      <input
-                        type="checkbox"
-                        checked={sendCleaningChecklist}
-                        onChange={(e) => setSendCleaningChecklist(e.target.checked)}
-                      />
-                      {texts.modal.sendCleaningChecklist}
-                    </label>
-
-                    <label className="flex items-center gap-2 text-sm text-slate-700">
-                      <input
-                        type="checkbox"
-                        checked={sendSuppliesChecklist}
-                        onChange={(e) => setSendSuppliesChecklist(e.target.checked)}
-                      />
-                      {texts.modal.sendSuppliesChecklist}
-                    </label>
-                  </div>
-                </div>
+                <TaskChecklistPanel
+                  className="md:col-span-2"
+                  title={texts.modal.checklistsTitle}
+                  options={[
+                    {
+                      label: texts.modal.sendCleaningChecklist,
+                      checked: sendCleaningChecklist,
+                      onChange: setSendCleaningChecklist,
+                    },
+                    {
+                      label: texts.modal.sendSuppliesChecklist,
+                      checked: sendSuppliesChecklist,
+                      onChange: setSendSuppliesChecklist,
+                    },
+                  ]}
+                />
 
                 <div className="md:col-span-2 rounded-3xl border border-slate-200 bg-slate-50 p-4">
                   <div className="mb-3">

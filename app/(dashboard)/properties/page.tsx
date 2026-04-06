@@ -1,8 +1,9 @@
-"use client"
+﻿"use client"
 
 import Link from "next/link"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useAppLanguage } from "@/components/i18n/LanguageProvider"
+import { isTaskAlertActive } from "@/components/tasks/task-ui"
 import {
   getPropertyStatusLabel,
   getPropertyTypeLabel,
@@ -22,6 +23,51 @@ type PartnerOption = {
   email: string
   specialty: string
   status: string
+}
+
+type PropertySupplyListItem = {
+  id: string
+  isActive?: boolean
+  fillLevel?: string | null
+  currentStock?: number | null
+  targetStock?: number | null
+  reorderThreshold?: number | null
+  targetLevel?: number | null
+  minimumThreshold?: number | null
+  trackingMode?: string | null
+  isCritical?: boolean
+  warningThreshold?: number | null
+  updatedAt?: string | null
+  lastUpdatedAt?: string | null
+  supplyItem?: {
+    id: string
+    code: string
+    name: string
+    nameEl?: string | null
+    nameEn?: string | null
+    category?: string | null
+    unit?: string | null
+    minimumStock?: number | null
+    isActive?: boolean
+  } | null
+}
+
+type PropertyIssueListItem = {
+  id: string
+  status: string
+  severity?: string | null
+  issueType?: string | null
+  requiresImmediateAction?: boolean
+}
+
+type PropertyTaskListItem = {
+  id: string
+  status: string
+  priority?: string | null
+  taskType?: string | null
+  scheduledDate?: string | null
+  alertEnabled?: boolean
+  alertAt?: string | null
 }
 
 type PropertyListItem = {
@@ -58,33 +104,9 @@ type PropertyListItem = {
     checkOutDate: string
     checkInTime?: string | null
   }>
-  tasks?: Array<{
-    id: string
-    status: string
-    priority?: string | null
-    taskType?: string | null
-    scheduledDate?: string | null
-    alertEnabled?: boolean
-    alertAt?: string | null
-    assignments?: Array<{
-      id: string
-      status?: string | null
-      assignedAt?: string | null
-      acceptedAt?: string | null
-      rejectedAt?: string | null
-    }>
-    checklistRun?: {
-      id: string
-      status?: string | null
-      startedAt?: string | null
-      completedAt?: string | null
-    } | null
-  }>
-  issues?: Array<{
-    id: string
-    status: string
-    severity?: string | null
-  }>
+  tasks?: PropertyTaskListItem[]
+  issues?: PropertyIssueListItem[]
+  propertySupplies?: PropertySupplyListItem[]
 }
 
 type CreatePropertyFormState = {
@@ -108,8 +130,23 @@ type MetricFilter =
   | "active"
   | "inactive"
   | "ready"
-  | "requires_action"
-  | "alerts"
+  | "not_ready"
+
+type TodayReadinessStatus = "READY" | "NOT_READY" | "UNKNOWN"
+
+type PropertyOperationalCounts = {
+  todayOpenTasks: number
+  activeAlerts: number
+  openIssues: number
+  openDamages: number
+  supplyShortages: number
+}
+
+type CounterConfig = {
+  key: keyof PropertyOperationalCounts
+  label: string
+  description: string
+}
 
 const PROPERTY_TYPE_OPTIONS = [
   "apartment",
@@ -164,119 +201,230 @@ function combineCheckInDateTime(
   return merged
 }
 
-function getStatusBadgeClasses(status?: string | null) {
-  const normalized = normalizePropertyStatus(status)
+function isSameCalendarDay(left: Date, right: Date) {
+  return (
+    left.getFullYear() === right.getFullYear() &&
+    left.getMonth() === right.getMonth() &&
+    left.getDate() === right.getDate()
+  )
+}
 
-  if (normalized === "ACTIVE") {
+function normalizeLooseText(value: unknown) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_")
+    .replace(/-+/g, "_")
+}
+
+function toNumericOrNull(value: unknown) {
+  if (value === undefined || value === null || value === "") return null
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric : null
+}
+
+function getMetricCardClasses(active: boolean) {
+  if (active) {
+    return "border-slate-900 bg-slate-900 text-white"
+  }
+
+  return "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
+}
+
+function getReadinessBadgeClasses(status: TodayReadinessStatus) {
+  if (status === "READY") {
     return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
   }
 
-  if (normalized === "INACTIVE") {
-    return "bg-slate-100 text-slate-700 ring-1 ring-slate-200"
+  if (status === "NOT_READY") {
+    return "bg-red-50 text-red-700 ring-1 ring-red-200"
   }
 
-  return "bg-amber-50 text-amber-700 ring-1 ring-amber-200"
+  return "bg-slate-100 text-slate-700 ring-1 ring-slate-200"
 }
 
-function getMetricCardClasses(
-  active: boolean,
-  tone: "default" | "green" | "slate" | "amber" | "red"
-) {
-  if (active) {
-    switch (tone) {
-      case "green":
-        return "border-emerald-300 bg-emerald-50 ring-2 ring-emerald-200"
-      case "slate":
-        return "border-slate-400 bg-slate-100 ring-2 ring-slate-200"
-      case "amber":
-        return "border-amber-300 bg-amber-50 ring-2 ring-amber-200"
-      case "red":
-        return "border-red-300 bg-red-50 ring-2 ring-red-200"
-      default:
-        return "border-slate-300 bg-slate-50 ring-2 ring-slate-200"
-    }
+function getReadinessLabel(language: "el" | "en", status: TodayReadinessStatus) {
+  if (status === "READY") {
+    return language === "en" ? "Ready" : "Ετοιμο"
   }
 
-  return "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
+  if (status === "NOT_READY") {
+    return language === "en" ? "Not ready" : "Μη ετοιμο"
+  }
+
+  return language === "en" ? "Unknown" : "Αγνωστο"
 }
 
-function getOpenIssuesCount(property: PropertyListItem) {
-  return safeArray(property.issues).filter((issue) => {
-    const status = normalizeIssueStatus(issue.status)
-    return status === "OPEN" || status === "IN_PROGRESS"
-  }).length
-}
+function isTodayOpenTask(task: PropertyTaskListItem, now: Date) {
+  const scheduledDate = normalizeDate(task.scheduledDate)
+  if (!scheduledDate) return false
 
-function isTaskStillOperationallyOpen(
-  task: NonNullable<PropertyListItem["tasks"]>[number]
-) {
-  const taskStatus = normalizeTaskStatus(task?.status)
-  const assignmentStatus = String(task?.assignments?.[0]?.status || "").toLowerCase()
-  const checklistStatus = String(task?.checklistRun?.status || "").toLowerCase()
+  const taskStatus = normalizeTaskStatus(task.status)
+  const isOpenStatus = [
+    "PENDING",
+    "ASSIGNED",
+    "WAITING_ACCEPTANCE",
+    "ACCEPTED",
+    "IN_PROGRESS",
+    "NEW",
+  ].includes(taskStatus)
 
-  if (taskStatus === "COMPLETED" || taskStatus === "CANCELLED") {
+  if (!isOpenStatus) {
     return false
   }
 
-  if (
-    [
-      "PENDING",
-      "ASSIGNED",
-      "WAITING_ACCEPTANCE",
-      "ACCEPTED",
-      "IN_PROGRESS",
-      "NEW",
-    ].includes(taskStatus)
-  ) {
+  return isSameCalendarDay(scheduledDate, now)
+}
+
+function isOpenIssue(issue: PropertyIssueListItem) {
+  const issueStatus = normalizeIssueStatus(issue.status)
+  return issueStatus === "OPEN" || issueStatus === "IN_PROGRESS"
+}
+
+function isDamageIssue(issue: PropertyIssueListItem) {
+  const normalizedType = normalizeLooseText(issue.issueType)
+  return normalizedType.includes("damage") || normalizedType.includes("ζημια")
+}
+
+function isSupplyShortage(supply: PropertySupplyListItem) {
+  if (!supply.isActive) {
+    return false
+  }
+
+  const fillLevel = normalizeLooseText(supply.fillLevel)
+  if (["missing", "empty", "low"].includes(fillLevel)) {
     return true
   }
 
-  if (
-    ["pending", "assigned", "sent", "accepted", "waiting_acceptance"].includes(
-      assignmentStatus
-    )
-  ) {
-    return true
-  }
+  const currentStock = toNumericOrNull(supply.currentStock)
+  const minimumThreshold = toNumericOrNull(supply.minimumThreshold)
+  const reorderThreshold = toNumericOrNull(supply.reorderThreshold)
+  const warningThreshold = toNumericOrNull(supply.warningThreshold)
+  const supplyMinimumStock = toNumericOrNull(supply.supplyItem?.minimumStock)
 
-  if (
-    ["pending", "in_progress", "submitted", "needs_review"].includes(
-      checklistStatus
-    )
-  ) {
-    return true
+  const threshold =
+    minimumThreshold ??
+    reorderThreshold ??
+    warningThreshold ??
+    supplyMinimumStock
+
+  if (currentStock !== null && threshold !== null) {
+    return currentStock <= threshold
   }
 
   return false
 }
 
-function isTaskAlertActive(
-  task: NonNullable<PropertyListItem["tasks"]>[number]
+function getOperationalCountsForToday(
+  property: PropertyListItem,
+  now: Date
+): PropertyOperationalCounts {
+  return {
+    todayOpenTasks: safeArray(property.tasks).filter((task) =>
+      isTodayOpenTask(task, now)
+    ).length,
+    activeAlerts: safeArray(property.tasks).filter((task) =>
+      isTaskAlertActive(task)
+    ).length,
+    openIssues: safeArray(property.issues).filter(
+      (issue) => isOpenIssue(issue) && !isDamageIssue(issue)
+    ).length,
+    openDamages: safeArray(property.issues).filter(
+      (issue) => isOpenIssue(issue) && isDamageIssue(issue)
+    ).length,
+    supplyShortages: safeArray(property.propertySupplies).filter((supply) =>
+      isSupplyShortage(supply)
+    ).length,
+  }
+}
+
+function getTodayReadinessStatus(
+  property: PropertyListItem,
+  now: Date
+): TodayReadinessStatus {
+  const counts = getOperationalCountsForToday(property, now)
+
+  const hasKnownSources =
+    Array.isArray(property.tasks) ||
+    Array.isArray(property.issues) ||
+    Array.isArray(property.propertySupplies)
+
+  if (!hasKnownSources) {
+    return "UNKNOWN"
+  }
+
+  const isReady =
+    counts.todayOpenTasks === 0 &&
+    counts.openIssues === 0 &&
+    counts.openDamages === 0 &&
+    counts.supplyShortages === 0
+
+  return isReady ? "READY" : "NOT_READY"
+}
+
+function getTodayReadinessExplanation(
+  property: PropertyListItem,
+  language: "el" | "en",
+  now: Date
 ) {
-  if (!isTaskStillOperationallyOpen(task)) return false
-  if (!task.alertEnabled) return false
-  if (!task.alertAt) return false
+  const counts = getOperationalCountsForToday(property, now)
+  const status = getTodayReadinessStatus(property, now)
 
-  const alertDate = normalizeDate(task.alertAt)
-  if (!alertDate) return false
+  if (status === "READY") {
+    return language === "en"
+      ? "No open work today, no open issues or damages, and no active supply shortages."
+      : "Δεν υπαρχουν σημερα ανοιχτες εργασιες, βλαβες, ζημιες ή ελλειψεις αναλωσιμων."
+  }
 
-  return alertDate.getTime() <= Date.now()
-}
+  if (status === "UNKNOWN") {
+    return language === "en"
+      ? "Not enough operational data to calculate today's readiness."
+      : "Δεν υπαρχουν αρκετα επιχειρησιακα δεδομενα για σημερινο readiness."
+  }
 
-function getOpenTasksCount(property: PropertyListItem) {
-  return safeArray(property.tasks).filter((task) =>
-    isTaskStillOperationallyOpen(task)
-  ).length
-}
+  const pieces: string[] = []
 
-function getActiveAlertsCount(property: PropertyListItem) {
-  return safeArray(property.tasks).filter((task) =>
-    isTaskAlertActive(task)
-  ).length
-}
+  if (counts.todayOpenTasks > 0) {
+    pieces.push(
+      language === "en"
+        ? `${counts.todayOpenTasks} open tasks today`
+        : `${counts.todayOpenTasks} ανοιχτες εργασιες σημερα`
+    )
+  }
 
-function hasActiveAlert(property: PropertyListItem) {
-  return getActiveAlertsCount(property) > 0
+  if (counts.activeAlerts > 0) {
+    pieces.push(
+      language === "en"
+        ? `${counts.activeAlerts} active alerts`
+        : `${counts.activeAlerts} ενεργα alert`
+    )
+  }
+
+  if (counts.openIssues > 0) {
+    pieces.push(
+      language === "en"
+        ? `${counts.openIssues} open issues`
+        : `${counts.openIssues} ανοιχτες βλαβες`
+    )
+  }
+
+  if (counts.openDamages > 0) {
+    pieces.push(
+      language === "en"
+        ? `${counts.openDamages} open damages`
+        : `${counts.openDamages} ανοιχτες ζημιες`
+    )
+  }
+
+  if (counts.supplyShortages > 0) {
+    pieces.push(
+      language === "en"
+        ? `${counts.supplyShortages} supply shortages`
+        : `${counts.supplyShortages} ελλειψεις αναλωσιμων`
+    )
+  }
+
+  return pieces.join(" • ")
 }
 
 function getNextUpcomingBooking(property: PropertyListItem) {
@@ -310,103 +458,68 @@ function getNextUpcomingBooking(property: PropertyListItem) {
     })[0]
 }
 
-function hasCriticalCheckInAlert(property: PropertyListItem) {
-  const nextBooking = getNextUpcomingBooking(property)
-  if (!nextBooking?.checkInAt) return false
-
-  const openIssues = getOpenIssuesCount(property)
-  if (openIssues <= 0) return false
-
-  const diffMs = nextBooking.checkInAt.getTime() - Date.now()
-  const threeHoursMs = 3 * 60 * 60 * 1000
-
-  return diffMs >= 0 && diffMs <= threeHoursMs
+function getCounterToneClasses(count: number) {
+  return count > 0
+    ? "bg-red-50 text-red-700 ring-red-200"
+    : "bg-slate-100 text-slate-700 ring-slate-200"
 }
 
-function isPropertyOperationallyReady(property: PropertyListItem) {
-  const openIssues = getOpenIssuesCount(property)
-  const openTasks = getOpenTasksCount(property)
-  const criticalAlert = hasCriticalCheckInAlert(property)
-  const activeAlert = hasActiveAlert(property)
-
-  return openIssues === 0 && openTasks === 0 && !criticalAlert && !activeAlert
+function getCounterConfigs(language: "el" | "en"): CounterConfig[] {
+  return [
+    {
+      key: "todayOpenTasks",
+      label: language === "en" ? "Tasks" : "Εργ.",
+      description:
+        language === "en"
+          ? "Open tasks scheduled for today. Readiness requires this to be 0."
+          : "Ανοιχτες εργασιες με σημερινη ημερομηνια. Για readiness πρεπει να ειναι 0.",
+    },
+    {
+      key: "activeAlerts",
+      label: language === "en" ? "Alerts" : "Alert",
+      description:
+        language === "en"
+          ? "Active alerts on open tasks. This is an execution urgency signal from task creation."
+          : "Ενεργα alert σε ανοιχτες εργασιες. Δειχνει επειγον execution signal απο τη δημιουργια εργασιας.",
+    },
+    {
+      key: "openIssues",
+      label: language === "en" ? "Issues" : "Βλαβ.",
+      description:
+        language === "en"
+          ? "Open non-damage issues. Readiness requires this to be 0."
+          : "Ανοιχτες βλαβες που δεν ειναι ζημιες. Για readiness πρεπει να ειναι 0.",
+    },
+    {
+      key: "openDamages",
+      label: language === "en" ? "Damages" : "Ζημ.",
+      description:
+        language === "en"
+          ? "Open damage records. Readiness requires this to be 0."
+          : "Ανοιχτες ζημιες. Για readiness πρεπει να ειναι 0.",
+    },
+    {
+      key: "supplyShortages",
+      label: language === "en" ? "Supply" : "Ελλ.",
+      description:
+        language === "en"
+          ? "Active supply shortages. Readiness requires this to be 0."
+          : "Ενεργες ελλειψεις αναλωσιμων. Για readiness πρεπει να ειναι 0.",
+    },
+  ]
 }
 
-function getPropertyReadinessDetails(
+function formatLocation(property: PropertyListItem) {
+  return [property.address, property.city, property.region].filter(Boolean).join(", ")
+}
+
+function matchesMetricFilter(
   property: PropertyListItem,
-  language: "el" | "en"
+  metricFilter: MetricFilter,
+  now: Date
 ) {
-  const texts = getPropertiesPageTexts(language)
-  const openTasks = getOpenTasksCount(property)
-  const openIssues = getOpenIssuesCount(property)
-  const criticalAlert = hasCriticalCheckInAlert(property)
-  const activeAlerts = getActiveAlertsCount(property)
-  const ready = isPropertyOperationallyReady(property)
-
-  if (ready) {
-    return {
-      label: texts.propertyReady,
-      detail: texts.readinessNoAlert,
-    }
-  }
-
-  if (criticalAlert) {
-    return {
-      label: texts.propertyNeedsAction,
-      detail: texts.readinessCritical,
-    }
-  }
-
-  if (activeAlerts > 0 && openTasks > 0 && openIssues > 0) {
-    return {
-      label: texts.propertyNeedsAction,
-      detail: `${activeAlerts} ${texts.readinessAlerts} · ${openTasks} ${texts.readinessOpenTasks} · ${openIssues} ${texts.readinessOpenIssues}`,
-    }
-  }
-
-  if (activeAlerts > 0 && openTasks > 0) {
-    return {
-      label: texts.propertyNeedsAction,
-      detail: `${activeAlerts} ${texts.readinessAlerts} · ${openTasks} ${texts.readinessOpenTasks}`,
-    }
-  }
-
-  if (activeAlerts > 0) {
-    return {
-      label: texts.propertyNeedsAction,
-      detail: `${activeAlerts} ${texts.readinessAlerts}`,
-    }
-  }
-
-  if (openTasks > 0 && openIssues > 0) {
-    return {
-      label: texts.propertyNeedsAction,
-      detail: `${openTasks} ${texts.readinessOpenTasks} · ${openIssues} ${texts.readinessOpenIssues}`,
-    }
-  }
-
-  if (openTasks > 0) {
-    return {
-      label: texts.propertyNeedsAction,
-      detail: `${openTasks} ${texts.readinessOpenTasks}`,
-    }
-  }
-
-  if (openIssues > 0) {
-    return {
-      label: texts.propertyNeedsAction,
-      detail: `${openIssues} ${texts.readinessOpenIssues}`,
-    }
-  }
-
-  return {
-    label: texts.propertyNeedsAction,
-    detail: texts.readinessFallback,
-  }
-}
-
-function matchesMetricFilter(property: PropertyListItem, metricFilter: MetricFilter) {
   const propertyStatus = normalizePropertyStatus(property.status)
+  const readinessStatus = getTodayReadinessStatus(property, now)
 
   switch (metricFilter) {
     case "active":
@@ -414,11 +527,9 @@ function matchesMetricFilter(property: PropertyListItem, metricFilter: MetricFil
     case "inactive":
       return propertyStatus === "INACTIVE"
     case "ready":
-      return isPropertyOperationallyReady(property)
-    case "requires_action":
-      return !isPropertyOperationallyReady(property)
-    case "alerts":
-      return hasActiveAlert(property)
+      return readinessStatus === "READY"
+    case "not_ready":
+      return readinessStatus === "NOT_READY"
     case "all":
     default:
       return true
@@ -477,6 +588,8 @@ export default function PropertiesPage() {
     useState<CreatePropertyFormState>(initialCreateForm)
   const [createSubmitting, setCreateSubmitting] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
+  const todayReference = useMemo(() => new Date(), [])
+  const counterConfigs = useMemo(() => getCounterConfigs(language), [language])
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -544,25 +657,22 @@ export default function PropertiesPage() {
       (item) => normalizePropertyStatus(item.status) === "INACTIVE"
     ).length
 
-    const ready = properties.filter((item) =>
-      isPropertyOperationallyReady(item)
+    const ready = properties.filter(
+      (item) => getTodayReadinessStatus(item, todayReference) === "READY"
     ).length
 
-    const requiresAction = properties.filter(
-      (item) => !isPropertyOperationallyReady(item)
+    const notReady = properties.filter(
+      (item) => getTodayReadinessStatus(item, todayReference) === "NOT_READY"
     ).length
-
-    const alerts = properties.filter((item) => hasActiveAlert(item)).length
 
     return {
       total: properties.length,
       active,
       inactive,
       ready,
-      requiresAction,
-      alerts,
+      notReady,
     }
-  }, [properties])
+  }, [properties, todayReference])
 
   const filteredProperties = useMemo(() => {
     const term = search.trim().toLowerCase()
@@ -585,7 +695,11 @@ export default function PropertiesPage() {
         cityFilter === "all" ||
         String(property.city || "").toLowerCase() === cityFilter.toLowerCase()
 
-      const matchesMetric = matchesMetricFilter(property, metricFilter)
+      const matchesMetric = matchesMetricFilter(
+        property,
+        metricFilter,
+        todayReference
+      )
 
       return matchesSearch && matchesType && matchesCity && matchesMetric
     })
@@ -609,7 +723,16 @@ export default function PropertiesPage() {
     })
 
     return rows
-  }, [properties, search, typeFilter, cityFilter, sortBy, metricFilter, texts.locale])
+  }, [
+    properties,
+    search,
+    typeFilter,
+    cityFilter,
+    sortBy,
+    metricFilter,
+    texts.locale,
+    todayReference,
+  ])
 
   function openCreateDrawer() {
     setCreateError(null)
@@ -720,17 +843,16 @@ export default function PropertiesPage() {
           </div>
         </div>
 
-        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
+        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           <button
             type="button"
             onClick={() => setMetricFilter("all")}
             className={`rounded-2xl border p-5 text-left shadow-sm transition ${getMetricCardClasses(
-              metricFilter === "all",
-              "default"
+              metricFilter === "all"
             )}`}
           >
             <div className="text-sm text-slate-500">{texts.total}</div>
-            <div className="mt-2 text-3xl font-bold text-slate-900">
+            <div className="mt-2 text-2xl font-bold text-slate-900">
               {summary.total}
             </div>
           </button>
@@ -739,12 +861,11 @@ export default function PropertiesPage() {
             type="button"
             onClick={() => setMetricFilter("active")}
             className={`rounded-2xl border p-5 text-left shadow-sm transition ${getMetricCardClasses(
-              metricFilter === "active",
-              "green"
+              metricFilter === "active"
             )}`}
           >
             <div className="text-sm text-slate-500">{texts.active}</div>
-            <div className="mt-2 text-3xl font-bold text-emerald-700">
+            <div className="mt-2 text-2xl font-bold text-emerald-700">
               {summary.active}
             </div>
           </button>
@@ -753,12 +874,11 @@ export default function PropertiesPage() {
             type="button"
             onClick={() => setMetricFilter("inactive")}
             className={`rounded-2xl border p-5 text-left shadow-sm transition ${getMetricCardClasses(
-              metricFilter === "inactive",
-              "slate"
+              metricFilter === "inactive"
             )}`}
           >
             <div className="text-sm text-slate-500">{texts.inactive}</div>
-            <div className="mt-2 text-3xl font-bold text-slate-700">
+            <div className="mt-2 text-2xl font-bold text-slate-700">
               {summary.inactive}
             </div>
           </button>
@@ -767,41 +887,27 @@ export default function PropertiesPage() {
             type="button"
             onClick={() => setMetricFilter("ready")}
             className={`rounded-2xl border p-5 text-left shadow-sm transition ${getMetricCardClasses(
-              metricFilter === "ready",
-              "green"
+              metricFilter === "ready"
             )}`}
           >
             <div className="text-sm text-slate-500">{texts.ready}</div>
-            <div className="mt-2 text-3xl font-bold text-emerald-700">
+            <div className="mt-2 text-2xl font-bold text-emerald-700">
               {summary.ready}
             </div>
           </button>
 
           <button
             type="button"
-            onClick={() => setMetricFilter("requires_action")}
+            onClick={() => setMetricFilter("not_ready")}
             className={`rounded-2xl border p-5 text-left shadow-sm transition ${getMetricCardClasses(
-              metricFilter === "requires_action",
-              "red"
+              metricFilter === "not_ready"
             )}`}
           >
-            <div className="text-sm text-slate-500">{texts.requiresAction}</div>
-            <div className="mt-2 text-3xl font-bold text-red-700">
-              {summary.requiresAction}
+            <div className="text-sm text-slate-500">
+              {language === "en" ? "Not ready" : "Μη ετοιμα"}
             </div>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setMetricFilter("alerts")}
-            className={`rounded-2xl border p-5 text-left shadow-sm transition ${getMetricCardClasses(
-              metricFilter === "alerts",
-              "red"
-            )}`}
-          >
-            <div className="text-sm text-slate-500">{texts.alerts}</div>
-            <div className="mt-2 text-3xl font-bold text-red-700">
-              {summary.alerts}
+            <div className="mt-2 text-2xl font-bold text-red-700">
+              {summary.notReady}
             </div>
           </button>
         </section>
@@ -917,6 +1023,14 @@ export default function PropertiesPage() {
                       <th className="px-4 py-3 font-semibold">{texts.property}</th>
                       <th className="px-4 py-3 font-semibold">{texts.address}</th>
                       <th className="px-4 py-3 font-semibold">{texts.readiness}</th>
+                      <th className="px-4 py-3 font-semibold">
+                        {language === "en" ? "Next check-in" : "Επομενο check-in"}
+                      </th>
+                      <th className="px-4 py-3 font-semibold">
+                        {language === "en"
+                          ? "Operational counters"
+                          : "Επιχειρησιακοι μετρητες"}
+                      </th>
                       <th className="px-4 py-3 font-semibold">{texts.updated}</th>
                       <th className="px-4 py-3 text-right font-semibold">
                         {texts.actions}
@@ -926,13 +1040,21 @@ export default function PropertiesPage() {
 
                   <tbody className="divide-y divide-slate-100">
                     {filteredProperties.map((property) => {
-                      const criticalAlert = hasCriticalCheckInAlert(property)
-                      const activeAlert = hasActiveAlert(property)
-                      const ready = isPropertyOperationallyReady(property)
-                      const readiness = getPropertyReadinessDetails(
+                      const readinessStatus = getTodayReadinessStatus(
                         property,
-                        language
+                        todayReference
                       )
+                      const readinessExplanation = getTodayReadinessExplanation(
+                        property,
+                        language,
+                        todayReference
+                      )
+                      const counts = getOperationalCountsForToday(
+                        property,
+                        todayReference
+                      )
+                      const nextBooking = getNextUpcomingBooking(property)
+                      const location = formatLocation(property)
 
                       return (
                         <tr key={property.id} className="hover:bg-slate-50/70">
@@ -950,39 +1072,64 @@ export default function PropertiesPage() {
                           </td>
 
                           <td className="px-4 py-4 align-top">
-                            <div className="text-slate-900">{property.address}</div>
-                            <div className="mt-1 text-xs text-slate-500">
-                              {property.city}, {property.region}
+                            <div className="text-slate-900">
+                              {location || "—"}
                             </div>
                           </td>
 
                           <td className="px-4 py-4 align-top">
-                            <div className="flex flex-col gap-2">
+                            <div className="flex max-w-xs flex-col gap-2">
                               <span
-                                className={`inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold ${
-                                  ready
-                                    ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
-                                    : "bg-amber-50 text-amber-700 ring-1 ring-amber-200"
-                                }`}
+                                className={`inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold ${getReadinessBadgeClasses(
+                                  readinessStatus
+                                )}`}
                               >
-                                {readiness.label}
+                                {getReadinessLabel(language, readinessStatus)}
                               </span>
 
-                              {activeAlert ? (
-                                <span className="inline-flex w-fit rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 ring-1 ring-red-200">
-                                  {texts.activeTaskAlert}
-                                </span>
-                              ) : null}
-
-                              {criticalAlert ? (
-                                <span className="inline-flex w-fit rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 ring-1 ring-red-200">
-                                  {texts.criticalAlert}
-                                </span>
-                              ) : null}
-
-                              <div className="text-xs text-slate-500">
-                                {readiness.detail}
+                              <div className="text-xs leading-5 text-slate-500">
+                                {readinessExplanation}
                               </div>
+                            </div>
+                          </td>
+
+                          <td className="px-4 py-4 align-top">
+                            {nextBooking ? (
+                              <div>
+                                <div className="text-sm font-medium text-slate-900">
+                                  {formatDateTime(
+                                    nextBooking.checkInAt?.toISOString(),
+                                    texts.locale
+                                  )}
+                                </div>
+                                <div className="mt-1 text-xs text-slate-500">
+                                  {language === "en"
+                                    ? "Upcoming confirmed or pending arrival"
+                                    : "Επομενη επιβεβαιωμενη ή εκκρεμης αφιξη"}
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="text-sm text-slate-500">—</div>
+                            )}
+                          </td>
+
+                          <td className="px-4 py-4 align-top">
+                            <div className="flex flex-wrap gap-2">
+                              {counterConfigs.map((config) => {
+                                const count = counts[config.key]
+
+                                return (
+                                  <span
+                                    key={config.key}
+                                    title={config.description}
+                                    className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${getCounterToneClasses(
+                                      count
+                                    )}`}
+                                  >
+                                    {config.label}: {count}
+                                  </span>
+                                )
+                              })}
                             </div>
                           </td>
 
@@ -1009,13 +1156,21 @@ export default function PropertiesPage() {
 
               <div className="grid gap-4 p-4 sm:p-6 xl:hidden">
                 {filteredProperties.map((property) => {
-                  const criticalAlert = hasCriticalCheckInAlert(property)
-                  const activeAlert = hasActiveAlert(property)
-                  const ready = isPropertyOperationallyReady(property)
-                  const readiness = getPropertyReadinessDetails(
+                  const readinessStatus = getTodayReadinessStatus(
                     property,
-                    language
+                    todayReference
                   )
+                  const readinessExplanation = getTodayReadinessExplanation(
+                    property,
+                    language,
+                    todayReference
+                  )
+                  const counts = getOperationalCountsForToday(
+                    property,
+                    todayReference
+                  )
+                  const nextBooking = getNextUpcomingBooking(property)
+                  const location = formatLocation(property)
 
                   return (
                     <div
@@ -1030,58 +1185,69 @@ export default function PropertiesPage() {
                           <div className="mt-1 text-xs text-slate-500">
                             {property.code}
                           </div>
+                          <div className="mt-1 text-xs text-slate-500">
+                            {getPropertyTypeLabel(language, property.type)} ·{" "}
+                            {getPropertyStatusLabel(language, property.status)}
+                          </div>
                         </div>
 
                         <span
-                          className={`inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold ${getStatusBadgeClasses(
-                            property.status
+                          className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${getReadinessBadgeClasses(
+                            readinessStatus
                           )}`}
                         >
-                          {getPropertyStatusLabel(language, property.status)}
+                          {getReadinessLabel(language, readinessStatus)}
                         </span>
                       </div>
 
                       <div className="mt-4 text-sm text-slate-900">
-                        {property.address}
+                        {location || "—"}
                       </div>
-                      <div className="mt-1 text-sm text-slate-500">
-                        {property.city}, {property.region}
+
+                      <div className="mt-3 text-xs leading-5 text-slate-500">
+                        {readinessExplanation}
                       </div>
 
                       <div className="mt-4 flex flex-wrap gap-2">
-                        <span
-                          className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
-                            ready
-                              ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
-                              : "bg-amber-50 text-amber-700 ring-1 ring-amber-200"
-                          }`}
-                        >
-                          {readiness.label}
-                        </span>
+                        {counterConfigs.map((config) => {
+                          const count = counts[config.key]
 
-                        {activeAlert ? (
-                          <span className="inline-flex rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 ring-1 ring-red-200">
-                            {texts.activeTaskAlert}
-                          </span>
-                        ) : null}
-
-                        {criticalAlert ? (
-                          <span className="inline-flex rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 ring-1 ring-red-200">
-                            {texts.criticalAlert}
-                          </span>
-                        ) : null}
+                          return (
+                            <span
+                              key={config.key}
+                              title={config.description}
+                              className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${getCounterToneClasses(
+                                count
+                              )}`}
+                            >
+                              {config.label}: {count}
+                            </span>
+                          )
+                        })}
                       </div>
 
-                      <div className="mt-3 text-xs text-slate-500">
-                        {readiness.detail}
-                      </div>
-
-                      <div className="mt-4">
-                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                          {texts.updated}
+                      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                        <div>
+                          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            {language === "en" ? "Next check-in" : "Επομενο check-in"}
+                          </div>
+                          <div className="mt-1 text-sm text-slate-900">
+                            {nextBooking
+                              ? formatDateTime(
+                                  nextBooking.checkInAt?.toISOString(),
+                                  texts.locale
+                                )
+                              : "—"}
+                          </div>
                         </div>
-                        <div className="mt-1 text-sm text-slate-900">
-                          {formatDateTime(property.updatedAt, texts.locale)}
+
+                        <div>
+                          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            {texts.updated}
+                          </div>
+                          <div className="mt-1 text-sm text-slate-900">
+                            {formatDateTime(property.updatedAt, texts.locale)}
+                          </div>
                         </div>
                       </div>
 

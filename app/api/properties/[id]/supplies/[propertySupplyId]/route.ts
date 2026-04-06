@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { requireApiAppAccess, canAccessOrganization } from "@/lib/route-access"
 import { SUPPLY_STATUS_OPTIONS, getSupplyPresetByCode } from "@/lib/supply-presets"
+import { refreshPropertyReadinessSnapshot } from "@/lib/properties/readiness-snapshot"
 
 type RouteContext = {
   params: Promise<{
@@ -440,13 +441,28 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       data: {
         ...(currentStock !== null ? { currentStock } : {}),
         ...(targetStock !== null ? { targetStock, targetLevel: targetStock } : {}),
-        ...(reorderThreshold !== null ? { reorderThreshold, minimumThreshold: reorderThreshold } : {}),
+        ...(reorderThreshold !== null
+          ? { reorderThreshold, minimumThreshold: reorderThreshold }
+          : {}),
         ...(notes !== undefined ? { notes } : {}),
         lastUpdatedAt: new Date(),
       },
     })
 
     await syncSupplyTemplate(property.id, property.organizationId)
+
+    try {
+      await refreshPropertyReadinessSnapshot({
+        propertyId: property.id,
+        organizationId: property.organizationId,
+      })
+    } catch (readinessError) {
+      console.error(
+        "PATCH property supply readiness snapshot refresh error:",
+        readinessError
+      )
+    }
+
     const payload = await buildResponse(property.id)
 
     return NextResponse.json(payload)
@@ -507,6 +523,19 @@ export async function DELETE(_request: NextRequest, context: RouteContext) {
     })
 
     await syncSupplyTemplate(property.id, property.organizationId)
+
+    try {
+      await refreshPropertyReadinessSnapshot({
+        propertyId: property.id,
+        organizationId: property.organizationId,
+      })
+    } catch (readinessError) {
+      console.error(
+        "DELETE property supply readiness snapshot refresh error:",
+        readinessError
+      )
+    }
+
     const payload = await buildResponse(property.id)
 
     return NextResponse.json(payload)

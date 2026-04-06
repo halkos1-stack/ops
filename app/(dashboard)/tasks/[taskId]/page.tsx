@@ -143,6 +143,59 @@ type ActivityLog = {
   createdAt?: string | null
 }
 
+type PropertyCondition = {
+  id: string
+  title?: string | null
+  description?: string | null
+  conditionType?: string | null
+  status?: string | null
+  severity?: string | null
+  blockingStatus?: string | null
+  managerDecision?: string | null
+  sourceTaskId?: string | null
+  taskId?: string | null
+  createdFromTaskId?: string | null
+  originTaskId?: string | null
+  linkedChecklistRunId?: string | null
+  linkedChecklistAnswerId?: string | null
+  createdAt?: string | null
+  updatedAt?: string | null
+  resolvedAt?: string | null
+}
+
+type TaskIssue = {
+  id: string
+  title?: string | null
+  description?: string | null
+  issueType?: string | null
+  type?: string | null
+  status?: string | null
+  severity?: string | null
+  blockingStatus?: string | null
+  createdAt?: string | null
+  updatedAt?: string | null
+  resolvedAt?: string | null
+  propertyConditionId?: string | null
+}
+
+type TaskWarning = {
+  id?: string | null
+  code?: string | null
+  title?: string | null
+  message?: string | null
+  severity?: string | null
+}
+
+type ReadinessSnapshot = {
+  status?: string | null
+  blockingCount?: number | null
+  warningCount?: number | null
+  openConditionsCount?: number | null
+  reasonSummary?: string[] | null
+  summary?: string | null
+  nextCheckInAt?: string | null
+}
+
 type PropertyLists = {
   cleaning: {
     availableOnProperty: boolean
@@ -178,6 +231,22 @@ type PropertyLists = {
       }
     }>
   }
+  issues: {
+    availableOnProperty: boolean
+    activeIssuesCount: number
+    items: Array<{
+      id: string
+      title: string
+      description?: string | null
+      issueType?: string | null
+      severity?: string | null
+      blockingStatus?: string | null
+      status?: string | null
+      createdAt?: string | null
+      updatedAt?: string | null
+      resolvedAt?: string | null
+    }>
+  }
 }
 
 type TaskDetails = {
@@ -205,11 +274,17 @@ type TaskDetails = {
   assignments?: TaskAssignment[]
   cleaningChecklistRun?: TaskChecklistRun | null
   suppliesChecklistRun?: TaskChecklistRun | null
+  issuesChecklistRun?: TaskChecklistRun | null
   checklistRun?: TaskChecklistRun | null
   activityLogs?: ActivityLog[]
   propertyLists?: PropertyLists
+  propertyConditions?: PropertyCondition[]
+  issues?: TaskIssue[]
+  warnings?: Array<TaskWarning | string>
+  readiness?: ReadinessSnapshot | null
   sendCleaningChecklist?: boolean
   sendSuppliesChecklist?: boolean
+  sendIssuesChecklist?: boolean
 }
 
 type ScheduleFormState = {
@@ -242,7 +317,7 @@ type EditableChecklistItem = {
 }
 
 type ChecklistEditorState = {
-  checklistKey: "cleaning" | null
+  checklistKey: "cleaning" | "issues" | null
   title: string
   active: boolean
   items: EditableChecklistItem[]
@@ -472,6 +547,20 @@ function normalizeSystemGeneratedTaskTitle(rawTitle: unknown, language: "el" | "
       : `Αναπλήρωση αναλωσίμων - ${match[1]}`
   }
 
+  match = title.match(/^Βλάβες και ζημιές\s*-\s*(.+)$/i)
+  if (match?.[1]) {
+    return language === "en"
+      ? `Issues and damages - ${match[1]}`
+      : `Βλάβες και ζημιές - ${match[1]}`
+  }
+
+  match = title.match(/^Issues and damages\s*-\s*(.+)$/i)
+  if (match?.[1]) {
+    return language === "en"
+      ? `Issues and damages - ${match[1]}`
+      : `Βλάβες και ζημιές - ${match[1]}`
+  }
+
   return title
 }
 
@@ -509,6 +598,18 @@ function normalizeChecklistTitleForUi(
 
   if (looksLikeGeneratedSuppliesTitle) {
     return language === "en" ? "Supplies list" : "Λίστα αναλωσίμων"
+  }
+
+  const looksLikeGeneratedIssuesTitle =
+    /^(issues checklist|issues list|damages list|damage checklist|issues and damages)(\s*[·\-].*)?$/.test(normalized) ||
+    /^(λίστα βλαβών|λίστα ζημιών|λίστα βλαβών και ζημιών|βλάβες και ζημιές|βλαβες και ζημιες)(\s*[·\-].*)?$/.test(normalized) ||
+    (normalized.includes("issue") && normalized.includes("task")) ||
+    (normalized.includes("damage") && normalized.includes("task")) ||
+    (normalized.includes("βλαβ") && normalized.includes("εργασ")) ||
+    (normalized.includes("ζημι") && normalized.includes("εργασ"))
+
+  if (looksLikeGeneratedIssuesTitle) {
+    return language === "en" ? "Issues and damages list" : "Λίστα βλαβών και ζημιών"
   }
 
   return title
@@ -579,6 +680,9 @@ function normalizeFreeTextByLanguage(value: unknown, language: "el" | "en") {
     if (normalized === "completed") return "Ολοκληρώθηκε"
     if (normalized === "not submitted") return "Δεν υποβλήθηκε"
     if (normalized === "pending") return "Αναμονή"
+    if (normalized === "warning") return "Προειδοποίηση"
+    if (normalized === "open") return "Ανοιχτό"
+    if (normalized === "resolved") return "Επιλύθηκε"
   }
 
   if (language === "en") {
@@ -588,21 +692,28 @@ function normalizeFreeTextByLanguage(value: unknown, language: "el" | "en") {
     if (normalized === "ολοκληρώθηκε") return "Completed"
     if (normalized === "δεν υποβλήθηκε") return "Not submitted"
     if (normalized === "αναμονή" || normalized === "αναμονη") return "Pending"
+    if (normalized === "προειδοποίηση" || normalized === "προειδοποιηση") return "Warning"
+    if (normalized === "ανοιχτό" || normalized === "ανοιχτο") return "Open"
+    if (normalized === "επιλύθηκε" || normalized === "επιλυθηκε") return "Resolved"
   }
 
   return text
+}
+
+function getLanguageUnknownLabel(language: "el" | "en") {
+  return language === "en" ? "Unknown" : "Άγνωστο"
 }
 function getActiveAssignment(assignments?: TaskAssignment[]) {
   if (!assignments || assignments.length === 0) return null
 
   const order: Record<string, number> = {
-    accepted: 1,
-    assigned: 2,
-    pending: 3,
-    rejected: 4,
-    cancelled: 5,
-    completed: 6,
-    unknown: 7,
+    ACCEPTED: 1,
+    ASSIGNED: 2,
+    PENDING: 3,
+    REJECTED: 4,
+    CANCELLED: 5,
+    COMPLETED: 6,
+    UNKNOWN: 7,
   }
 
   const sorted = [...assignments].sort((a, b) => {
@@ -625,12 +736,16 @@ function hasAssignmentAccepted(assignment?: TaskAssignment | null) {
   return status === "accepted" || Boolean(assignment.acceptedAt)
 }
 
-function buildEditableItemsFromCleaningSource(task: TaskDetails | null): EditableChecklistItem[] {
-  const runItems = task?.cleaningChecklistRun?.items || []
+function buildEditableItemsFromRunOrPropertySource(params: {
+  run?: TaskChecklistRun | null
+  fallbackItems?: TaskChecklistTemplateItem[]
+  prefix: string
+}): EditableChecklistItem[] {
+  const runItems = params.run?.items || []
 
   if (runItems.length > 0) {
     return runItems.map((item, index) => ({
-      localId: `cleaning-run-${item.id || index}-${index}`,
+      localId: `${params.prefix}-run-${item.id || index}-${index}`,
       sourceId: item.id,
       label: item.label || "",
       description: item.description || "",
@@ -648,9 +763,8 @@ function buildEditableItemsFromCleaningSource(task: TaskDetails | null): Editabl
     }))
   }
 
-  const propertyItems = task?.propertyLists?.cleaning?.primaryTemplate?.items || []
-  return propertyItems.map((item, index) => ({
-    localId: `cleaning-property-${item.id || index}-${index}`,
+  return (params.fallbackItems || []).map((item, index) => ({
+    localId: `${params.prefix}-property-${item.id || index}-${index}`,
     sourceId: item.id,
     label: item.label || "",
     description: item.description || "",
@@ -666,6 +780,22 @@ function buildEditableItemsFromCleaningSource(task: TaskDetails | null): Editabl
     issueSeverityOnFail: item.issueSeverityOnFail || "medium",
     failureValuesText: item.failureValuesText || "",
   }))
+}
+
+function buildEditableItemsFromCleaningSource(task: TaskDetails | null): EditableChecklistItem[] {
+  return buildEditableItemsFromRunOrPropertySource({
+    run: task?.cleaningChecklistRun || null,
+    fallbackItems: task?.propertyLists?.cleaning?.primaryTemplate?.items || [],
+    prefix: "cleaning",
+  })
+}
+
+function buildEditableItemsFromIssuesSource(task: TaskDetails | null): EditableChecklistItem[] {
+  return buildEditableItemsFromRunOrPropertySource({
+    run: task?.issuesChecklistRun || null,
+    fallbackItems: [],
+    prefix: "issues",
+  })
 }
 
 function isChecklistActuallySent(params: {
@@ -717,14 +847,47 @@ function runLooksLikeSuppliesByAnswers(run?: TaskChecklistRun | null) {
   })
 }
 
-function classifyRunKind(run?: TaskChecklistRun | null): "cleaning" | "supplies" | "unknown" {
+function runLooksLikeIssuesByAnswers(run?: TaskChecklistRun | null) {
+  if (!run?.answers?.length) return false
+
+  return run.answers.some((answer) => {
+    const text = String(answer.valueText ?? "").trim().toLowerCase()
+    const select = String(answer.valueSelect ?? "").trim().toLowerCase()
+    const note = String(answer.note ?? "").trim().toLowerCase()
+    const label = String(answer.itemLabel ?? "").trim().toLowerCase()
+
+    return (
+      Boolean(answer.issueCreated) ||
+      label.includes("βλαβ") ||
+      label.includes("ζημι") ||
+      label.includes("issue") ||
+      label.includes("damage") ||
+      note.includes("βλαβ") ||
+      note.includes("ζημι") ||
+      note.includes("issue") ||
+      note.includes("damage") ||
+      text.includes("βλαβ") ||
+      text.includes("ζημι") ||
+      text.includes("issue") ||
+      text.includes("damage") ||
+      select === "damage" ||
+      select === "issue"
+    )
+  })
+}
+
+function classifyRunKind(run?: TaskChecklistRun | null): "cleaning" | "supplies" | "issues" | "unknown" {
   if (!run) return "unknown"
 
   const typeText = String(run.checklistType || "").trim().toLowerCase()
   if (typeText.includes("suppl")) return "supplies"
   if (typeText.includes("clean")) return "cleaning"
+  if (typeText.includes("issue") || typeText.includes("damage") || typeText.includes("repair")) {
+    return "issues"
+  }
   if (typeText.includes("αναλω")) return "supplies"
   if (typeText.includes("καθαρ")) return "cleaning"
+  if (typeText.includes("βλαβ") || typeText.includes("ζημι")) return "issues"
 
   const titleText = getRunTitleText(run)
 
@@ -734,6 +897,16 @@ function classifyRunKind(run?: TaskChecklistRun | null): "cleaning" | "supplies"
 
   if (titleText.includes("clean") || titleText.includes("καθαρ")) {
     return "cleaning"
+  }
+
+  if (
+    titleText.includes("issue") ||
+    titleText.includes("damage") ||
+    titleText.includes("repair") ||
+    titleText.includes("βλαβ") ||
+    titleText.includes("ζημι")
+  ) {
+    return "issues"
   }
 
   const items = run.items || []
@@ -759,7 +932,39 @@ function classifyRunKind(run?: TaskChecklistRun | null): "cleaning" | "supplies"
   })
 
   if (hasSupplySignals) return "supplies"
+
+  const hasIssueSignals = items.some((item) => {
+    const categoryText = String(item.category || "").toLowerCase()
+    const labelText = String(item.label || "").toLowerCase()
+    const descriptionText = String(item.description || "").toLowerCase()
+    const issueType = String(item.issueTypeOnFail || "").toLowerCase()
+
+    return (
+      Boolean(item.opensIssueOnFail) ||
+      issueType === "damage" ||
+      issueType === "repair" ||
+      issueType === "general" ||
+      categoryText.includes("issue") ||
+      categoryText.includes("damage") ||
+      categoryText.includes("repair") ||
+      categoryText.includes("βλαβ") ||
+      categoryText.includes("ζημι") ||
+      labelText.includes("issue") ||
+      labelText.includes("damage") ||
+      labelText.includes("repair") ||
+      labelText.includes("βλαβ") ||
+      labelText.includes("ζημι") ||
+      descriptionText.includes("issue") ||
+      descriptionText.includes("damage") ||
+      descriptionText.includes("repair") ||
+      descriptionText.includes("βλαβ") ||
+      descriptionText.includes("ζημι")
+    )
+  })
+
+  if (hasIssueSignals) return "issues"
   if (runLooksLikeSuppliesByAnswers(run)) return "supplies"
+  if (runLooksLikeIssuesByAnswers(run)) return "issues"
   if (items.length > 0) return "cleaning"
 
   return "unknown"
@@ -768,9 +973,12 @@ function classifyRunKind(run?: TaskChecklistRun | null): "cleaning" | "supplies"
 function getAllRuns(task: TaskDetails | null): TaskChecklistRun[] {
   if (!task) return []
 
-  const source = [task.cleaningChecklistRun, task.suppliesChecklistRun, task.checklistRun].filter(
-    Boolean
-  ) as TaskChecklistRun[]
+  const source = [
+    task.cleaningChecklistRun,
+    task.suppliesChecklistRun,
+    task.issuesChecklistRun,
+    task.checklistRun,
+  ].filter(Boolean) as TaskChecklistRun[]
 
   const seen = new Set<string>()
   const unique: TaskChecklistRun[] = []
@@ -790,8 +998,9 @@ function resolveChecklistRuns(task: TaskDetails | null) {
 
   let cleaning: TaskChecklistRun | null = task?.cleaningChecklistRun || null
   let supplies: TaskChecklistRun | null = task?.suppliesChecklistRun || null
+  let issues: TaskChecklistRun | null = task?.issuesChecklistRun || null
 
-  if (!cleaning || !supplies) {
+  if (!cleaning || !supplies || !issues) {
     for (const run of allRuns) {
       const kind = classifyRunKind(run)
 
@@ -802,11 +1011,16 @@ function resolveChecklistRuns(task: TaskDetails | null) {
 
       if (kind === "supplies" && !supplies) {
         supplies = run
+        continue
+      }
+
+      if (kind === "issues" && !issues) {
+        issues = run
       }
     }
   }
 
-  if (!cleaning && !supplies && allRuns.length === 1) {
+  if (!cleaning && !supplies && !issues && allRuns.length === 1) {
     const onlyRun = allRuns[0]
     const kind = classifyRunKind(onlyRun)
 
@@ -814,10 +1028,14 @@ function resolveChecklistRuns(task: TaskDetails | null) {
       cleaning = onlyRun
     } else if (kind === "supplies") {
       supplies = onlyRun
-    } else if (task?.sendCleaningChecklist && !task?.sendSuppliesChecklist) {
+    } else if (kind === "issues") {
+      issues = onlyRun
+    } else if (task?.sendCleaningChecklist && !task?.sendSuppliesChecklist && !task?.sendIssuesChecklist) {
       cleaning = onlyRun
-    } else if (task?.sendSuppliesChecklist && !task?.sendCleaningChecklist) {
+    } else if (task?.sendSuppliesChecklist && !task?.sendCleaningChecklist && !task?.sendIssuesChecklist) {
       supplies = onlyRun
+    } else if (task?.sendIssuesChecklist && !task?.sendCleaningChecklist && !task?.sendSuppliesChecklist) {
+      issues = onlyRun
     }
   }
 
@@ -835,7 +1053,14 @@ function resolveChecklistRuns(task: TaskDetails | null) {
     }
   }
 
-  return { cleaning, supplies }
+  if (!issues && task?.sendIssuesChecklist && task?.checklistRun) {
+    const fallbackRun = task.checklistRun
+    if (classifyRunKind(fallbackRun) === "issues" || runLooksLikeIssuesByAnswers(fallbackRun)) {
+      issues = fallbackRun
+    }
+  }
+
+  return { cleaning, supplies, issues }
 }
 
 function getAnswerPhotos(answer?: TaskChecklistAnswer | null): string[] {
@@ -895,13 +1120,14 @@ function answerHasData(answer?: TaskChecklistAnswer | null) {
   if (answer.valueSelect && answer.valueSelect.trim()) return true
   if (answer.valueNumber !== null && answer.valueNumber !== undefined) return true
   if (answer.note && answer.note.trim()) return true
+  if (Boolean(answer.issueCreated)) return true
   if (getAnswerPhotos(answer).length > 0) return true
   return false
 }
 
 function getSubmissionTimeFromActivityLogs(
   activityLogs: ActivityLog[] | undefined,
-  kind: "cleaning" | "supplies"
+  kind: "cleaning" | "supplies" | "issues"
 ) {
   if (!activityLogs?.length) return null
 
@@ -921,11 +1147,22 @@ function getSubmissionTimeFromActivityLogs(
       )
     }
 
-    if (action === "PARTNER_SUPPLIES_SUBMITTED") return true
+    if (kind === "supplies") {
+      if (action === "PARTNER_SUPPLIES_SUBMITTED") return true
+
+      return (
+        /submitted the supplies from the portal/i.test(message) ||
+        /υπέβαλε τα αναλώσιμα από το portal/i.test(message)
+      )
+    }
+
+    if (action === "PARTNER_ISSUES_SUBMITTED") return true
 
     return (
-      /submitted the supplies from the portal/i.test(message) ||
-      /υπέβαλε τα αναλώσιμα από το portal/i.test(message)
+      /submitted the issues list from the portal/i.test(message) ||
+      /submitted the issues and damages list from the portal/i.test(message) ||
+      /υπέβαλε τη λίστα βλαβών από το portal/i.test(message) ||
+      /υπέβαλε τη λίστα βλαβών και ζημιών από το portal/i.test(message)
     )
   })
 
@@ -1025,6 +1262,10 @@ function answerValueLabel(
     return normalizeFreeTextByLanguage(answer.valueText, language)
   }
 
+  if (answer.issueCreated) {
+    return language === "en" ? "Issue created" : "Δημιουργήθηκε θέμα"
+  }
+
   return texts.common.noAnswer
 }
 
@@ -1102,6 +1343,17 @@ function buildActivitySuppliesSubmittedMessage(
   return `Ο συνεργάτης ${partnerName} υπέβαλε τα αναλώσιμα από το portal.`
 }
 
+function buildActivityIssuesSubmittedMessage(
+  language: "el" | "en",
+  partnerName: string
+) {
+  if (language === "en") {
+    return `Partner ${partnerName} submitted the issues and damages list from the portal.`
+  }
+
+  return `Ο συνεργάτης ${partnerName} υπέβαλε τη λίστα βλαβών και ζημιών από το portal.`
+}
+
 function buildActivityPhotoUploadedMessage(
   language: "el" | "en",
   partnerName: string,
@@ -1162,6 +1414,15 @@ function tryTranslateGenericActivityMessage(rawMessage: string, language: "el" |
   }
 
   match =
+    message.match(/^Partner\s+(.+?)\s+submitted the issues list from the portal\.?$/i) ||
+    message.match(/^Partner\s+(.+?)\s+submitted the issues and damages list from the portal\.?$/i) ||
+    message.match(/^Ο συνεργάτης\s+(.+?)\s+υπέβαλε τη λίστα βλαβών από το portal\.?$/i) ||
+    message.match(/^Ο συνεργάτης\s+(.+?)\s+υπέβαλε τη λίστα βλαβών και ζημιών από το portal\.?$/i)
+  if (match?.[1]) {
+    return buildActivityIssuesSubmittedMessage(language, match[1].trim())
+  }
+
+  match =
     message.match(/^Partner\s+(.+?)\s+uploaded a photo for item\s+"(.+)"\.?$/i) ||
     message.match(/^Ο συνεργάτης\s+(.+?)\s+ανέβασε φωτογραφία για το στοιχείο\s+"(.+)"\.?$/i)
   if (match?.[1] && match?.[2]) {
@@ -1206,6 +1467,8 @@ function tryTranslateGenericActivityMessage(rawMessage: string, language: "el" |
       .replace(/\s+submitted the supplies from the portal\.?$/i, " υπέβαλε τα αναλώσιμα από το portal.")
       .replace(/\s+submitted the cleaning list from the portal\.?$/i, " υπέβαλε τη λίστα καθαριότητας από το portal.")
       .replace(/\s+submitted the checklist from the portal\.?$/i, " υπέβαλε τη λίστα καθαριότητας από το portal.")
+      .replace(/\s+submitted the issues list from the portal\.?$/i, " υπέβαλε τη λίστα βλαβών και ζημιών από το portal.")
+      .replace(/\s+submitted the issues and damages list from the portal\.?$/i, " υπέβαλε τη λίστα βλαβών και ζημιών από το portal.")
       .replace(/\s+uploaded a photo for item\s+/i, ' ανέβασε φωτογραφία για το στοιχείο ')
       .replace(/\s+accepted task\s+/i, ' αποδέχτηκε την εργασία ')
       .replace(/\s+rejected task\s+/i, ' απέρριψε την εργασία ')
@@ -1223,6 +1486,8 @@ function tryTranslateGenericActivityMessage(rawMessage: string, language: "el" |
     .replace(/\s+υπέβαλε τη λίστα καθαριότητας από το portal\.?$/i, " submitted the cleaning list from the portal.")
     .replace(/\s+υπέβαλε τη λίστα από το portal\.?$/i, " submitted the cleaning list from the portal.")
     .replace(/\s+υπέβαλε τη checklist από το portal\.?$/i, " submitted the cleaning list from the portal.")
+    .replace(/\s+υπέβαλε τη λίστα βλαβών από το portal\.?$/i, " submitted the issues and damages list from the portal.")
+    .replace(/\s+υπέβαλε τη λίστα βλαβών και ζημιών από το portal\.?$/i, " submitted the issues and damages list from the portal.")
     .replace(/\s+ανέβασε φωτογραφία για το στοιχείο\s+/i, ' uploaded a photo for item ')
     .replace(/\s+αποδέχτηκε την εργασία\s+/i, ' accepted task ')
     .replace(/\s+απέρριψε την εργασία\s+/i, ' rejected task ')
@@ -1240,6 +1505,101 @@ function normalizeActivityMessage(log: ActivityLog, language: "el" | "en") {
 
   const normalized = tryTranslateGenericActivityMessage(rawMessage, language)
   return cleanupActivityMessageText(normalized)
+}
+
+function normalizeConditionTypeLabel(value: unknown, language: "el" | "en") {
+  const normalized = String(value ?? "").trim().toLowerCase()
+  if (normalized === "supply" || normalized === "supplies") return language === "en" ? "Supply" : "Αναλώσιμο"
+  if (normalized === "issue") return language === "en" ? "Issue" : "Θέμα"
+  if (normalized === "damage") return language === "en" ? "Damage" : "Ζημιά"
+  return String(value ?? "").trim() || getLanguageUnknownLabel(language)
+}
+
+function normalizeConditionStatusLabel(value: unknown, language: "el" | "en") {
+  const normalized = String(value ?? "").trim().toLowerCase()
+  if (normalized === "open") return language === "en" ? "Open" : "Ανοιχτό"
+  if (normalized === "monitoring") return language === "en" ? "Monitoring" : "Παρακολούθηση"
+  if (normalized === "resolved") return language === "en" ? "Resolved" : "Επιλύθηκε"
+  if (normalized === "dismissed") return language === "en" ? "Dismissed" : "Απορρίφθηκε"
+  return String(value ?? "").trim() || getLanguageUnknownLabel(language)
+}
+
+function normalizeBlockingStatusLabel(value: unknown, language: "el" | "en") {
+  const normalized = String(value ?? "").trim().toLowerCase()
+  if (normalized === "blocking") return language === "en" ? "Blocking" : "Μπλοκάρει"
+  if (normalized === "non_blocking") return language === "en" ? "Non blocking" : "Μη μπλοκάρον"
+  if (normalized === "warning") return language === "en" ? "Warning" : "Προειδοποίηση"
+  return String(value ?? "").trim() || getLanguageUnknownLabel(language)
+}
+
+function normalizeSeverityLabel(value: unknown, language: "el" | "en") {
+  const normalized = String(value ?? "").trim().toLowerCase()
+  if (normalized === "low") return language === "en" ? "Low" : "Χαμηλή"
+  if (normalized === "medium") return language === "en" ? "Medium" : "Μεσαία"
+  if (normalized === "high") return language === "en" ? "High" : "Υψηλή"
+  if (normalized === "critical") return language === "en" ? "Critical" : "Κρίσιμη"
+  return String(value ?? "").trim() || getLanguageUnknownLabel(language)
+}
+
+function normalizeManagerDecisionLabel(value: unknown, language: "el" | "en") {
+  const normalized = String(value ?? "").trim().toLowerCase()
+  if (normalized === "allow_with_issue") return language === "en" ? "Allow with issue" : "Επιτρέπεται με θέμα"
+  if (normalized === "block_until_resolved") return language === "en" ? "Block until resolved" : "Μπλοκάρισμα μέχρι επίλυση"
+  if (normalized === "monitor") return language === "en" ? "Monitor" : "Παρακολούθηση"
+  if (normalized === "resolved") return language === "en" ? "Resolved" : "Επιλύθηκε"
+  if (normalized === "dismissed") return language === "en" ? "Dismissed" : "Απορρίφθηκε"
+  return String(value ?? "").trim() || getLanguageUnknownLabel(language)
+}
+
+function getReadinessLabel(value: unknown, language: "el" | "en") {
+  const normalized = String(value ?? "").trim().toLowerCase()
+  if (normalized === "ready") return language === "en" ? "Ready" : "Έτοιμο"
+  if (normalized === "borderline") return language === "en" ? "Borderline" : "Οριακό"
+  if (normalized === "not_ready") return language === "en" ? "Not ready" : "Μη έτοιμο"
+  if (normalized === "unknown") return language === "en" ? "Unknown" : "Άγνωστο"
+  return String(value ?? "").trim() || getLanguageUnknownLabel(language)
+}
+
+function getReadinessTone(value: unknown): "green" | "amber" | "red" | "slate" {
+  const normalized = String(value ?? "").trim().toLowerCase()
+  if (normalized === "ready") return "green"
+  if (normalized === "borderline") return "amber"
+  if (normalized === "not_ready") return "red"
+  return "slate"
+}
+
+function getSeverityTone(value: unknown): "green" | "amber" | "red" | "slate" {
+  const normalized = String(value ?? "").trim().toLowerCase()
+  if (normalized === "low") return "green"
+  if (normalized === "medium") return "amber"
+  if (normalized === "high" || normalized === "critical") return "red"
+  return "slate"
+}
+
+function getBlockingTone(value: unknown): "red" | "amber" | "slate" {
+  const normalized = String(value ?? "").trim().toLowerCase()
+  if (normalized === "blocking") return "red"
+  if (normalized === "warning") return "amber"
+  return "slate"
+}
+
+function getConditionCreatedByTask(condition: PropertyCondition, taskId: string) {
+  return (
+    condition.sourceTaskId === taskId ||
+    condition.taskId === taskId ||
+    condition.createdFromTaskId === taskId ||
+    condition.originTaskId === taskId
+  )
+}
+
+function getWarningMessage(warning: TaskWarning | string, language: "el" | "en") {
+  if (typeof warning === "string") return warning
+  return (
+    warning.message ||
+    warning.title ||
+    warning.code ||
+    (language === "en" ? "Warning" : "Προειδοποίηση")
+  )
 }
 
 function Badge({
@@ -1272,11 +1632,14 @@ function Badge({
 
 function HelpDot({ text }: { text: string }) {
   return (
-    <span
-      className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-300 text-[11px] text-slate-500"
-      title={text}
-    >
-      ?
+    <span className="group relative inline-flex">
+      <span className="inline-flex h-5 w-5 cursor-help items-center justify-center rounded-full border border-slate-300 text-[11px] text-slate-500">
+        ?
+      </span>
+
+      <span className="pointer-events-none absolute left-1/2 top-full z-30 mt-2 w-64 -translate-x-1/2 rounded-xl border border-slate-200 bg-white p-3 text-xs leading-5 text-slate-700 opacity-0 shadow-lg transition duration-150 group-hover:opacity-100">
+        {text}
+      </span>
     </span>
   )
 }
@@ -1369,6 +1732,35 @@ function getSuppliesPreviewDescription(
   return ""
 }
 
+function getIssuesPreviewDescription(
+  item: {
+    description?: string | null
+    category?: string | null
+    issueTypeOnFail?: string | null
+    issueSeverityOnFail?: string | null
+  },
+  language: "el" | "en"
+) {
+  const parts: string[] = []
+
+  if (item.description?.trim()) {
+    parts.push(item.description.trim())
+  }
+
+  if (item.category?.trim()) {
+    parts.push(item.category.trim())
+  }
+
+  if (item.issueTypeOnFail?.trim()) {
+    parts.push(normalizeConditionTypeLabel(item.issueTypeOnFail, language))
+  }
+
+  if (item.issueSeverityOnFail?.trim()) {
+    parts.push(normalizeSeverityLabel(item.issueSeverityOnFail, language))
+  }
+
+  return parts.filter(Boolean).join(" · ")
+}
 function SubmittedAnswersView({
   run,
   submitted,
@@ -1378,6 +1770,7 @@ function SubmittedAnswersView({
   onClose,
   texts,
   language,
+  checklistKind,
 }: {
   run?: TaskChecklistRun | null
   submitted: boolean
@@ -1387,6 +1780,7 @@ function SubmittedAnswersView({
   onClose: () => void
   texts: ReturnType<typeof getTaskDetailsPageTexts>
   language: "el" | "en"
+  checklistKind: "cleaning" | "supplies" | "issues"
 }) {
   if (!submitted) {
     return (
@@ -1412,11 +1806,26 @@ function SubmittedAnswersView({
   const effectiveSubmittedAt = submittedAtOverride || getRunSubmittedAt(run)
   const submittedAt = formatDateTime(effectiveSubmittedAt, locale, texts.common.dash)
 
+  const getKindBadge = () => {
+    if (checklistKind === "cleaning") {
+      return language === "en" ? "Cleaning" : "Καθαριότητα"
+    }
+    if (checklistKind === "supplies") {
+      return language === "en" ? "Supplies" : "Αναλώσιμα"
+    }
+    return language === "en" ? "Issues / Damages" : "Βλάβες / Ζημιές"
+  }
+
+  const getIssueCreatedLabel = () => {
+    return language === "en" ? "Issue created from this answer" : "Δημιουργήθηκε θέμα από αυτή την απάντηση"
+  }
+
   return (
     <div className="space-y-4">
       <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
         <div className="flex flex-wrap items-center gap-2">
           <Badge tone="green">{texts.answers.submittedBanner}</Badge>
+          <Badge tone="blue">{getKindBadge()}</Badge>
           <p className="text-sm text-slate-700">
             {texts.answers.submittedAtLabel}: {submittedAt}
           </p>
@@ -1425,13 +1834,17 @@ function SubmittedAnswersView({
 
       {answers.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-slate-300 p-5 text-sm text-slate-500">
-          {texts.answers.submittedButAnswersMissing}
+          {texts.answers.noAnswersReturned}
         </div>
       ) : (
         <div className="space-y-4">
           {answers.map((answer) => {
             const photos = getAnswerPhotos(answer)
             const cleanedNote = answer.note?.trim() || ""
+            const shouldHideSystemSupplyNote =
+              cleanedNote === texts.lists.hiddenSystemSupplyNote ||
+              cleanedNote === "Ενεργοποιήθηκε από τη διαχείριση λίστας αναλωσίμων." ||
+              cleanedNote === "Activated from supplies list management."
 
             return (
               <div key={answer.id} className="rounded-2xl border border-slate-200 p-4">
@@ -1456,10 +1869,18 @@ function SubmittedAnswersView({
                   ) : null}
                 </div>
 
-                {cleanedNote &&
-                cleanedNote !== texts.lists.hiddenSystemSupplyNote &&
-                cleanedNote !== "Ενεργοποιήθηκε από τη διαχείριση λίστας αναλωσίμων." &&
-                cleanedNote !== "Activated from supplies list management." ? (
+                {answer.issueCreated ? (
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <Badge tone="amber">{getIssueCreatedLabel()}</Badge>
+                    {answer.linkedSupplyItemId ? (
+                      <Badge tone="violet">
+                        {language === "en" ? "Linked supply item" : "Συνδεδεμένο αναλώσιμο"}
+                      </Badge>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {cleanedNote && !shouldHideSystemSupplyNote ? (
                   <div className="mt-3 rounded-2xl bg-slate-50 p-3">
                     <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
                       {texts.answers.note}
@@ -1521,6 +1942,258 @@ function SubmittedAnswersView({
   )
 }
 
+function getChecklistModalTexts(
+  kind: "cleaning" | "supplies" | "issues",
+  texts: ReturnType<typeof getTaskDetailsPageTexts>,
+  language: "el" | "en"
+) {
+  if (kind === "cleaning") {
+    return {
+      title: texts.answers.modalCleaningAnswersTitle,
+      description: texts.answers.modalCleaningAnswersDescription,
+      emptyText: texts.answers.noCleaningSubmission,
+      submittedTitle: texts.answers.cleaningSubmittedTitle,
+      submittedHelp: texts.answers.cleaningSubmissionHelp,
+    }
+  }
+
+  if (kind === "supplies") {
+    return {
+      title: texts.answers.modalSuppliesAnswersTitle,
+      description: texts.answers.modalSuppliesAnswersDescription,
+      emptyText: texts.answers.noSuppliesSubmission,
+      submittedTitle: texts.answers.suppliesSubmittedTitle,
+      submittedHelp: texts.answers.suppliesSubmissionHelp,
+    }
+  }
+
+  return {
+    title:
+      language === "en"
+        ? "Submitted issues and damages"
+        : "Υποβληθείσες βλάβες και ζημιές",
+    description:
+      language === "en"
+        ? "View the answers and photos submitted by the partner for the issues and damages list."
+        : "Δες τις απαντήσεις και τις φωτογραφίες που υπέβαλε ο συνεργάτης για τη λίστα βλαβών και ζημιών.",
+    emptyText:
+      language === "en"
+        ? "No submission has been returned yet for the issues and damages list."
+        : "Δεν έχει επιστραφεί ακόμη υποβολή για τη λίστα βλαβών και ζημιών.",
+    submittedTitle:
+      language === "en"
+        ? "Issues and damages submission"
+        : "Υποβολή βλαβών και ζημιών",
+    submittedHelp:
+      language === "en"
+        ? "View what the partner submitted for the issues and damages list."
+        : "Δες τι υπέβαλε ο συνεργάτης για τη λίστα βλαβών και ζημιών.",
+  }
+}
+
+function getChecklistPreviewTexts(
+  kind: "cleaning" | "supplies" | "issues",
+  texts: ReturnType<typeof getTaskDetailsPageTexts>,
+  language: "el" | "en"
+) {
+  if (kind === "cleaning") {
+    return {
+      title: texts.lists.modalCleaningPreviewTitle,
+      description: texts.lists.modalCleaningPreviewDescription,
+      sectionTitle: texts.lists.cleaningListTitle,
+      defaultTitle: texts.lists.cleaningDefaultTitle,
+    }
+  }
+
+  if (kind === "supplies") {
+    return {
+      title: texts.lists.modalSuppliesPreviewTitle,
+      description: texts.lists.modalSuppliesPreviewDescription,
+      sectionTitle: texts.lists.suppliesListTitle,
+      defaultTitle: texts.lists.suppliesDefaultTitle,
+    }
+  }
+
+  return {
+    title:
+      language === "en"
+        ? "Issues and damages list preview"
+        : "Προεπισκόπηση λίστας βλαβών και ζημιών",
+    description:
+      language === "en"
+        ? "Preview the issues and damages list that is sent for this task."
+        : "Προεπισκόπηση της λίστας βλαβών και ζημιών που αποστέλλεται για αυτή την εργασία.",
+    sectionTitle:
+      language === "en" ? "Issues and damages list" : "Λίστα βλαβών και ζημιών",
+    defaultTitle:
+      language === "en" ? "Issues and damages list" : "Λίστα βλαβών και ζημιών",
+  }
+}
+
+function getChecklistCardTexts(
+  kind: "cleaning" | "supplies" | "issues",
+  texts: ReturnType<typeof getTaskDetailsPageTexts>,
+  language: "el" | "en"
+) {
+  if (kind === "cleaning") {
+    return {
+      title: texts.lists.cleaningListTitle,
+      help: texts.lists.cleaningCardHelp,
+    }
+  }
+
+  if (kind === "supplies") {
+    return {
+      title: texts.lists.suppliesListTitle,
+      help: texts.lists.suppliesCardHelp,
+    }
+  }
+
+  return {
+    title:
+      language === "en" ? "Issues and damages list" : "Λίστα βλαβών και ζημιών",
+    help:
+      language === "en"
+        ? "Shows the task-level list for issues, damages and repair findings that can be sent to the partner."
+        : "Δείχνει τη task-level λίστα για βλάβες, ζημιές και τεχνικά ευρήματα που μπορεί να σταλεί στον συνεργάτη.",
+  }
+}
+
+function getChecklistSubmittedStatusText(
+  submitted: boolean,
+  texts: ReturnType<typeof getTaskDetailsPageTexts>
+) {
+  return submitted ? texts.common.submitted : texts.common.notSubmitted
+}
+
+function getChecklistCompletionBadgeText(
+  submitted: boolean,
+  run: TaskChecklistRun | null | undefined,
+  language: "el" | "en"
+) {
+  if (submitted) {
+    return language === "en" ? "Completed" : "Ολοκληρώθηκε"
+  }
+
+  if (!run) {
+    return language === "en" ? "Not started" : "Δεν ξεκίνησε"
+  }
+
+  return normalizeFreeTextByLanguage(
+    getChecklistStatusLabel(language, normalizeChecklistStatus(run.status)),
+    language
+  )
+}
+
+function getChecklistEnabledFlag(params: {
+  kind: "cleaning" | "supplies" | "issues"
+  task: TaskDetails | null
+  run?: TaskChecklistRun | null
+}) {
+  const { kind, task, run } = params
+
+  if (kind === "cleaning") {
+    return Boolean(task?.sendCleaningChecklist ?? run?.isActive)
+  }
+
+  if (kind === "supplies") {
+    return Boolean(
+      task?.sendSuppliesChecklist ??
+        run?.isActive ??
+        task?.propertyLists?.supplies?.availableOnProperty
+    )
+  }
+
+  return Boolean(
+    task?.sendIssuesChecklist ??
+      run?.isActive ??
+      task?.propertyLists?.issues?.availableOnProperty ??
+      (task?.propertyLists?.issues?.activeIssuesCount || 0) > 0
+  )
+}
+
+function getChecklistPreviewItems(params: {
+  kind: "cleaning" | "supplies" | "issues"
+  task: TaskDetails | null
+  run?: TaskChecklistRun | null
+  language: "el" | "en"
+}) {
+  const { kind, task, run, language } = params
+
+  if (kind === "cleaning") {
+    return (run?.items || task?.propertyLists?.cleaning?.primaryTemplate?.items || []).map(
+      (item, index) => ({
+        id: item.id || `cleaning-${index}`,
+        label: item.label || "",
+        description: item.description || "",
+        category: item.category || "",
+        itemType: item.itemType || "boolean",
+        requiresPhoto: Boolean(item.requiresPhoto),
+        isRequired: Boolean(item.isRequired),
+        issueTypeOnFail: item.issueTypeOnFail || null,
+        issueSeverityOnFail: item.issueSeverityOnFail || null,
+      })
+    )
+  }
+
+  if (kind === "supplies") {
+    if (run?.items?.length) {
+      return run.items.map((item, index) => ({
+        id: item.id || `run-supply-${index}`,
+        label: item.label || "",
+        description: item.description || "",
+        category: item.category || "",
+        itemType: item.itemType || "select",
+        requiresPhoto: Boolean(item.requiresPhoto),
+        isRequired: Boolean(item.isRequired),
+        issueTypeOnFail: item.issueTypeOnFail || null,
+        issueSeverityOnFail: item.issueSeverityOnFail || null,
+      }))
+    }
+
+    return (
+      task?.propertyLists?.supplies?.items?.map((item, index) => ({
+        id: item.id || `supply-${index}`,
+        label: resolveSupplyDisplayName(language, item.supplyItem),
+        description: item.supplyItem.category || "",
+        category: item.supplyItem.category || "",
+        itemType: "select",
+        requiresPhoto: false,
+        isRequired: false,
+        issueTypeOnFail: null,
+        issueSeverityOnFail: null,
+      })) || []
+    )
+  }
+
+  if (run?.items?.length) {
+    return run.items.map((item, index) => ({
+      id: item.id || `run-issue-${index}`,
+      label: item.label || "",
+      description: item.description || "",
+      category: item.category || "",
+      itemType: item.itemType || "text",
+      requiresPhoto: Boolean(item.requiresPhoto),
+      isRequired: Boolean(item.isRequired),
+      issueTypeOnFail: item.issueTypeOnFail || null,
+      issueSeverityOnFail: item.issueSeverityOnFail || null,
+    }))
+  }
+
+  return (
+    task?.propertyLists?.issues?.items?.map((item, index) => ({
+      id: item.id || `issue-${index}`,
+      label: item.title || `${language === "en" ? "Issue" : "Θέμα"} ${index + 1}`,
+      description: item.description || "",
+      category: item.issueType || "",
+      itemType: "text",
+      requiresPhoto: false,
+      isRequired: false,
+      issueTypeOnFail: item.issueType || null,
+      issueSeverityOnFail: item.severity || null,
+    })) || []
+  )
+}
 export default function TaskDetailsPage() {
   const params = useParams<{ taskId: string }>()
   const taskId = String(params?.taskId || "")
@@ -1537,9 +2210,11 @@ export default function TaskDetailsPage() {
   const [openAssignmentModal, setOpenAssignmentModal] = useState(false)
   const [openCleaningPreviewModal, setOpenCleaningPreviewModal] = useState(false)
   const [openSuppliesPreviewModal, setOpenSuppliesPreviewModal] = useState(false)
+  const [openIssuesPreviewModal, setOpenIssuesPreviewModal] = useState(false)
   const [openChecklistEditorModal, setOpenChecklistEditorModal] = useState(false)
   const [openCleaningAnswersModal, setOpenCleaningAnswersModal] = useState(false)
   const [openSuppliesAnswersModal, setOpenSuppliesAnswersModal] = useState(false)
+  const [openIssuesAnswersModal, setOpenIssuesAnswersModal] = useState(false)
 
   const [scheduleForm, setScheduleForm] = useState<ScheduleFormState>({
     scheduledDate: "",
@@ -1611,7 +2286,7 @@ export default function TaskDetailsPage() {
 
   useEffect(() => {
     if (!taskId) return
-    loadTask()
+    void loadTask()
   }, [taskId, language])
 
   const activeAssignment = useMemo(
@@ -1622,13 +2297,19 @@ export default function TaskDetailsPage() {
   const resolvedRuns = useMemo(() => resolveChecklistRuns(task), [task])
   const cleaningRun = resolvedRuns.cleaning
   const suppliesRun = resolvedRuns.supplies
+  const issuesRun = resolvedRuns.issues
 
   const uiTaskTitle = useMemo(() => {
     return normalizeSystemGeneratedTaskTitle(task?.title, language)
   }, [task?.title, language])
 
   const propertyAddress = useMemo(() => {
-    return [task?.property?.address, task?.property?.city, task?.property?.region, task?.property?.country]
+    return [
+      task?.property?.address,
+      task?.property?.city,
+      task?.property?.region,
+      task?.property?.country,
+    ]
       .filter(Boolean)
       .join(", ")
   }, [task?.property])
@@ -1642,27 +2323,26 @@ export default function TaskDetailsPage() {
     return "slate"
   }, [task?.status])
 
-  const cleaningStatusLabel = cleaningRun
-    ? normalizeFreeTextByLanguage(
-        getChecklistStatusLabel(language, normalizeChecklistStatus(cleaningRun?.status)),
-        language
-      )
-    : texts.common.dash
-
-  const suppliesStatusLabel = suppliesRun
-    ? normalizeFreeTextByLanguage(
-        getChecklistStatusLabel(language, normalizeChecklistStatus(suppliesRun?.status)),
-        language
-      )
-    : texts.common.dash
-
   const cleaningSubmittedAt = useMemo(() => {
-    return getRunSubmittedAt(cleaningRun) || getSubmissionTimeFromActivityLogs(task?.activityLogs, "cleaning")
+    return (
+      getRunSubmittedAt(cleaningRun) ||
+      getSubmissionTimeFromActivityLogs(task?.activityLogs, "cleaning")
+    )
   }, [cleaningRun, task?.activityLogs])
 
   const suppliesSubmittedAt = useMemo(() => {
-    return getRunSubmittedAt(suppliesRun) || getSubmissionTimeFromActivityLogs(task?.activityLogs, "supplies")
+    return (
+      getRunSubmittedAt(suppliesRun) ||
+      getSubmissionTimeFromActivityLogs(task?.activityLogs, "supplies")
+    )
   }, [suppliesRun, task?.activityLogs])
+
+  const issuesSubmittedAt = useMemo(() => {
+    return (
+      getRunSubmittedAt(issuesRun) ||
+      getSubmissionTimeFromActivityLogs(task?.activityLogs, "issues")
+    )
+  }, [issuesRun, task?.activityLogs])
 
   const cleaningSubmitted = useMemo(() => {
     return Boolean(cleaningSubmittedAt) || runHasSubmission(cleaningRun)
@@ -1672,54 +2352,99 @@ export default function TaskDetailsPage() {
     return Boolean(suppliesSubmittedAt) || runHasSubmission(suppliesRun)
   }, [suppliesSubmittedAt, suppliesRun])
 
+  const issuesSubmitted = useMemo(() => {
+    return Boolean(issuesSubmittedAt) || runHasSubmission(issuesRun)
+  }, [issuesSubmittedAt, issuesRun])
+
+  const cleaningEnabled = useMemo(
+    () =>
+      getChecklistEnabledFlag({
+        kind: "cleaning",
+        task,
+        run: cleaningRun,
+      }),
+    [task, cleaningRun]
+  )
+
+  const suppliesEnabled = useMemo(
+    () =>
+      getChecklistEnabledFlag({
+        kind: "supplies",
+        task,
+        run: suppliesRun,
+      }),
+    [task, suppliesRun]
+  )
+
+  const issuesEnabled = useMemo(
+    () =>
+      getChecklistEnabledFlag({
+        kind: "issues",
+        task,
+        run: issuesRun,
+      }),
+    [task, issuesRun]
+  )
+
   const cleaningSentLabel = getChecklistSentLabel({
     run: cleaningRun,
-    isEnabled: Boolean(task?.sendCleaningChecklist ?? cleaningRun?.isActive),
+    isEnabled: cleaningEnabled,
     activeAssignment,
     texts,
   })
 
   const suppliesSentLabel = getChecklistSentLabel({
     run: suppliesRun,
-    isEnabled: Boolean(
-      task?.sendSuppliesChecklist ??
-        suppliesRun?.isActive ??
-        task?.propertyLists?.supplies?.availableOnProperty
-    ),
+    isEnabled: suppliesEnabled,
     activeAssignment,
     texts,
   })
 
-  const suppliesPreviewItems = useMemo(() => {
-    if (suppliesRun?.items?.length) {
-      return suppliesRun.items.map((item, index) => ({
-        id: item.id || `run-supply-${index}`,
-        label: item.label || "",
-        description: item.description || "",
-        category: item.category || "",
-        itemType: item.itemType || "select",
-      }))
-    }
+  const issuesSentLabel = getChecklistSentLabel({
+    run: issuesRun,
+    isEnabled: issuesEnabled,
+    activeAssignment,
+    texts,
+  })
 
-    return (
-      task?.propertyLists?.supplies?.items?.map((item, index) => ({
-        id: item.id || `supply-${index}`,
-        label: resolveSupplyDisplayName(language, item.supplyItem),
-        description: item.supplyItem.category || "",
-        category: item.supplyItem.category || "",
-        itemType: "select",
-      })) || []
-    )
-  }, [suppliesRun?.items, task?.propertyLists?.supplies?.items, language])
+  const cleaningPreviewItems = useMemo(() => {
+    return getChecklistPreviewItems({
+      kind: "cleaning",
+      task,
+      run: cleaningRun,
+      language,
+    })
+  }, [task, cleaningRun, language])
+
+  const suppliesPreviewItems = useMemo(() => {
+    return getChecklistPreviewItems({
+      kind: "supplies",
+      task,
+      run: suppliesRun,
+      language,
+    })
+  }, [task, suppliesRun, language])
+
+  const issuesPreviewItems = useMemo(() => {
+    return getChecklistPreviewItems({
+      kind: "issues",
+      task,
+      run: issuesRun,
+      language,
+    })
+  }, [task, issuesRun, language])
 
   const cleaningListTitle = useMemo(() => {
     return normalizeChecklistTitleForUi(
-      cleaningRun?.template?.title || task?.propertyLists?.cleaning?.primaryTemplate?.title,
+      cleaningRun?.template?.title ||
+        cleaningRun?.title ||
+        task?.propertyLists?.cleaning?.primaryTemplate?.title,
       texts.lists.cleaningDefaultTitle,
       language
     )
   }, [
     cleaningRun?.template?.title,
+    cleaningRun?.title,
     task?.propertyLists?.cleaning?.primaryTemplate?.title,
     texts.lists.cleaningDefaultTitle,
     language,
@@ -1727,17 +2452,46 @@ export default function TaskDetailsPage() {
 
   const suppliesListTitle = useMemo(() => {
     return normalizeChecklistTitleForUi(
-      suppliesRun?.title,
+      suppliesRun?.title || suppliesRun?.template?.title || suppliesRun?.template?.name,
       texts.lists.suppliesDefaultTitle,
       language
     )
-  }, [suppliesRun?.title, texts.lists.suppliesDefaultTitle, language])
-    function openCleaningEditor() {
+  }, [suppliesRun?.title, suppliesRun?.template?.title, suppliesRun?.template?.name, texts.lists.suppliesDefaultTitle, language])
+
+  const issuesListTitle = useMemo(() => {
+    return normalizeChecklistTitleForUi(
+      issuesRun?.title || issuesRun?.template?.title || issuesRun?.template?.name,
+      language === "en" ? "Issues and damages list" : "Λίστα βλαβών και ζημιών",
+      language
+    )
+  }, [issuesRun?.title, issuesRun?.template?.title, issuesRun?.template?.name, language])
+
+  const propertyConditions = useMemo(() => task?.propertyConditions || [], [task?.propertyConditions])
+  const issues = useMemo(() => task?.issues || [], [task?.issues])
+  const warnings = useMemo(() => task?.warnings || [], [task?.warnings])
+  const readiness = useMemo(() => task?.readiness || null, [task?.readiness])
+
+  const conditionsCreatedByTask = useMemo(() => {
+    if (!task?.id) return []
+    return propertyConditions.filter((condition) => getConditionCreatedByTask(condition, task.id))
+  }, [propertyConditions, task?.id])
+
+  function openCleaningEditor() {
     setChecklistEditor({
       checklistKey: "cleaning",
       title: texts.lists.cleaningListTitle,
-      active: Boolean(task?.sendCleaningChecklist ?? cleaningRun?.isActive),
+      active: cleaningEnabled,
       items: buildEditableItemsFromCleaningSource(task),
+    })
+    setOpenChecklistEditorModal(true)
+  }
+
+  function openIssuesEditor() {
+    setChecklistEditor({
+      checklistKey: "issues",
+      title: language === "en" ? "Issues and damages list" : "Λίστα βλαβών και ζημιών",
+      active: issuesEnabled,
+      items: buildEditableItemsFromIssuesSource(task),
     })
     setOpenChecklistEditorModal(true)
   }
@@ -1748,19 +2502,19 @@ export default function TaskDetailsPage() {
       items: [
         ...prev.items,
         {
-          localId: `new-cleaning-${Date.now()}-${prev.items.length}`,
+          localId: `new-${prev.checklistKey || "checklist"}-${Date.now()}-${prev.items.length}`,
           sourceId: null,
           label: "",
           description: "",
-          itemType: "boolean",
+          itemType: prev.checklistKey === "issues" ? "text" : "boolean",
           isRequired: false,
           requiresPhoto: false,
           optionsText: "",
-          category: "inspection",
+          category: prev.checklistKey === "issues" ? "issue" : "inspection",
           linkedSupplyItemId: null,
           supplyUpdateMode: null,
-          opensIssueOnFail: false,
-          issueTypeOnFail: "general",
+          opensIssueOnFail: prev.checklistKey === "issues",
+          issueTypeOnFail: prev.checklistKey === "issues" ? "damage" : "general",
           issueSeverityOnFail: "medium",
           failureValuesText: "",
         },
@@ -2029,7 +2783,9 @@ export default function TaskDetailsPage() {
           <p className="mt-2 text-sm text-red-700">{error || texts.common.loadingErrorFallback}</p>
           <button
             type="button"
-            onClick={loadTask}
+            onClick={() => {
+              void loadTask()
+            }}
             className="mt-4 rounded-2xl border border-red-200 bg-white px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50"
           >
             {texts.common.retry}
@@ -2039,6 +2795,17 @@ export default function TaskDetailsPage() {
     )
   }
 
+  const cleaningModalTexts = getChecklistModalTexts("cleaning", texts, language)
+  const suppliesModalTexts = getChecklistModalTexts("supplies", texts, language)
+  const issuesModalTexts = getChecklistModalTexts("issues", texts, language)
+
+  const cleaningPreviewTexts = getChecklistPreviewTexts("cleaning", texts, language)
+  const suppliesPreviewTexts = getChecklistPreviewTexts("supplies", texts, language)
+  const issuesPreviewTexts = getChecklistPreviewTexts("issues", texts, language)
+
+  const cleaningCardTexts = getChecklistCardTexts("cleaning", texts, language)
+  const suppliesCardTexts = getChecklistCardTexts("supplies", texts, language)
+  const issuesCardTexts = getChecklistCardTexts("issues", texts, language)
   return (
     <div className="space-y-6 p-6">
       <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -2213,9 +2980,11 @@ export default function TaskDetailsPage() {
                     <p className="text-base font-semibold text-slate-950">
                       {activeAssignment.partner?.name || texts.common.dash}
                     </p>
+                    <HelpDot text={texts.assignment.currentPartnerHelp} />
                     <Badge tone="blue">
                       {getAssignmentStatusLabel(language, activeAssignment.status)}
                     </Badge>
+                    <HelpDot text={texts.assignment.currentAssignmentStatusHelp} />
                   </div>
 
                   <div className="mt-4 grid gap-4 md:grid-cols-2">
@@ -2285,6 +3054,95 @@ export default function TaskDetailsPage() {
 
           <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="flex items-center gap-2">
+              <h2 className="text-xl font-semibold text-slate-950">
+                {language === "en" ? "Property readiness snapshot" : "Snapshot readiness ακινήτου"}
+              </h2>
+              <HelpDot
+                text={
+                  language === "en"
+                    ? "The property is the readiness hub. The task displays a snapshot and not the canonical truth."
+                    : "Το ακίνητο είναι το readiness hub. Το task προβάλλει snapshot και όχι canonical truth."
+                }
+              />
+            </div>
+
+            <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <FieldCard
+                label={language === "en" ? "Readiness status" : "Κατάσταση readiness"}
+                value={getReadinessLabel(readiness?.status, language)}
+                help={
+                  language === "en"
+                    ? "Canonical statuses: ready / borderline / not_ready / unknown."
+                    : "Canonical statuses: ready / borderline / not_ready / unknown."
+                }
+              />
+              <FieldCard
+                label={language === "en" ? "Open conditions" : "Ανοιχτές conditions"}
+                value={String(readiness?.openConditionsCount ?? propertyConditions.length)}
+                help={
+                  language === "en"
+                    ? "Total property conditions in the current snapshot."
+                    : "Σύνολο property conditions στο snapshot."
+                }
+              />
+              <FieldCard
+                label="Blocking"
+                value={String(
+                  readiness?.blockingCount ??
+                    propertyConditions.filter(
+                      (condition) =>
+                        String(condition.blockingStatus ?? "").trim().toLowerCase() === "blocking"
+                    ).length
+                )}
+                help={
+                  language === "en"
+                    ? "Conditions that currently block readiness."
+                    : "Conditions που μπλοκάρουν readiness."
+                }
+              />
+              <FieldCard
+                label="Warnings"
+                value={String(readiness?.warningCount ?? warnings.length)}
+                help={
+                  language === "en"
+                    ? "Warnings returned by the route."
+                    : "Warnings που επιστρέφει το route."
+                }
+              />
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <Badge tone={getReadinessTone(readiness?.status)}>
+                {getReadinessLabel(readiness?.status, language)}
+              </Badge>
+
+              {readiness?.nextCheckInAt ? (
+                <Badge tone="violet">
+                  {language === "en" ? "Next check-in" : "Επόμενο check-in"}: {formatDateTime(readiness.nextCheckInAt, locale, texts.common.dash)}
+                </Badge>
+              ) : null}
+            </div>
+
+            {Array.isArray(readiness?.reasonSummary) && readiness.reasonSummary.length > 0 ? (
+              <div className="mt-4 rounded-2xl bg-slate-50 p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                  {language === "en" ? "Snapshot reasoning" : "Αιτιολόγηση snapshot"}
+                </p>
+                <ul className="mt-2 space-y-2 text-sm text-slate-700">
+                  {readiness.reasonSummary.map((reason, index) => (
+                    <li key={`reason-${index}`}>• {reason}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : readiness?.summary ? (
+              <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-700">
+                {readiness.summary}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="flex items-center gap-2">
               <h2 className="text-xl font-semibold text-slate-950">{texts.lists.sectionTitle}</h2>
               <HelpDot text={texts.lists.sectionHelp} />
             </div>
@@ -2294,28 +3152,35 @@ export default function TaskDetailsPage() {
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="text-base font-semibold text-slate-950">
-                        {texts.lists.cleaningListTitle}
-                      </h3>
-                      <Badge tone={Boolean(task?.sendCleaningChecklist ?? cleaningRun?.isActive) ? "green" : "slate"}>
-                        {Boolean(task?.sendCleaningChecklist ?? cleaningRun?.isActive)
-                          ? texts.common.active
-                          : texts.common.inactive}
+                      <h3 className="text-base font-semibold text-slate-950">{cleaningCardTexts.title}</h3>
+                      <HelpDot text={cleaningCardTexts.help} />
+                      <Badge tone={cleaningEnabled ? "green" : "slate"}>
+                        {cleaningEnabled ? texts.common.active : texts.common.inactive}
                       </Badge>
                       <Badge tone={cleaningSubmitted ? "green" : "blue"}>
-                        {cleaningSubmitted ? texts.common.completed : cleaningStatusLabel}
+                        {getChecklistCompletionBadgeText(cleaningSubmitted, cleaningRun, language)}
                       </Badge>
+                      <HelpDot text={texts.lists.statusBadgeHelp} />
                     </div>
                     <p className="mt-2 text-sm text-slate-500">{cleaningListTitle}</p>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={() => setOpenCleaningPreviewModal(true)}
-                    className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                  >
-                    {texts.common.view}
-                  </button>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setOpenCleaningPreviewModal(true)}
+                      className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      {texts.common.view}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={openCleaningEditor}
+                      className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      {texts.lists.previewEditThisTask}
+                    </button>
+                  </div>
                 </div>
 
                 <div className="mt-4 grid gap-4 md:grid-cols-3">
@@ -2326,7 +3191,7 @@ export default function TaskDetailsPage() {
                   />
                   <FieldCard
                     label={texts.lists.submission}
-                    value={cleaningSubmitted ? texts.common.submitted : texts.common.notSubmitted}
+                    value={getChecklistSubmittedStatusText(cleaningSubmitted, texts)}
                     help={texts.lists.submissionHelp}
                   />
                   <FieldCard
@@ -2341,31 +3206,15 @@ export default function TaskDetailsPage() {
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="text-base font-semibold text-slate-950">
-                        {texts.lists.suppliesListTitle}
-                      </h3>
-                      <Badge
-                        tone={
-                          Boolean(
-                            task?.sendSuppliesChecklist ??
-                              suppliesRun?.isActive ??
-                              task?.propertyLists?.supplies?.availableOnProperty
-                          )
-                            ? "green"
-                            : "slate"
-                        }
-                      >
-                        {Boolean(
-                          task?.sendSuppliesChecklist ??
-                            suppliesRun?.isActive ??
-                            task?.propertyLists?.supplies?.availableOnProperty
-                        )
-                          ? texts.common.active
-                          : texts.common.inactive}
+                      <h3 className="text-base font-semibold text-slate-950">{suppliesCardTexts.title}</h3>
+                      <HelpDot text={suppliesCardTexts.help} />
+                      <Badge tone={suppliesEnabled ? "green" : "slate"}>
+                        {suppliesEnabled ? texts.common.active : texts.common.inactive}
                       </Badge>
                       <Badge tone={suppliesSubmitted ? "green" : "blue"}>
-                        {suppliesSubmitted ? texts.common.completed : suppliesStatusLabel}
+                        {getChecklistCompletionBadgeText(suppliesSubmitted, suppliesRun, language)}
                       </Badge>
+                      <HelpDot text={texts.lists.statusBadgeHelp} />
                     </div>
                     <p className="mt-2 text-sm text-slate-500">{suppliesListTitle}</p>
                   </div>
@@ -2387,12 +3236,65 @@ export default function TaskDetailsPage() {
                   />
                   <FieldCard
                     label={texts.lists.submission}
-                    value={suppliesSubmitted ? texts.common.submitted : texts.common.notSubmitted}
+                    value={getChecklistSubmittedStatusText(suppliesSubmitted, texts)}
                     help={texts.lists.submissionHelp}
                   />
                   <FieldCard
                     label={texts.lists.submissionTime}
                     value={formatDateTime(suppliesSubmittedAt, locale, texts.common.dash)}
+                    help={texts.lists.submissionTimeHelp}
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 p-5">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-base font-semibold text-slate-950">{issuesCardTexts.title}</h3>
+                      <HelpDot text={issuesCardTexts.help} />
+                      <Badge tone={issuesEnabled ? "green" : "slate"}>
+                        {issuesEnabled ? texts.common.active : texts.common.inactive}
+                      </Badge>
+                      <Badge tone={issuesSubmitted ? "green" : "blue"}>
+                        {getChecklistCompletionBadgeText(issuesSubmitted, issuesRun, language)}
+                      </Badge>
+                    </div>
+                    <p className="mt-2 text-sm text-slate-500">{issuesListTitle}</p>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setOpenIssuesPreviewModal(true)}
+                      className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      {texts.common.view}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={openIssuesEditor}
+                      className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      {texts.lists.previewEditThisTask}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-4 md:grid-cols-3">
+                  <FieldCard
+                    label={texts.lists.sentAfterAcceptance}
+                    value={issuesSentLabel}
+                    help={texts.lists.sentAfterAcceptanceHelp}
+                  />
+                  <FieldCard
+                    label={texts.lists.submission}
+                    value={getChecklistSubmittedStatusText(issuesSubmitted, texts)}
+                    help={texts.lists.submissionHelp}
+                  />
+                  <FieldCard
+                    label={texts.lists.submissionTime}
+                    value={formatDateTime(issuesSubmittedAt, locale, texts.common.dash)}
                     help={texts.lists.submissionTimeHelp}
                   />
                 </div>
@@ -2411,11 +3313,10 @@ export default function TaskDetailsPage() {
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="text-base font-semibold text-slate-950">
-                        {texts.answers.cleaningSubmittedTitle}
-                      </h3>
+                      <h3 className="text-base font-semibold text-slate-950">{cleaningModalTexts.submittedTitle}</h3>
+                      <HelpDot text={cleaningModalTexts.submittedHelp} />
                       <Badge tone={cleaningSubmitted ? "green" : "slate"}>
-                        {cleaningSubmitted ? texts.common.submitted : texts.common.notSubmitted}
+                        {getChecklistSubmittedStatusText(cleaningSubmitted, texts)}
                       </Badge>
                     </div>
                     <p className="mt-2 text-sm text-slate-500">
@@ -2425,7 +3326,7 @@ export default function TaskDetailsPage() {
                             locale,
                             texts.common.dash
                           )} · ${texts.answers.responsesCount}: ${getChecklistResponseCount(cleaningRun)}`
-                        : texts.answers.noCleaningSubmission}
+                        : cleaningModalTexts.emptyText}
                     </p>
                   </div>
 
@@ -2449,11 +3350,10 @@ export default function TaskDetailsPage() {
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="text-base font-semibold text-slate-950">
-                        {texts.answers.suppliesSubmittedTitle}
-                      </h3>
+                      <h3 className="text-base font-semibold text-slate-950">{suppliesModalTexts.submittedTitle}</h3>
+                      <HelpDot text={suppliesModalTexts.submittedHelp} />
                       <Badge tone={suppliesSubmitted ? "green" : "slate"}>
-                        {suppliesSubmitted ? texts.common.submitted : texts.common.notSubmitted}
+                        {getChecklistSubmittedStatusText(suppliesSubmitted, texts)}
                       </Badge>
                     </div>
                     <p className="mt-2 text-sm text-slate-500">
@@ -2463,7 +3363,7 @@ export default function TaskDetailsPage() {
                             locale,
                             texts.common.dash
                           )} · ${texts.answers.responsesCount}: ${getChecklistResponseCount(suppliesRun)}`
-                        : texts.answers.noSuppliesSubmission}
+                        : suppliesModalTexts.emptyText}
                     </p>
                   </div>
 
@@ -2481,6 +3381,219 @@ export default function TaskDetailsPage() {
                     {texts.answers.viewSubmission}
                   </button>
                 </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 p-5">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-base font-semibold text-slate-950">{issuesModalTexts.submittedTitle}</h3>
+                      <HelpDot text={issuesModalTexts.submittedHelp} />
+                      <Badge tone={issuesSubmitted ? "green" : "slate"}>
+                        {getChecklistSubmittedStatusText(issuesSubmitted, texts)}
+                      </Badge>
+                    </div>
+                    <p className="mt-2 text-sm text-slate-500">
+                      {issuesSubmitted
+                        ? `${texts.answers.submittedAtLabel}: ${formatDateTime(
+                            issuesSubmittedAt,
+                            locale,
+                            texts.common.dash
+                          )} · ${texts.answers.responsesCount}: ${getChecklistResponseCount(issuesRun)}`
+                        : issuesModalTexts.emptyText}
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setOpenIssuesAnswersModal(true)}
+                    disabled={!issuesSubmitted}
+                    className={cn(
+                      "rounded-xl px-3 py-2 text-sm font-medium",
+                      issuesSubmitted
+                        ? "border border-slate-200 text-slate-700 hover:bg-slate-50"
+                        : "cursor-not-allowed border border-slate-200 bg-slate-100 text-slate-400"
+                    )}
+                  >
+                    {texts.answers.viewSubmission}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="flex items-center gap-2">
+              <h2 className="text-xl font-semibold text-slate-950">
+                {language === "en"
+                  ? "Conditions created from this task"
+                  : "Conditions που δημιουργήθηκαν από αυτό το task"}
+              </h2>
+              <HelpDot
+                text={
+                  language === "en"
+                    ? "The task is the execution layer. Conditions are the canonical operational truth of the property."
+                    : "Το task είναι execution layer. Οι conditions είναι canonical operational truth του ακινήτου."
+                }
+              />
+            </div>
+
+            {conditionsCreatedByTask.length === 0 ? (
+              <div className="mt-5 rounded-2xl border border-dashed border-slate-300 p-5 text-sm text-slate-500">
+                {language === "en"
+                  ? "No property conditions were found with this task as source."
+                  : "Δεν βρέθηκαν property conditions που να έχουν source το συγκεκριμένο task."}
+              </div>
+            ) : (
+              <div className="mt-5 space-y-3">
+                {conditionsCreatedByTask.map((condition) => (
+                  <div key={condition.id} className="rounded-2xl border border-emerald-200 bg-emerald-50/40 p-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-semibold text-slate-950">
+                        {condition.title || (language === "en" ? "Condition" : "Condition")}
+                      </p>
+                      <Badge tone="green">{language === "en" ? "From this task" : "Από αυτό το task"}</Badge>
+                      <Badge tone="blue">
+                        {normalizeConditionTypeLabel(condition.conditionType, language)}
+                      </Badge>
+                      <Badge tone={getSeverityTone(condition.severity)}>
+                        {normalizeSeverityLabel(condition.severity, language)}
+                      </Badge>
+                      <Badge tone={getBlockingTone(condition.blockingStatus)}>
+                        {normalizeBlockingStatusLabel(condition.blockingStatus, language)}
+                      </Badge>
+                    </div>
+
+                    {condition.description ? (
+                      <p className="mt-2 text-sm text-slate-700">{condition.description}</p>
+                    ) : null}
+
+                    <div className="mt-3 text-xs text-slate-600">
+                      <span>{normalizeConditionStatusLabel(condition.status, language)}</span>
+                      {condition.managerDecision ? (
+                        <>
+                          {" · "}
+                          <span>{normalizeManagerDecisionLabel(condition.managerDecision, language)}</span>
+                        </>
+                      ) : null}
+                      {condition.createdAt ? (
+                        <>
+                          {" · "}
+                          <span>{formatDateTime(condition.createdAt, locale, texts.common.dash)}</span>
+                        </>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="flex items-center gap-2">
+              <h2 className="text-xl font-semibold text-slate-950">
+                {language === "en" ? "Linked issues / warnings" : "Linked issues / warnings"}
+              </h2>
+              <HelpDot
+                text={
+                  language === "en"
+                    ? "View the issues and warnings returned by the task route."
+                    : "Προβολή των issues και warnings που επιστρέφει το route του task."
+                }
+              />
+            </div>
+
+            <div className="mt-5 grid gap-6 lg:grid-cols-2">
+              <div>
+                <div className="mb-3 flex items-center gap-2">
+                  <h3 className="text-base font-semibold text-slate-950">Issues</h3>
+                  <Badge tone="amber">{issues.length}</Badge>
+                </div>
+
+                {issues.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-slate-300 p-4 text-sm text-slate-500">
+                    {language === "en" ? "No issues were returned." : "Δεν επιστράφηκαν issues."}
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {issues.map((issue) => (
+                      <div key={issue.id} className="rounded-2xl border border-slate-200 p-4">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-sm font-semibold text-slate-950">
+                            {issue.title || "Issue"}
+                          </p>
+                          <Badge tone={getSeverityTone(issue.severity)}>
+                            {normalizeSeverityLabel(issue.severity, language)}
+                          </Badge>
+                          {issue.blockingStatus ? (
+                            <Badge tone={getBlockingTone(issue.blockingStatus)}>
+                              {normalizeBlockingStatusLabel(issue.blockingStatus, language)}
+                            </Badge>
+                          ) : null}
+                        </div>
+
+                        {issue.description ? (
+                          <p className="mt-2 text-sm text-slate-600">{issue.description}</p>
+                        ) : null}
+
+                        <div className="mt-3 text-xs text-slate-500">
+                          <span>{issue.issueType || issue.type || texts.common.dash}</span>
+                          {issue.status ? (
+                            <>
+                              {" · "}
+                              <span>{normalizeConditionStatusLabel(issue.status, language)}</span>
+                            </>
+                          ) : null}
+                          {issue.createdAt ? (
+                            <>
+                              {" · "}
+                              <span>{formatDateTime(issue.createdAt, locale, texts.common.dash)}</span>
+                            </>
+                          ) : null}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <div className="mb-3 flex items-center gap-2">
+                  <h3 className="text-base font-semibold text-slate-950">Warnings</h3>
+                  <Badge tone="amber">{warnings.length}</Badge>
+                </div>
+
+                {warnings.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-slate-300 p-4 text-sm text-slate-500">
+                    {language === "en" ? "No warnings were returned." : "Δεν επιστράφηκαν warnings."}
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {warnings.map((warning, index) => (
+                      <div
+                        key={typeof warning === "string" ? `warning-${index}` : warning.id || `warning-${index}`}
+                        className="rounded-2xl border border-amber-200 bg-amber-50/40 p-4"
+                      >
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-sm font-semibold text-slate-950">
+                            {getWarningMessage(warning, language)}
+                          </p>
+                          {typeof warning !== "string" && warning.severity ? (
+                            <Badge tone={getSeverityTone(warning.severity)}>
+                              {normalizeSeverityLabel(warning.severity, language)}
+                            </Badge>
+                          ) : (
+                            <Badge tone="amber">Warning</Badge>
+                          )}
+                        </div>
+
+                        {typeof warning !== "string" && warning.code ? (
+                          <p className="mt-2 text-xs text-slate-500">{warning.code}</p>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -2598,6 +3711,71 @@ export default function TaskDetailsPage() {
                       : texts.common.dash}
                   </p>
                 </div>
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="flex items-center gap-2">
+              <h2 className="text-xl font-semibold text-slate-950">
+                {language === "en" ? "Property condition snapshot" : "Property condition snapshot"}
+              </h2>
+              <HelpDot
+                text={
+                  language === "en"
+                    ? "Canonical operational state of the property in the readiness-first model."
+                    : "Canonical operational κατάσταση του ακινήτου στο readiness-first μοντέλο."
+                }
+              />
+            </div>
+
+            {propertyConditions.length === 0 ? (
+              <div className="mt-5 rounded-2xl border border-dashed border-slate-300 p-5 text-sm text-slate-500">
+                {language === "en"
+                  ? "No property conditions were returned."
+                  : "Δεν επιστράφηκαν property conditions."}
+              </div>
+            ) : (
+              <div className="mt-5 space-y-3">
+                {propertyConditions.map((condition) => (
+                  <div key={condition.id} className="rounded-2xl border border-slate-200 p-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-semibold text-slate-950">
+                        {condition.title || (language === "en" ? "Condition" : "Condition")}
+                      </p>
+                      <Badge tone="blue">
+                        {normalizeConditionTypeLabel(condition.conditionType, language)}
+                      </Badge>
+                      <Badge tone={getSeverityTone(condition.severity)}>
+                        {normalizeSeverityLabel(condition.severity, language)}
+                      </Badge>
+                      <Badge tone={getBlockingTone(condition.blockingStatus)}>
+                        {normalizeBlockingStatusLabel(condition.blockingStatus, language)}
+                      </Badge>
+                      <Badge tone="slate">
+                        {normalizeConditionStatusLabel(condition.status, language)}
+                      </Badge>
+                    </div>
+
+                    {condition.description ? (
+                      <p className="mt-2 text-sm text-slate-600">{condition.description}</p>
+                    ) : null}
+
+                    <div className="mt-3 text-xs text-slate-500">
+                      {condition.managerDecision ? (
+                        <span>
+                          {language === "en" ? "Decision" : "Απόφαση"}: {normalizeManagerDecisionLabel(condition.managerDecision, language)}
+                        </span>
+                      ) : null}
+                      {condition.createdAt ? (
+                        <>
+                          {" · "}
+                          <span>{formatDateTime(condition.createdAt, locale, texts.common.dash)}</span>
+                        </>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -2762,8 +3940,8 @@ export default function TaskDetailsPage() {
       <Modal
         open={openCleaningPreviewModal}
         onClose={() => setOpenCleaningPreviewModal(false)}
-        title={texts.lists.modalCleaningPreviewTitle}
-        description={texts.lists.modalCleaningPreviewDescription}
+        title={cleaningPreviewTexts.title}
+        description={cleaningPreviewTexts.description}
         maxWidth="max-w-5xl"
         showHeaderClose={false}
         closeLabel={texts.common.close}
@@ -2771,48 +3949,27 @@ export default function TaskDetailsPage() {
         <div className="space-y-5">
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
             <div className="flex flex-wrap items-center gap-2">
-              <p className="text-base font-semibold text-slate-950">
-                {texts.lists.cleaningListTitle}
-              </p>
-              <Badge tone={Boolean(task?.sendCleaningChecklist ?? cleaningRun?.isActive) ? "green" : "slate"}>
-                {Boolean(task?.sendCleaningChecklist ?? cleaningRun?.isActive)
-                  ? texts.common.active
-                  : texts.common.inactive}
+              <p className="text-base font-semibold text-slate-950">{cleaningPreviewTexts.sectionTitle}</p>
+              <Badge tone={cleaningEnabled ? "green" : "slate"}>
+                {cleaningEnabled ? texts.common.active : texts.common.inactive}
               </Badge>
             </div>
-            <p className="mt-2 text-sm text-slate-600">
-              {normalizeChecklistTitleForUi(
-                cleaningRun?.title ||
-                  cleaningRun?.template?.title ||
-                  cleaningRun?.template?.name ||
-                  task?.propertyLists?.cleaning?.primaryTemplate?.title,
-                texts.lists.cleaningDefaultTitle,
-                language
-              )}
-            </p>
+            <p className="mt-2 text-sm text-slate-600">{cleaningListTitle}</p>
           </div>
 
           <div className="space-y-3">
-            {(cleaningRun?.items || task?.propertyLists?.cleaning?.primaryTemplate?.items || []).map(
-              (item, index) => (
-                <div key={item.id || `${index}`} className="rounded-2xl border border-slate-200 p-4">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-sm font-semibold text-slate-950">
-                      {index + 1}. {item.label}
-                    </p>
-                    {item.isRequired ? (
-                      <Badge tone="amber">{texts.lists.listItemRequired}</Badge>
-                    ) : null}
-                    {item.requiresPhoto ? (
-                      <Badge tone="blue">{texts.lists.listItemRequiresPhoto}</Badge>
-                    ) : null}
-                  </div>
-                  {item.description ? (
-                    <p className="mt-2 text-sm text-slate-600">{item.description}</p>
-                  ) : null}
+            {cleaningPreviewItems.map((item, index) => (
+              <div key={item.id || `${index}`} className="rounded-2xl border border-slate-200 p-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-semibold text-slate-950">
+                    {index + 1}. {item.label}
+                  </p>
+                  {item.isRequired ? <Badge tone="amber">{texts.lists.listItemRequired}</Badge> : null}
+                  {item.requiresPhoto ? <Badge tone="blue">{texts.lists.listItemRequiresPhoto}</Badge> : null}
                 </div>
-              )
-            )}
+                {item.description ? <p className="mt-2 text-sm text-slate-600">{item.description}</p> : null}
+              </div>
+            ))}
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -2845,8 +4002,8 @@ export default function TaskDetailsPage() {
       <Modal
         open={openSuppliesPreviewModal}
         onClose={() => setOpenSuppliesPreviewModal(false)}
-        title={texts.lists.modalSuppliesPreviewTitle}
-        description={texts.lists.modalSuppliesPreviewDescription}
+        title={suppliesPreviewTexts.title}
+        description={suppliesPreviewTexts.description}
         maxWidth="max-w-5xl"
         showHeaderClose={false}
         closeLabel={texts.common.close}
@@ -2854,44 +4011,18 @@ export default function TaskDetailsPage() {
         <div className="space-y-5">
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
             <div className="flex flex-wrap items-center gap-2">
-              <p className="text-base font-semibold text-slate-950">
-                {texts.lists.suppliesListTitle}
-              </p>
-              <Badge
-                tone={
-                  Boolean(
-                    task?.sendSuppliesChecklist ??
-                      suppliesRun?.isActive ??
-                      task?.propertyLists?.supplies?.availableOnProperty
-                  )
-                    ? "green"
-                    : "slate"
-                }
-              >
-                {Boolean(
-                  task?.sendSuppliesChecklist ??
-                    suppliesRun?.isActive ??
-                    task?.propertyLists?.supplies?.availableOnProperty
-                )
-                  ? texts.common.active
-                  : texts.common.inactive}
+              <p className="text-base font-semibold text-slate-950">{suppliesPreviewTexts.sectionTitle}</p>
+              <Badge tone={suppliesEnabled ? "green" : "slate"}>
+                {suppliesEnabled ? texts.common.active : texts.common.inactive}
               </Badge>
             </div>
-            <p className="mt-2 text-sm text-slate-600">
-              {normalizeChecklistTitleForUi(
-                suppliesRun?.title ||
-                  suppliesRun?.template?.title ||
-                  suppliesRun?.template?.name,
-                texts.lists.suppliesDefaultTitle,
-                language
-              )}
-            </p>
+            <p className="mt-2 text-sm text-slate-600">{suppliesListTitle}</p>
           </div>
 
           <div className="space-y-3">
             {suppliesPreviewItems.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-slate-300 p-5 text-sm text-slate-500">
-                {texts.answers.noSuppliesSubmission}
+                {suppliesModalTexts.emptyText}
               </div>
             ) : (
               suppliesPreviewItems.map((item, index) => (
@@ -2927,6 +4058,76 @@ export default function TaskDetailsPage() {
             <button
               type="button"
               onClick={() => setOpenSuppliesPreviewModal(false)}
+              className="rounded-2xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              {texts.common.close}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={openIssuesPreviewModal}
+        onClose={() => setOpenIssuesPreviewModal(false)}
+        title={issuesPreviewTexts.title}
+        description={issuesPreviewTexts.description}
+        maxWidth="max-w-5xl"
+        showHeaderClose={false}
+        closeLabel={texts.common.close}
+      >
+        <div className="space-y-5">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-base font-semibold text-slate-950">{issuesPreviewTexts.sectionTitle}</p>
+              <Badge tone={issuesEnabled ? "green" : "slate"}>
+                {issuesEnabled ? texts.common.active : texts.common.inactive}
+              </Badge>
+            </div>
+            <p className="mt-2 text-sm text-slate-600">{issuesListTitle}</p>
+          </div>
+
+          <div className="space-y-3">
+            {issuesPreviewItems.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-slate-300 p-5 text-sm text-slate-500">
+                {issuesModalTexts.emptyText}
+              </div>
+            ) : (
+              issuesPreviewItems.map((item, index) => (
+                <div key={item.id || `${index}`} className="rounded-2xl border border-slate-200 p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-sm font-semibold text-slate-950">
+                      {index + 1}. {item.label}
+                    </p>
+                    {item.isRequired ? <Badge tone="amber">{texts.lists.listItemRequired}</Badge> : null}
+                    {item.requiresPhoto ? <Badge tone="blue">{texts.lists.listItemRequiresPhoto}</Badge> : null}
+                  </div>
+                  {getIssuesPreviewDescription(item, language) ? (
+                    <p className="mt-2 text-sm text-slate-600">{getIssuesPreviewDescription(item, language)}</p>
+                  ) : null}
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                setOpenIssuesPreviewModal(false)
+                openIssuesEditor()
+              }}
+              className="rounded-2xl border border-slate-900 bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+            >
+              {texts.lists.previewEditThisTask}
+            </button>
+
+            <p className="text-sm text-slate-500">{texts.lists.previewEditHint}</p>
+          </div>
+
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() => setOpenIssuesPreviewModal(false)}
               className="rounded-2xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
             >
               {texts.common.close}
@@ -3270,8 +4471,8 @@ export default function TaskDetailsPage() {
       <Modal
         open={openCleaningAnswersModal}
         onClose={() => setOpenCleaningAnswersModal(false)}
-        title={texts.answers.modalCleaningAnswersTitle}
-        description={texts.answers.modalCleaningAnswersDescription}
+        title={cleaningModalTexts.title}
+        description={cleaningModalTexts.description}
         maxWidth="max-w-5xl"
         showHeaderClose={false}
         closeLabel={texts.common.close}
@@ -3281,19 +4482,19 @@ export default function TaskDetailsPage() {
           submitted={cleaningSubmitted}
           submittedAtOverride={cleaningSubmittedAt}
           locale={locale}
-          emptyText={texts.answers.noCleaningSubmission}
+          emptyText={cleaningModalTexts.emptyText}
           onClose={() => setOpenCleaningAnswersModal(false)}
           texts={texts}
           language={language}
+          checklistKind="cleaning"
         />
       </Modal>
 
       <Modal
         open={openSuppliesAnswersModal}
-       
         onClose={() => setOpenSuppliesAnswersModal(false)}
-        title={texts.answers.modalSuppliesAnswersTitle}
-        description={texts.answers.modalSuppliesAnswersDescription}
+        title={suppliesModalTexts.title}
+        description={suppliesModalTexts.description}
         maxWidth="max-w-5xl"
         showHeaderClose={false}
         closeLabel={texts.common.close}
@@ -3303,10 +4504,33 @@ export default function TaskDetailsPage() {
           submitted={suppliesSubmitted}
           submittedAtOverride={suppliesSubmittedAt}
           locale={locale}
-          emptyText={texts.answers.noSuppliesSubmission}
+          emptyText={suppliesModalTexts.emptyText}
           onClose={() => setOpenSuppliesAnswersModal(false)}
           texts={texts}
           language={language}
+          checklistKind="supplies"
+        />
+      </Modal>
+
+      <Modal
+        open={openIssuesAnswersModal}
+        onClose={() => setOpenIssuesAnswersModal(false)}
+        title={issuesModalTexts.title}
+        description={issuesModalTexts.description}
+        maxWidth="max-w-5xl"
+        showHeaderClose={false}
+        closeLabel={texts.common.close}
+      >
+        <SubmittedAnswersView
+          run={issuesRun}
+          submitted={issuesSubmitted}
+          submittedAtOverride={issuesSubmittedAt}
+          locale={locale}
+          emptyText={issuesModalTexts.emptyText}
+          onClose={() => setOpenIssuesAnswersModal(false)}
+          texts={texts}
+          language={language}
+          checklistKind="issues"
         />
       </Modal>
     </div>

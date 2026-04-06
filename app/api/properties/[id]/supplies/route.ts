@@ -6,6 +6,7 @@ import {
   getSupplyPresetByCode,
   buildCustomSupplyCode,
 } from "@/lib/supply-presets"
+import { refreshPropertyReadinessSnapshot } from "@/lib/properties/readiness-snapshot"
 
 type RouteContext = {
   params: Promise<{
@@ -139,7 +140,7 @@ async function buildResponse(propertyId: string) {
     warningThreshold: row.warningThreshold ?? null,
     lastUpdatedAt: row.lastUpdatedAt,
     notes: row.notes,
-    fillLevel: (row as any).fillLevel ?? "full",
+    fillLevel: row.fillLevel ?? "full",
     isActive: true,
     supplyItemId: row.supplyItemId,
     name: row.supplyItem.name,
@@ -290,6 +291,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
         },
       })
 
+      let didAffectReadiness = false
+
       if (enabled && !existing) {
         await prisma.propertySupply.create({
           data: {
@@ -304,6 +307,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
             lastUpdatedAt: new Date(),
           },
         })
+
+        didAffectReadiness = true
       }
 
       if (!enabled && existing) {
@@ -312,6 +317,22 @@ export async function POST(request: NextRequest, context: RouteContext) {
             id: existing.id,
           },
         })
+
+        didAffectReadiness = true
+      }
+
+      if (didAffectReadiness) {
+        try {
+          await refreshPropertyReadinessSnapshot({
+            propertyId: property.id,
+            organizationId: property.organizationId,
+          })
+        } catch (readinessError) {
+          console.error(
+            "POST toggle_builtin readiness snapshot refresh error:",
+            readinessError
+          )
+        }
       }
 
       const payload = await buildResponse(property.id)
@@ -360,6 +381,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
           ? supplyItem.minimumStock
           : 1
 
+      let didAffectReadiness = false
+
       if (enabled && !existing) {
         await prisma.propertySupply.create({
           data: {
@@ -374,6 +397,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
             lastUpdatedAt: new Date(),
           },
         })
+
+        didAffectReadiness = true
       }
 
       if (!enabled && existing) {
@@ -382,6 +407,22 @@ export async function POST(request: NextRequest, context: RouteContext) {
             id: existing.id,
           },
         })
+
+        didAffectReadiness = true
+      }
+
+      if (didAffectReadiness) {
+        try {
+          await refreshPropertyReadinessSnapshot({
+            propertyId: property.id,
+            organizationId: property.organizationId,
+          })
+        } catch (readinessError) {
+          console.error(
+            "POST toggle_custom readiness snapshot refresh error:",
+            readinessError
+          )
+        }
       }
 
       const payload = await buildResponse(property.id)

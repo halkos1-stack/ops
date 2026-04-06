@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { useAppLanguage } from "@/components/i18n/LanguageProvider"
+import { TaskAlertPanel } from "@/components/tasks/TaskAlertPanel"
+import { TaskChecklistPanel } from "@/components/tasks/TaskChecklistPanel"
 
 type Property = {
   id: string
@@ -767,40 +769,20 @@ export default function NewTaskPage() {
             />
           </div>
 
-          <div className="md:col-span-2 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <div className="mb-3">
-              <div className="text-sm font-semibold text-slate-900">{texts.alertTitle}</div>
-              <div className="mt-1 text-xs text-slate-500">
-                {texts.alertDescription}
-              </div>
-            </div>
-
-            <label className="flex items-center gap-3 text-sm font-medium text-slate-700">
-              <input
-                type="checkbox"
-                checked={alertEnabled}
-                onChange={(e) => {
-                  setAlertEnabled(e.target.checked)
-                  if (!e.target.checked) setAlertAt("")
-                }}
-              />
-              {texts.alertEnabled}
-            </label>
-
-            {alertEnabled ? (
-              <div className="mt-3">
-                <label className="mb-2 block text-sm font-medium text-slate-700">
-                  {texts.alertTime}
-                </label>
-                <input
-                  type="datetime-local"
-                  value={alertAt}
-                  onChange={(e) => setAlertAt(e.target.value)}
-                  className="w-full rounded-2xl border border-slate-300 px-4 py-3 outline-none"
-                />
-              </div>
-            ) : null}
-          </div>
+          <TaskAlertPanel
+            className="md:col-span-2"
+            title={texts.alertTitle}
+            description={texts.alertDescription}
+            enabledLabel={texts.alertEnabled}
+            timeLabel={texts.alertTime}
+            enabled={alertEnabled}
+            value={alertAt}
+            onEnabledChange={(checked) => {
+              setAlertEnabled(checked)
+              if (!checked) setAlertAt("")
+            }}
+            onValueChange={setAlertAt}
+          />
 
           <div className="md:col-span-2">
             <label className="mb-2 block text-sm font-medium text-slate-700">
@@ -816,44 +798,48 @@ export default function NewTaskPage() {
           </div>
         </div>
 
-        <div className="mt-6 rounded-3xl border border-slate-200 bg-slate-50 p-5">
-          <h2 className="text-xl font-bold text-slate-950">{texts.sectionsTitle}</h2>
+        <div className="mt-6 space-y-4">
+          <TaskChecklistPanel
+            title={texts.sectionsTitle}
+            options={[
+              {
+                label: texts.sendCleaningChecklist,
+                checked: sendCleaningChecklist,
+                onChange: setSendCleaningChecklist,
+                disabled: !canSendCleaningChecklist,
+              },
+              {
+                label: texts.sendSuppliesChecklist,
+                checked: sendSuppliesChecklist,
+                onChange: setSendSuppliesChecklist,
+                disabled: !canSendSuppliesChecklist,
+              },
+            ]}
+            footer={
+              <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700">
+                <div>
+                  <strong>{texts.primaryCleaningChecklist}:</strong>{" "}
+                  {primaryTemplate ? primaryTemplate.title : texts.notDefined}
+                </div>
 
-          <div className="mt-4 grid gap-3 md:grid-cols-2">
-            <label
-              className={`flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium ${
-                canSendCleaningChecklist
-                  ? "text-slate-700"
-                  : "cursor-not-allowed text-slate-400"
-              }`}
-            >
-              <input
-                type="checkbox"
-                checked={sendCleaningChecklist}
-                onChange={(e) => setSendCleaningChecklist(e.target.checked)}
-                disabled={!canSendCleaningChecklist}
-              />
-              {texts.sendCleaningChecklist}
-            </label>
+                <div>
+                  <strong>{texts.activePropertySupplies}:</strong> {activeSuppliesCount}
+                </div>
 
-            <label
-              className={`flex items-center gap-3 rounded-2xl px-3 py-2 text-sm font-medium ${
-                canSendSuppliesChecklist
-                  ? "text-slate-700"
-                  : "cursor-not-allowed text-slate-400"
-              }`}
-            >
-              <input
-                type="checkbox"
-                checked={sendSuppliesChecklist}
-                onChange={(e) => setSendSuppliesChecklist(e.target.checked)}
-                disabled={!canSendSuppliesChecklist}
-              />
-              {texts.sendSuppliesChecklist}
-            </label>
-          </div>
+                <div className="text-xs text-slate-500">{texts.sectionsHelp}</div>
 
-          <div className="mt-4 grid gap-3 md:grid-cols-2">
+                {!canSendCleaningChecklist ? (
+                  <div className="text-xs text-red-600">{texts.missingCleaningHelp}</div>
+                ) : null}
+
+                {!canSendSuppliesChecklist ? (
+                  <div className="text-xs text-amber-600">{texts.missingSuppliesHelp}</div>
+                ) : null}
+              </div>
+            }
+          />
+
+          <div className="grid gap-3 rounded-3xl border border-slate-200 bg-slate-50 p-5 md:grid-cols-2">
             <label className="flex items-center gap-3 text-sm font-medium text-slate-700">
               <input
                 type="checkbox"
@@ -871,33 +857,6 @@ export default function NewTaskPage() {
               />
               {texts.requiresApproval}
             </label>
-          </div>
-
-          <div className="mt-4 space-y-3 rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700">
-            <div>
-              <strong>{texts.primaryCleaningChecklist}:</strong>{" "}
-              {primaryTemplate ? primaryTemplate.title : texts.notDefined}
-            </div>
-
-            <div>
-              <strong>{texts.activePropertySupplies}:</strong> {activeSuppliesCount}
-            </div>
-
-            <div className="text-xs text-slate-500">
-              {texts.sectionsHelp}
-            </div>
-
-            {!canSendCleaningChecklist ? (
-              <div className="text-xs text-red-600">
-                {texts.missingCleaningHelp}
-              </div>
-            ) : null}
-
-            {!canSendSuppliesChecklist ? (
-              <div className="text-xs text-amber-600">
-                {texts.missingSuppliesHelp}
-              </div>
-            ) : null}
           </div>
         </div>
 

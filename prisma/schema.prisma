@@ -30,6 +30,47 @@ enum BookingMappingStatus {
   INACTIVE
 }
 
+enum PropertyReadinessStatus {
+  READY      @map("ready")
+  BORDERLINE @map("borderline")
+  NOT_READY  @map("not_ready")
+  UNKNOWN    @map("unknown")
+}
+
+enum PropertyConditionType {
+  SUPPLY @map("supply")
+  ISSUE  @map("issue")
+  DAMAGE @map("damage")
+}
+
+enum PropertyConditionStatus {
+  OPEN       @map("open")
+  MONITORING @map("monitoring")
+  RESOLVED   @map("resolved")
+  DISMISSED  @map("dismissed")
+}
+
+enum PropertyConditionBlockingStatus {
+  BLOCKING     @map("blocking")
+  NON_BLOCKING @map("non_blocking")
+  WARNING      @map("warning")
+}
+
+enum PropertyConditionSeverity {
+  LOW      @map("low")
+  MEDIUM   @map("medium")
+  HIGH     @map("high")
+  CRITICAL @map("critical")
+}
+
+enum PropertyConditionManagerDecision {
+  ALLOW_WITH_ISSUE     @map("allow_with_issue")
+  BLOCK_UNTIL_RESOLVED @map("block_until_resolved")
+  MONITOR              @map("monitor")
+  RESOLVED             @map("resolved")
+  DISMISSED            @map("dismissed")
+}
+
 model User {
   id            String     @id @default(cuid())
   name          String?
@@ -64,8 +105,10 @@ model Organization {
   partners           Partner[]
   tasks              Task[]
   issues             Issue[]
+  propertyConditions PropertyCondition[]
   events             Event[]
   checklistTemplates PropertyChecklistTemplate[]
+  issueTemplates     PropertyIssueTemplate[]
   activityLogs       ActivityLog[]
   settings           Settings[]
   qrCodes            PropertySupplyQRCode[]
@@ -91,26 +134,31 @@ model Membership {
 }
 
 model Property {
-  id               String   @id @default(cuid())
-  organizationId   String
-  code             String
-  name             String
-  address          String
-  city             String
-  region           String
-  postalCode       String
-  country          String
-  type             String
-  status           String
-  bedrooms         Int      @default(0)
-  bathrooms        Int      @default(0)
-  maxGuests        Int      @default(0)
-  notes            String?
-  defaultPartnerId   String?
-  readinessStatus    String?
-  readinessUpdatedAt DateTime?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  id                         String                   @id @default(cuid())
+  organizationId             String
+  code                       String
+  name                       String
+  address                    String
+  city                       String
+  region                     String
+  postalCode                 String
+  country                    String
+  type                       String
+  status                     String
+  bedrooms                   Int                      @default(0)
+  bathrooms                  Int                      @default(0)
+  maxGuests                  Int                      @default(0)
+  notes                      String?
+  defaultPartnerId           String?
+  readinessStatus            PropertyReadinessStatus?
+  readinessUpdatedAt         DateTime?
+  readinessReasonsText       String?
+  openConditionCount         Int                      @default(0)
+  openBlockingConditionCount Int                      @default(0)
+  openWarningConditionCount  Int                      @default(0)
+  nextCheckInAt              DateTime?
+  createdAt                  DateTime                 @default(now())
+  updatedAt                  DateTime                 @updatedAt
 
   organization       Organization                @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   defaultPartner     Partner?                    @relation("PropertyDefaultPartner", fields: [defaultPartnerId], references: [id], onDelete: SetNull)
@@ -118,7 +166,9 @@ model Property {
   bookingMappings    BookingPropertyMapping[]
   tasks              Task[]
   checklistTemplates PropertyChecklistTemplate[]
+  issueTemplates     PropertyIssueTemplate[]
   issues             Issue[]
+  conditions         PropertyCondition[]
   propertySupplies   PropertySupply[]
   taskPhotos         TaskPhoto[]
   activityLogs       ActivityLog[]
@@ -130,51 +180,110 @@ model Property {
   @@index([defaultPartnerId])
   @@index([status])
   @@index([name])
+  @@index([readinessStatus])
+  @@index([nextCheckInAt])
+  @@index([organizationId, readinessStatus])
+}
+
+model PropertyCondition {
+  id               String                          @id @default(cuid())
+  organizationId   String
+  propertyId       String
+  taskId           String?
+  bookingId        String?
+  propertySupplyId String?
+  mergeKey         String?
+  sourceType       String                          @default("system")
+  sourceLabel      String?
+  sourceItemId     String?
+  sourceItemLabel  String?
+  sourceRunId      String?
+  sourceAnswerId   String?
+  conditionType    PropertyConditionType
+  title            String
+  description      String?
+  locationText     String?
+  status           PropertyConditionStatus         @default(OPEN)
+  blockingStatus   PropertyConditionBlockingStatus @default(WARNING)
+  severity         PropertyConditionSeverity       @default(MEDIUM)
+  managerDecision  PropertyConditionManagerDecision?
+  managerNotes     String?
+  evidence         Json?
+  firstDetectedAt  DateTime                        @default(now())
+  lastDetectedAt   DateTime                        @default(now())
+  resolvedAt       DateTime?
+  dismissedAt      DateTime?
+  createdAt        DateTime                        @default(now())
+  updatedAt        DateTime                        @updatedAt
+
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  property       Property        @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  task           Task?           @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  booking        Booking?        @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  propertySupply PropertySupply? @relation(fields: [propertySupplyId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([propertyId])
+  @@index([taskId])
+  @@index([bookingId])
+  @@index([propertySupplyId])
+  @@index([mergeKey])
+  @@index([conditionType])
+  @@index([status])
+  @@index([blockingStatus])
+  @@index([severity])
+  @@index([managerDecision])
+  @@index([propertyId, status])
+  @@index([propertyId, blockingStatus])
+  @@index([propertyId, conditionType])
+  @@index([propertyId, createdAt])
+  @@index([propertyId, mergeKey])
 }
 
 model Booking {
-  id                          String            @id @default(cuid())
-  organizationId              String
-  propertyId                  String?
-  sourcePlatform              String
-  externalBookingId           String
-  externalListingId           String?
-  externalListingName         String?
-  externalPropertyAddress     String?
-  externalPropertyCity        String?
-  externalPropertyRegion      String?
-  externalPropertyPostalCode  String?
-  externalPropertyCountry     String?
-  guestName                   String?
-  guestPhone                  String?
-  guestEmail                  String?
-  checkInDate                 DateTime
-  checkOutDate                DateTime
-  checkInTime                 String?
-  checkOutTime                String?
-  adults                      Int               @default(1)
-  children                    Int               @default(0)
-  infants                     Int               @default(0)
-  status                      String            @default("confirmed")
-  syncStatus                  BookingSyncStatus @default(PENDING_MATCH)
-  needsMapping                Boolean           @default(true)
-  isManual                    Boolean           @default(false)
-  sourceUpdatedAt             DateTime?
-  rawPayload                  Json?
-  lastProcessedAt             DateTime?
-  lastError                   String?
-  notes                       String?
-  importedAt                  DateTime          @default(now())
-  createdAt                   DateTime          @default(now())
-  updatedAt                   DateTime          @updatedAt
+  id                         String            @id @default(cuid())
+  organizationId             String
+  propertyId                 String?
+  sourcePlatform             String
+  externalBookingId          String
+  externalListingId          String?
+  externalListingName        String?
+  externalPropertyAddress    String?
+  externalPropertyCity       String?
+  externalPropertyRegion     String?
+  externalPropertyPostalCode String?
+  externalPropertyCountry    String?
+  guestName                  String?
+  guestPhone                 String?
+  guestEmail                 String?
+  checkInDate                DateTime
+  checkOutDate               DateTime
+  checkInTime                String?
+  checkOutTime               String?
+  adults                     Int               @default(1)
+  children                   Int               @default(0)
+  infants                    Int               @default(0)
+  status                     String            @default("confirmed")
+  syncStatus                 BookingSyncStatus @default(PENDING_MATCH)
+  needsMapping               Boolean           @default(true)
+  isManual                   Boolean           @default(false)
+  sourceUpdatedAt            DateTime?
+  rawPayload                 Json?
+  lastProcessedAt            DateTime?
+  lastError                  String?
+  notes                      String?
+  importedAt                 DateTime          @default(now())
+  createdAt                  DateTime          @default(now())
+  updatedAt                  DateTime          @updatedAt
 
-  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  property     Property?          @relation(fields: [propertyId], references: [id], onDelete: SetNull)
-  tasks        Task[]
-  issues       Issue[]
-  activityLogs ActivityLog[]
-  events       Event[]
-  syncEvents   BookingSyncEvent[]
+  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  property           Property?           @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+  tasks              Task[]
+  issues             Issue[]
+  propertyConditions PropertyCondition[]
+  activityLogs       ActivityLog[]
+  events             Event[]
+  syncEvents         BookingSyncEvent[]
 
   @@unique([organizationId, sourcePlatform, externalBookingId])
   @@index([organizationId])
@@ -301,7 +410,10 @@ model Task {
   requiresApproval                Boolean   @default(false)
   sendCleaningChecklist           Boolean   @default(true)
   sendSuppliesChecklist           Boolean   @default(false)
+  sendIssuesChecklist             Boolean   @default(false)
   usesCustomizedCleaningChecklist Boolean   @default(false)
+  usesCustomizedSuppliesChecklist Boolean   @default(false)
+  usesCustomizedIssuesChecklist   Boolean   @default(false)
   alertEnabled                    Boolean   @default(false)
   alertAt                         DateTime?
   notes                           String?
@@ -309,16 +421,18 @@ model Task {
   createdAt                       DateTime  @default(now())
   updatedAt                       DateTime  @updatedAt
 
-  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  property           Property            @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  booking            Booking?            @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  organization       Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  property           Property               @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  booking            Booking?               @relation(fields: [bookingId], references: [id], onDelete: SetNull)
   assignments        TaskAssignment[]
   issues             Issue[]
+  propertyConditions PropertyCondition[]
   taskPhotos         TaskPhoto[]
   supplyConsumptions SupplyConsumption[]
   activityLogs       ActivityLog[]
   checklistRun       TaskChecklistRun?
   supplyRun          TaskSupplyRun?
+  issueRun           TaskIssueRun?
   events             Event[]
   qrScans            PropertySupplyQRScan[]
 
@@ -364,21 +478,24 @@ model TaskAssignment {
 }
 
 model Issue {
-  id              String    @id @default(cuid())
-  organizationId  String
-  propertyId      String
-  taskId          String?
-  bookingId       String?
-  issueType       String
-  title           String
-  description     String?
-  severity        String    @default("medium")
-  status          String    @default("open")
-  reportedBy      String?
-  resolutionNotes String?
-  resolvedAt      DateTime?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id                      String    @id @default(cuid())
+  organizationId          String
+  propertyId              String
+  taskId                  String?
+  bookingId               String?
+  issueType               String
+  title                   String
+  description             String?
+  severity                String    @default("medium")
+  status                  String    @default("open")
+  reportedBy              String?
+  affectsHosting          Boolean   @default(false)
+  requiresImmediateAction Boolean   @default(false)
+  locationText            String?
+  resolutionNotes         String?
+  resolvedAt              DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
 
   organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   property     Property      @relation(fields: [propertyId], references: [id], onDelete: Cascade)
@@ -395,6 +512,8 @@ model Issue {
   @@index([issueType])
   @@index([severity])
   @@index([status])
+  @@index([affectsHosting])
+  @@index([requiresImmediateAction])
 }
 
 model SupplyItem {
@@ -414,11 +533,14 @@ model SupplyItem {
   propertySupplies       PropertySupply[]
   consumptions           SupplyConsumption[]
   checklistTemplateItems PropertyChecklistTemplateItem[]
+  taskChecklistRunItems  TaskChecklistRunItem[]
+  taskSupplyRunItems     TaskSupplyRunItem[]
 
   @@index([category])
   @@index([isActive])
   @@index([name])
   @@index([nameEl])
+  @@index([nameEn])
 }
 
 model PropertySupply {
@@ -440,10 +562,12 @@ model PropertySupply {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  property          Property             @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  supplyItem        SupplyItem           @relation(fields: [supplyItemId], references: [id], onDelete: Cascade)
-  taskSupplyAnswers TaskSupplyAnswer[]
-  qrCodes           PropertySupplyQRCode[]
+  property           Property               @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  supplyItem         SupplyItem             @relation(fields: [supplyItemId], references: [id], onDelete: Cascade)
+  taskSupplyRunItems TaskSupplyRunItem[]
+  taskSupplyAnswers  TaskSupplyAnswer[]
+  propertyConditions PropertyCondition[]
+  qrCodes            PropertySupplyQRCode[]
 
   @@unique([propertyId, supplyItemId])
   @@index([propertyId])
@@ -471,7 +595,7 @@ model SupplyConsumption {
 }
 
 model TaskPhoto {
-  id         String    @id @default(cuid())
+  id         String   @id @default(cuid())
   propertyId String
   taskId     String?
   issueId    String?
@@ -480,7 +604,7 @@ model TaskPhoto {
   fileName   String?
   caption    String?
   takenAt    DateTime?
-  uploadedAt DateTime  @default(now())
+  uploadedAt DateTime @default(now())
 
   property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   task     Task?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
@@ -504,8 +628,8 @@ model PropertyChecklistTemplate {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  organization  Organization                    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  property      Property                        @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  organization  Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  property      Property                  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   items         PropertyChecklistTemplateItem[]
   checklistRuns TaskChecklistRun[]
 
@@ -519,6 +643,7 @@ model PropertyChecklistTemplateItem {
   id               String  @id @default(cuid())
   templateId       String
   label            String
+  labelEn          String?
   description      String?
   itemType         String
   isRequired       Boolean @default(true)
@@ -533,15 +658,16 @@ model PropertyChecklistTemplateItem {
   failureValuesText   String?
 
   linkedSupplyItemId String?
-  supplyUpdateMode   String  @default("none")
+  supplyUpdateMode   String @default("none")
   supplyQuantity     Float?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  template   PropertyChecklistTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
-  answers    TaskChecklistAnswer[]
-  supplyItem SupplyItem?               @relation(fields: [linkedSupplyItemId], references: [id], onDelete: SetNull)
+  template             PropertyChecklistTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  runItems             TaskChecklistRunItem[]
+  taskChecklistAnswers TaskChecklistAnswer[]
+  supplyItem           SupplyItem?               @relation(fields: [linkedSupplyItemId], references: [id], onDelete: SetNull)
 
   @@index([templateId])
   @@index([templateId, sortOrder])
@@ -550,27 +676,71 @@ model PropertyChecklistTemplateItem {
 }
 
 model TaskChecklistRun {
-  id          String    @id @default(cuid())
-  taskId      String    @unique
-  templateId  String
-  status      String    @default("pending")
-  startedAt   DateTime?
-  completedAt DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id                        String   @id @default(cuid())
+  taskId                    String   @unique
+  templateId                String?
+  sourceTemplateTitle       String?
+  sourceTemplateDescription String?
+  templateType              String?  @default("main")
+  isCustomized              Boolean  @default(false)
+  status                    String   @default("pending")
+  startedAt                 DateTime?
+  completedAt               DateTime?
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
 
-  task     Task                      @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  template PropertyChecklistTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  task     Task                       @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  template PropertyChecklistTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  items    TaskChecklistRunItem[]
   answers  TaskChecklistAnswer[]
 
   @@index([templateId])
   @@index([status])
+  @@index([isCustomized])
+}
+
+model TaskChecklistRunItem {
+  id                     String   @id @default(cuid())
+  checklistRunId         String
+  propertyTemplateItemId String?
+  label                  String
+  labelEn                String?
+  description            String?
+  itemType               String
+  isRequired             Boolean  @default(true)
+  sortOrder              Int
+  category               String?  @default("inspection")
+  requiresPhoto          Boolean  @default(false)
+  opensIssueOnFail       Boolean  @default(false)
+  optionsText            String?
+  issueTypeOnFail        String?  @default("repair")
+  issueSeverityOnFail    String?  @default("medium")
+  failureValuesText      String?
+  linkedSupplyItemId     String?
+  linkedSupplyItemName   String?
+  linkedSupplyItemNameEl String?
+  linkedSupplyItemNameEn String?
+  supplyUpdateMode       String   @default("none")
+  supplyQuantity         Float?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  checklistRun         TaskChecklistRun              @relation(fields: [checklistRunId], references: [id], onDelete: Cascade)
+  propertyTemplateItem PropertyChecklistTemplateItem? @relation(fields: [propertyTemplateItemId], references: [id], onDelete: SetNull)
+  supplyItem           SupplyItem?                   @relation(fields: [linkedSupplyItemId], references: [id], onDelete: SetNull)
+  answers              TaskChecklistAnswer[]
+
+  @@index([checklistRunId])
+  @@index([checklistRunId, sortOrder])
+  @@index([propertyTemplateItemId])
+  @@index([linkedSupplyItemId])
 }
 
 model TaskChecklistAnswer {
   id             String   @id @default(cuid())
   checklistRunId String
-  templateItemId String
+  runItemId      String
+  templateItemId String?
   valueBoolean   Boolean?
   valueText      String?
   valueNumber    Float?
@@ -582,47 +752,222 @@ model TaskChecklistAnswer {
   updatedAt      DateTime @updatedAt
 
   checklistRun TaskChecklistRun              @relation(fields: [checklistRunId], references: [id], onDelete: Cascade)
-  templateItem PropertyChecklistTemplateItem @relation(fields: [templateItemId], references: [id], onDelete: Cascade)
+  runItem      TaskChecklistRunItem          @relation(fields: [runItemId], references: [id], onDelete: Cascade)
+  templateItem PropertyChecklistTemplateItem? @relation(fields: [templateItemId], references: [id], onDelete: SetNull)
 
   @@index([checklistRunId])
+  @@index([runItemId])
   @@index([templateItemId])
 }
 
-model TaskSupplyRun {
-  id          String    @id @default(cuid())
-  taskId      String    @unique
-  status      String    @default("pending")
-  startedAt   DateTime?
-  completedAt DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+model PropertyIssueTemplate {
+  id             String   @id @default(cuid())
+  organizationId String
+  propertyId     String
+  title          String
+  description    String?
+  isPrimary      Boolean  @default(false)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  task    Task               @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  property     Property             @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  items        PropertyIssueTemplateItem[]
+  issueRuns    TaskIssueRun[]
+
+  @@index([organizationId])
+  @@index([propertyId])
+  @@index([propertyId, isPrimary])
+  @@index([propertyId, isActive])
+}
+
+model PropertyIssueTemplateItem {
+  id                      String   @id @default(cuid())
+  templateId              String
+  label                   String
+  labelEn                 String?
+  description             String?
+  sortOrder               Int
+  itemType                String   @default("issue_check")
+  isRequired              Boolean  @default(true)
+  allowsIssue             Boolean  @default(true)
+  allowsDamage            Boolean  @default(true)
+  defaultIssueType        String?  @default("repair")
+  defaultSeverity         String?  @default("medium")
+  requiresPhoto           Boolean  @default(false)
+  affectsHostingByDefault Boolean  @default(false)
+  urgentByDefault         Boolean  @default(false)
+  locationHint            String?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  template         PropertyIssueTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  runItems         TaskIssueRunItem[]
+  taskIssueAnswers TaskIssueAnswer[]
+
+  @@index([templateId])
+  @@index([templateId, sortOrder])
+}
+
+model TaskIssueRun {
+  id                        String   @id @default(cuid())
+  taskId                    String   @unique
+  templateId                String?
+  sourceTemplateTitle       String?
+  sourceTemplateDescription String?
+  isCustomized              Boolean  @default(false)
+  status                    String   @default("pending")
+  startedAt                 DateTime?
+  completedAt               DateTime?
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+
+  task     Task                   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  template PropertyIssueTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  items    TaskIssueRunItem[]
+  answers  TaskIssueAnswer[]
+
+  @@index([templateId])
+  @@index([status])
+  @@index([isCustomized])
+}
+
+model TaskIssueRunItem {
+  id                     String   @id @default(cuid())
+  issueRunId             String
+  propertyTemplateItemId String?
+  label                  String
+  labelEn                String?
+  description            String?
+  sortOrder              Int
+  itemType               String   @default("issue_check")
+  isRequired             Boolean  @default(true)
+  allowsIssue            Boolean  @default(true)
+  allowsDamage           Boolean  @default(true)
+  defaultIssueType       String?  @default("repair")
+  defaultSeverity        String?  @default("medium")
+  requiresPhoto          Boolean  @default(false)
+  affectsHostingByDefault Boolean @default(false)
+  urgentByDefault        Boolean  @default(false)
+  locationHint           String?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  issueRun             TaskIssueRun               @relation(fields: [issueRunId], references: [id], onDelete: Cascade)
+  propertyTemplateItem PropertyIssueTemplateItem? @relation(fields: [propertyTemplateItemId], references: [id], onDelete: SetNull)
+  answers              TaskIssueAnswer[]
+
+  @@index([issueRunId])
+  @@index([issueRunId, sortOrder])
+  @@index([propertyTemplateItemId])
+}
+
+model TaskIssueAnswer {
+  id                      String   @id @default(cuid())
+  issueRunId              String
+  runItemId               String
+  templateItemId          String?
+  reportType              String?
+  title                   String?
+  description             String?
+  severity                String?
+  affectsHosting          Boolean?
+  requiresImmediateAction Boolean?
+  locationText            String?
+  photoUrls               Json?
+  createdIssueId          String?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  issueRun     TaskIssueRun               @relation(fields: [issueRunId], references: [id], onDelete: Cascade)
+  runItem      TaskIssueRunItem           @relation(fields: [runItemId], references: [id], onDelete: Cascade)
+  templateItem PropertyIssueTemplateItem? @relation(fields: [templateItemId], references: [id], onDelete: SetNull)
+
+  @@index([issueRunId])
+  @@index([runItemId])
+  @@index([templateItemId])
+  @@index([createdIssueId])
+}
+
+model TaskSupplyRun {
+  id           String   @id @default(cuid())
+  taskId       String   @unique
+  isCustomized Boolean  @default(false)
+  status       String   @default("pending")
+  startedAt    DateTime?
+  completedAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  task    Task              @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  items   TaskSupplyRunItem[]
   answers TaskSupplyAnswer[]
 
   @@index([status])
+  @@index([isCustomized])
+}
+
+model TaskSupplyRunItem {
+  id               String   @id @default(cuid())
+  taskSupplyRunId  String
+  propertySupplyId String?
+  supplyItemId     String?
+  propertySupplyCode String?
+  label            String
+  labelEn          String?
+  category         String?
+  unit             String?
+  fillLevel        String?
+  currentStock     Float?
+  targetStock      Float?
+  reorderThreshold Float?
+  targetLevel      Float?
+  minimumThreshold Float?
+  trackingMode     String   @default("fill_level")
+  isCritical       Boolean  @default(false)
+  warningThreshold Float?
+  sortOrder        Int
+  isRequired       Boolean  @default(true)
+  notes            String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  taskSupplyRun  TaskSupplyRun   @relation(fields: [taskSupplyRunId], references: [id], onDelete: Cascade)
+  propertySupply PropertySupply? @relation(fields: [propertySupplyId], references: [id], onDelete: SetNull)
+  supplyItem     SupplyItem?     @relation(fields: [supplyItemId], references: [id], onDelete: SetNull)
+  answers        TaskSupplyAnswer[]
+
+  @@index([taskSupplyRunId])
+  @@index([taskSupplyRunId, sortOrder])
+  @@index([propertySupplyId])
+  @@index([supplyItemId])
 }
 
 model TaskSupplyAnswer {
   id               String   @id @default(cuid())
   taskSupplyRunId  String
-  propertySupplyId String
+  runItemId        String
+  propertySupplyId String?
   fillLevel        String
+  quantityValue    Float?
   notes            String?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  taskSupplyRun  TaskSupplyRun  @relation(fields: [taskSupplyRunId], references: [id], onDelete: Cascade)
-  propertySupply PropertySupply @relation(fields: [propertySupplyId], references: [id], onDelete: Cascade)
+  taskSupplyRun  TaskSupplyRun   @relation(fields: [taskSupplyRunId], references: [id], onDelete: Cascade)
+  runItem        TaskSupplyRunItem @relation(fields: [runItemId], references: [id], onDelete: Cascade)
+  propertySupply PropertySupply? @relation(fields: [propertySupplyId], references: [id], onDelete: SetNull)
 
-  @@unique([taskSupplyRunId, propertySupplyId])
+  @@unique([taskSupplyRunId, runItemId])
   @@index([taskSupplyRunId])
+  @@index([runItemId])
   @@index([propertySupplyId])
   @@index([fillLevel])
 }
 
 model Event {
-  id             String    @id @default(cuid())
+  id             String   @id @default(cuid())
   organizationId String
   propertyId     String?
   bookingId      String?
@@ -632,11 +977,11 @@ model Event {
   title          String
   description    String?
   eventType      String
-  status         String    @default("open")
+  status         String   @default("open")
   startAt        DateTime?
   endAt          DateTime?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   property     Property?    @relation(fields: [propertyId], references: [id], onDelete: SetNull)
@@ -754,12 +1099,12 @@ model VerificationToken {
 }
 
 model UserActivationToken {
-  id        String    @id @default(cuid())
+  id        String   @id @default(cuid())
   userId    String
-  token     String    @unique
+  token     String   @unique
   expiresAt DateTime
   usedAt    DateTime?
-  createdAt DateTime  @default(now())
+  createdAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -780,9 +1125,9 @@ model PropertySupplyQRCode {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  organization   Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  property       Property               @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  propertySupply PropertySupply         @relation(fields: [propertySupplyId], references: [id], onDelete: Cascade)
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  property       Property       @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  propertySupply PropertySupply @relation(fields: [propertySupplyId], references: [id], onDelete: Cascade)
   scans          PropertySupplyQRScan[]
 
   @@index([organizationId])
@@ -793,13 +1138,13 @@ model PropertySupplyQRCode {
 }
 
 model PropertySupplyQRScan {
-  id         String   @id @default(cuid())
-  qrCodeId   String
-  taskId     String?
-  scannedBy  String?
-  fillLevel  String?
-  notes      String?
-  scannedAt  DateTime @default(now())
+  id        String   @id @default(cuid())
+  qrCodeId  String
+  taskId    String?
+  scannedBy String?
+  fillLevel String?
+  notes     String?
+  scannedAt DateTime @default(now())
 
   qrCode PropertySupplyQRCode @relation(fields: [qrCodeId], references: [id], onDelete: Cascade)
   task   Task?                @relation(fields: [taskId], references: [id], onDelete: SetNull)

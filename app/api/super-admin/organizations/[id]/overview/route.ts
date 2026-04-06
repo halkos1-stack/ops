@@ -26,6 +26,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         slug: true,
         isActive: true,
         createdAt: true,
+        updatedAt: true,
         _count: {
           select: {
             memberships: true,
@@ -48,7 +49,9 @@ export async function GET(_request: NextRequest, context: RouteContext) {
             id: true,
             role: true,
             isActive: true,
+            isPrimaryOrgAdmin: true,
             createdAt: true,
+            updatedAt: true,
             user: {
               select: {
                 id: true,
@@ -56,6 +59,8 @@ export async function GET(_request: NextRequest, context: RouteContext) {
                 email: true,
                 systemRole: true,
                 isActive: true,
+                createdAt: true,
+                updatedAt: true,
               },
             },
           },
@@ -73,6 +78,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
             city: true,
             status: true,
             createdAt: true,
+            updatedAt: true,
           },
         },
         partners: {
@@ -88,6 +94,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
             specialty: true,
             status: true,
             createdAt: true,
+            updatedAt: true,
           },
         },
         tasks: {
@@ -102,6 +109,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
             status: true,
             scheduledDate: true,
             createdAt: true,
+            updatedAt: true,
             property: {
               select: {
                 id: true,
@@ -117,6 +125,8 @@ export async function GET(_request: NextRequest, context: RouteContext) {
               select: {
                 id: true,
                 status: true,
+                createdAt: true,
+                updatedAt: true,
                 partner: {
                   select: {
                     id: true,
@@ -138,6 +148,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
             status: true,
             severity: true,
             createdAt: true,
+            updatedAt: true,
             property: {
               select: {
                 id: true,
@@ -157,6 +168,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
             title: true,
             eventType: true,
             createdAt: true,
+            updatedAt: true,
             property: {
               select: {
                 id: true,

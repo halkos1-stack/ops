@@ -1,52 +1,194 @@
-import { NextRequest, NextResponse } from "next/server"
-import { prisma } from "@/lib/prisma"
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
 import {
   requireApiPartnerAccess,
   canPartnerAccessChecklistRun,
-} from "@/lib/partner-route-access"
+} from "@/lib/partner-route-access";
+import {
+  createPropertyConditionsFromRun,
+  type RunConditionAnswerInput,
+  type CreatedOrUpdatedPropertyConditionResult,
+} from "@/lib/checklists/create-property-conditions-from-run";
+import { validateChecklistSubmitAnswers } from "@/lib/checklists/checklist-proof-rules";
+import {
+  buildPropertyConditionSnapshot,
+  type RawPropertyConditionRecord,
+} from "@/lib/readiness/property-condition-mappers";
 
 type RouteContext = {
   params: Promise<{
-    runId: string
-  }>
-}
+    runId: string;
+  }>;
+};
 
 type AnswerInput = {
-  templateItemId?: unknown
-  valueBoolean?: unknown
-  valueText?: unknown
-  valueNumber?: unknown
-  valueSelect?: unknown
-  notes?: unknown
-  photoUrls?: unknown
+  templateItemId?: unknown;
+  valueBoolean?: unknown;
+  valueText?: unknown;
+  valueNumber?: unknown;
+  valueSelect?: unknown;
+  notes?: unknown;
+  photoUrls?: unknown;
+};
+
+type NormalizedAnswer = {
+  templateItemId: string;
+  valueBoolean: boolean | null;
+  valueText: string | null;
+  valueNumber: number | null;
+  valueSelect: string | null;
+  notes: string | null;
+  photoUrls: string[];
+};
+
+type EffectiveChecklistItem = {
+  id: string;
+  propertyTemplateItemId: string | null;
+  label: string;
+  labelEn: string | null;
+  description: string | null;
+  itemType: string;
+  isRequired: boolean;
+  sortOrder: number;
+  category: string | null;
+  requiresPhoto: boolean;
+  opensIssueOnFail: boolean;
+  optionsText: string | null;
+  issueTypeOnFail: string | null;
+  issueSeverityOnFail: string | null;
+  failureValuesText: string | null;
+  linkedSupplyItemId: string | null;
+  linkedSupplyItemName: string | null;
+  linkedSupplyItemNameEl: string | null;
+  linkedSupplyItemNameEn: string | null;
+  supplyUpdateMode: string | null;
+  supplyQuantity: number | null;
+};
+
+type SavedAnswerRow = {
+  id: string;
+  checklistRunId: string;
+  templateItemId?: string | null;
+  runItemId?: string | null;
+};
+
+type LatestAssignmentRow = {
+  id: string;
+} | null;
+
+type RefreshedTaskRow = {
+  checklistRun?: { status?: string | null } | null;
+  supplyRun?: { status?: string | null } | null;
+  issueRun?: { status?: string | null } | null;
+} | null;
+
+type RefreshedRunConditionRow = {
+  id: string;
+  propertyId: string;
+  taskId: string | null;
+  bookingId: string | null;
+  propertySupplyId: string | null;
+  mergeKey: string | null;
+  sourceType: string | null;
+  sourceLabel: string | null;
+  sourceItemId: string | null;
+  sourceItemLabel: string | null;
+  sourceRunId: string | null;
+  sourceAnswerId: string | null;
+  conditionType: unknown;
+  title: string;
+  description: string | null;
+  status: unknown;
+  blockingStatus: unknown;
+  severity: unknown;
+  managerDecision: unknown;
+  managerNotes: string | null;
+  createdAt: Date | string | null;
+  updatedAt: Date | string | null;
+  resolvedAt: Date | string | null;
+  dismissedAt: Date | string | null;
+};
+
+type RefreshedRunRow = {
+  task?: {
+    propertyConditions?: RefreshedRunConditionRow[] | null;
+  } | null;
+} | null;
+
+type ExistingRunRow = {
+  id: string;
+  templateId?: string | null;
+  sourceTemplateTitle?: string | null;
+  template?: {
+    title?: string | null;
+    items?: unknown[] | null;
+  } | null;
+  items?: unknown[] | null;
+  answers?: Array<{
+    id: string;
+    runItemId?: string | null;
+    templateItemId?: string | null;
+  }> | null;
+  task: {
+    id: string;
+    organizationId: string;
+    propertyId: string;
+    bookingId?: string | null;
+    status: string;
+    sendCleaningChecklist: boolean;
+    sendSuppliesChecklist: boolean;
+    sendIssuesChecklist: boolean;
+  };
+};
+
+type SubmitTransactionResult = {
+  run: RefreshedRunRow;
+  createdOrUpdatedConditionIds: string[];
+};
+
+function safeArray<T>(value: T[] | null | undefined): T[] {
+  return Array.isArray(value) ? value : [];
 }
 
 function toNullableString(value: unknown) {
-  if (value === undefined || value === null) return null
-  const text = String(value).trim()
-  return text === "" ? null : text
+  if (value === undefined || value === null) return null;
+  const text = String(value).trim();
+  return text === "" ? null : text;
 }
 
 function toNullableNumber(value: unknown) {
-  if (value === undefined || value === null || value === "") return null
-  const num = Number(value)
-  return Number.isFinite(num) ? num : null
+  if (value === undefined || value === null || value === "") return null;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+function toNullableDate(value: unknown, label: string) {
+  if (value === undefined) return undefined;
+  if (value === null || value === "") return null;
+
+  const date = new Date(String(value));
+
+  if (Number.isNaN(date.getTime())) {
+    throw new Error(`Το πεδίο "${label}" δεν είναι έγκυρη ημερομηνία.`);
+  }
+
+  return date;
 }
 
 function normalizePhotoUrls(value: unknown) {
-  if (!Array.isArray(value)) return []
-  return value.map((item) => String(item || "").trim()).filter(Boolean)
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => String(item || "").trim()).filter(Boolean);
 }
 
-function normalizeAnswers(input: unknown) {
-  if (!Array.isArray(input)) return []
+function normalizeAnswers(input: unknown): NormalizedAnswer[] {
+  if (!Array.isArray(input)) return [];
 
   return input
     .map((item) => {
-      const row = (item ?? {}) as AnswerInput
-      const templateItemId = toNullableString(row.templateItemId)
+      const row = (item ?? {}) as AnswerInput;
+      const templateItemId = toNullableString(row.templateItemId);
 
-      if (!templateItemId) return null
+      if (!templateItemId) return null;
 
       return {
         templateItemId,
@@ -57,77 +199,211 @@ function normalizeAnswers(input: unknown) {
         valueSelect: toNullableString(row.valueSelect),
         notes: toNullableString(row.notes),
         photoUrls: normalizePhotoUrls(row.photoUrls),
-      }
+      };
     })
-    .filter((item): item is NonNullable<typeof item> => item !== null)
+    .filter((item): item is NonNullable<typeof item> => item !== null);
 }
 
-function hasRequiredValue(itemType: string, answer?: ReturnType<typeof normalizeAnswers>[number]) {
-  if (!answer) return false
+function normalizeEffectiveChecklistItem(item: unknown): EffectiveChecklistItem {
+  const row = (item ?? {}) as Record<string, unknown>;
 
-  const normalized = String(itemType || "").trim().toLowerCase()
+  return {
+    id: String(row.id ?? "").trim(),
+    propertyTemplateItemId: toNullableString(row.propertyTemplateItemId),
+    label: String(row.label ?? "").trim(),
+    labelEn: toNullableString(row.labelEn),
+    description: toNullableString(row.description),
+    itemType: String(row.itemType ?? "").trim(),
+    isRequired: Boolean(row.isRequired),
+    sortOrder: Number(row.sortOrder ?? 0),
+    category: toNullableString(row.category),
+    requiresPhoto: Boolean(row.requiresPhoto),
+    opensIssueOnFail: Boolean(row.opensIssueOnFail),
+    optionsText: toNullableString(row.optionsText),
+    issueTypeOnFail: toNullableString(row.issueTypeOnFail),
+    issueSeverityOnFail: toNullableString(row.issueSeverityOnFail),
+    failureValuesText: toNullableString(row.failureValuesText),
+    linkedSupplyItemId: toNullableString(row.linkedSupplyItemId),
+    linkedSupplyItemName: toNullableString(row.linkedSupplyItemName),
+    linkedSupplyItemNameEl: toNullableString(row.linkedSupplyItemNameEl),
+    linkedSupplyItemNameEn: toNullableString(row.linkedSupplyItemNameEn),
+    supplyUpdateMode: toNullableString(row.supplyUpdateMode),
+    supplyQuantity:
+      typeof row.supplyQuantity === "number"
+        ? row.supplyQuantity
+        : toNullableNumber(row.supplyQuantity),
+  };
+}
 
-  if (
-    normalized === "boolean" ||
-    normalized === "yes_no" ||
-    normalized === "pass_fail" ||
-    normalized === "checkbox"
-  ) {
-    return typeof answer.valueBoolean === "boolean"
-  }
+function mapToRunConditionAnswerInput(
+  item: EffectiveChecklistItem,
+  savedAnswer: { id: string },
+  submitted: NormalizedAnswer
+): RunConditionAnswerInput {
+  return {
+    answerId: savedAnswer.id,
+    runItemId: item.id,
+    templateItemId: item.id,
+    propertyTemplateItemId: item.propertyTemplateItemId,
+    templateItemLabel: item.label,
+    templateItemCategory: item.category,
+    itemType: item.itemType,
+    linkedSupplyItemId: item.linkedSupplyItemId,
+    opensIssueOnFail: item.opensIssueOnFail,
+    issueTypeOnFail: item.issueTypeOnFail,
+    issueSeverityOnFail: item.issueSeverityOnFail,
+    failureValuesText: item.failureValuesText,
+    valueBoolean: submitted.valueBoolean,
+    valueText: submitted.valueText,
+    valueNumber: submitted.valueNumber,
+    valueSelect: submitted.valueSelect,
+    notes: submitted.notes,
+    photoUrls: submitted.photoUrls,
+  };
+}
 
-  if (normalized === "number" || normalized === "numeric") {
-    return typeof answer.valueNumber === "number" && Number.isFinite(answer.valueNumber)
-  }
+function normalizeConditionTypeValue(
+  value: unknown
+): "supply" | "issue" | "damage" {
+  const text = String(value || "").trim().toLowerCase();
+  if (text === "supply") return "supply";
+  if (text === "damage") return "damage";
+  return "issue";
+}
 
-  if (
-    normalized === "select" ||
-    normalized === "dropdown" ||
-    normalized === "choice" ||
-    normalized === "option" ||
-    normalized === "options"
-  ) {
-    return Boolean(answer.valueSelect)
-  }
+function normalizeConditionStatusValue(
+  value: unknown
+): "open" | "monitoring" | "resolved" | "dismissed" {
+  const text = String(value || "").trim().toLowerCase();
+  if (text === "monitoring") return "monitoring";
+  if (text === "resolved") return "resolved";
+  if (text === "dismissed") return "dismissed";
+  return "open";
+}
 
-  if (normalized === "photo") {
-    return answer.photoUrls.length > 0
-  }
+function normalizeBlockingStatusValue(
+  value: unknown
+): "blocking" | "non_blocking" | "warning" {
+  const text = String(value || "").trim().toLowerCase();
+  if (text === "blocking") return "blocking";
+  if (text === "non_blocking" || text === "non-blocking") return "non_blocking";
+  return "warning";
+}
 
-  return Boolean(answer.valueText)
+function normalizeSeverityValue(
+  value: unknown
+): "low" | "medium" | "high" | "critical" {
+  const text = String(value || "").trim().toLowerCase();
+  if (text === "low") return "low";
+  if (text === "high") return "high";
+  if (text === "critical") return "critical";
+  return "medium";
+}
+
+function normalizeManagerDecisionValue(
+  value: unknown
+):
+  | "allow_with_issue"
+  | "block_until_resolved"
+  | "monitor"
+  | "resolved"
+  | "dismissed"
+  | null {
+  const text = String(value || "").trim().toLowerCase();
+  if (!text) return null;
+  if (text === "allow_with_issue") return "allow_with_issue";
+  if (text === "block_until_resolved") return "block_until_resolved";
+  if (text === "monitor") return "monitor";
+  if (text === "resolved") return "resolved";
+  if (text === "dismissed") return "dismissed";
+  return null;
+}
+
+function mapDbConditionToRawRecord(input: {
+  id: string;
+  propertyId: string;
+  taskId: string | null;
+  bookingId: string | null;
+  propertySupplyId: string | null;
+  mergeKey: string | null;
+  title: string;
+  description: string | null;
+  sourceType: string | null;
+  sourceLabel: string | null;
+  sourceItemId: string | null;
+  sourceItemLabel: string | null;
+  sourceRunId: string | null;
+  sourceAnswerId: string | null;
+  conditionType: string;
+  status: string;
+  blockingStatus: string;
+  severity: string;
+  managerDecision: string | null;
+  managerNotes: string | null;
+  createdAt: Date | string | null;
+  updatedAt: Date | string | null;
+  resolvedAt: Date | string | null;
+  dismissedAt: Date | string | null;
+}): RawPropertyConditionRecord {
+  return {
+    id: input.id,
+    propertyId: input.propertyId,
+    title: input.title,
+    code: toNullableString(input.sourceLabel),
+    itemKey: toNullableString(input.sourceItemId),
+    itemLabel: toNullableString(input.sourceItemLabel),
+    notes:
+      toNullableString(input.managerNotes) ?? toNullableString(input.description),
+    conditionType: normalizeConditionTypeValue(input.conditionType),
+    status: normalizeConditionStatusValue(input.status),
+    blockingStatus: normalizeBlockingStatusValue(input.blockingStatus),
+    severity: normalizeSeverityValue(input.severity),
+    managerDecision: normalizeManagerDecisionValue(input.managerDecision),
+    sourceType: toNullableString(input.sourceType),
+    sourceTaskId: input.taskId,
+    sourceChecklistRunId: toNullableString(input.sourceRunId),
+    sourceChecklistAnswerId: toNullableString(input.sourceAnswerId),
+    createdAt: input.createdAt,
+    updatedAt: input.updatedAt,
+    resolvedAt: input.resolvedAt,
+    dismissedAt: input.dismissedAt,
+  };
 }
 
 export async function POST(req: NextRequest, context: RouteContext) {
   try {
-    const access = await requireApiPartnerAccess()
+    const access = await requireApiPartnerAccess();
 
     if (!access.ok) {
-      return access.response
+      return access.response;
     }
 
-    const { auth } = access
-    const { runId } = await context.params
-    const body = await req.json()
+    const { auth } = access;
+    const { runId } = await context.params;
+    const body = await req.json();
 
-    const allowed = await canPartnerAccessChecklistRun(auth, runId)
+    const allowed = await canPartnerAccessChecklistRun(auth, runId);
 
     if (!allowed) {
       return NextResponse.json(
         { error: "Δεν έχετε πρόσβαση σε αυτό το checklist run." },
         { status: 403 }
-      )
+      );
     }
 
-    const submittedAnswers = normalizeAnswers(body.answers)
+    const submittedAnswers = normalizeAnswers(body.answers);
 
     if (submittedAnswers.length === 0) {
       return NextResponse.json(
         { error: "Δεν υπάρχουν answers για υποβολή." },
         { status: 400 }
-      )
+      );
     }
 
-    const existingRun = await prisma.taskChecklistRun.findFirst({
+    const startedAt = toNullableDate(body.startedAt, "startedAt");
+    const completedAt = toNullableDate(body.completedAt, "completedAt");
+
+    const existingRun = (await (prisma.taskChecklistRun.findFirst as any)({
       where: {
         id: runId,
         task: {
@@ -144,182 +420,390 @@ export async function POST(req: NextRequest, context: RouteContext) {
             },
           },
         },
+        items: {
+          orderBy: {
+            sortOrder: "asc",
+          },
+        },
         answers: true,
         task: {
           select: {
             id: true,
+            organizationId: true,
+            propertyId: true,
+            bookingId: true,
             status: true,
+            sendCleaningChecklist: true,
+            sendSuppliesChecklist: true,
+            sendIssuesChecklist: true,
           },
         },
       },
-    })
+    })) as ExistingRunRow | null;
 
     if (!existingRun) {
       return NextResponse.json(
         { error: "Το checklist run δεν βρέθηκε." },
         { status: 404 }
-      )
+      );
     }
 
-    const templateItems = existingRun.template.items
-    const templateItemIds = new Set(templateItems.map((item) => item.id))
+    const runItems = safeArray(existingRun.items).map(normalizeEffectiveChecklistItem);
+    const fallbackTemplateItems = safeArray(existingRun.template?.items).map(
+      normalizeEffectiveChecklistItem
+    );
+
+    const effectiveItems: EffectiveChecklistItem[] =
+      runItems.length > 0 ? runItems : fallbackTemplateItems;
+
+    const itemIds = new Set(effectiveItems.map((item) => item.id));
 
     for (const answer of submittedAnswers) {
-      if (!templateItemIds.has(answer.templateItemId)) {
+      if (!itemIds.has(answer.templateItemId)) {
         return NextResponse.json(
-          { error: "Υπάρχει answer με template item που δεν ανήκει στο συγκεκριμένο run." },
+          {
+            error: "Υπάρχει answer με item που δεν ανήκει στο συγκεκριμένο run.",
+          },
           { status: 400 }
-        )
+        );
       }
     }
 
-    const missingRequiredItems = templateItems.filter((item) => {
-      if (!item.isRequired) return false
+    const validationResult = validateChecklistSubmitAnswers({
+      items: effectiveItems.map((item) => ({
+        id: item.id,
+        label: item.label,
+        itemType: item.itemType,
+        isRequired: item.isRequired,
+        requiresPhoto: item.requiresPhoto,
+        opensIssueOnFail: item.opensIssueOnFail,
+        failureValuesText: item.failureValuesText,
+      })),
+      answers: submittedAnswers,
+    });
 
-      const answer = submittedAnswers.find(
-        (submitted) => submitted.templateItemId === item.id
-      )
-
-      return !hasRequiredValue(item.itemType, answer)
-    })
-
-    if (missingRequiredItems.length > 0) {
+    if (!validationResult.ok) {
       return NextResponse.json(
         {
-          error: "Λείπουν υποχρεωτικές απαντήσεις από το checklist.",
-          missingItems: missingRequiredItems.map((item) => ({
-            id: item.id,
-            label: item.label,
-          })),
+          error: validationResult.error,
+          missingItems: validationResult.missingItems,
         },
         { status: 400 }
-      )
+      );
     }
 
     const submittedMap = new Map(
       submittedAnswers.map((answer) => [answer.templateItemId, answer])
-    )
+    );
 
-    const result = await prisma.$transaction(async (tx) => {
-      for (const item of templateItems) {
-        const submitted = submittedMap.get(item.id)
-        const existing = existingRun.answers.find((row) => row.templateItemId === item.id)
+    const now = new Date();
 
-        if (!submitted) {
-          if (existing) {
-            await tx.taskChecklistAnswer.delete({
-              where: { id: existing.id },
-            })
+    const result: SubmitTransactionResult = await prisma.$transaction(
+      async (tx) => {
+        const savedAnswers = new Map<string, SavedAnswerRow>();
+
+        for (const item of effectiveItems) {
+          const submitted = submittedMap.get(item.id);
+          const existing = safeArray(existingRun.answers).find((row) => {
+            return row.runItemId === item.id || row.templateItemId === item.id;
+          });
+
+          if (!submitted) {
+            if (existing) {
+              await tx.taskChecklistAnswer.delete({
+                where: { id: existing.id },
+              });
+            }
+            continue;
           }
-          continue
+
+          const data = {
+            valueBoolean: submitted.valueBoolean,
+            valueText: submitted.valueText,
+            valueNumber: submitted.valueNumber,
+            valueSelect: submitted.valueSelect,
+            notes: submitted.notes,
+            photoUrls: submitted.photoUrls,
+            issueCreated: false,
+          };
+
+          if (existing) {
+            const updated = (await (tx.taskChecklistAnswer.update as any)({
+              where: { id: existing.id },
+              data,
+              select: {
+                id: true,
+                checklistRunId: true,
+                templateItemId: true,
+                runItemId: true,
+              },
+            })) as SavedAnswerRow;
+
+            savedAnswers.set(item.id, updated);
+          } else {
+            const createData =
+              runItems.length > 0
+                ? {
+                    checklistRunId: runId,
+                    runItemId: item.id,
+                    ...data,
+                  }
+                : {
+                    checklistRunId: runId,
+                    templateItemId: item.id,
+                    ...data,
+                  };
+
+            const created = (await (tx.taskChecklistAnswer.create as any)({
+              data: createData,
+              select: {
+                id: true,
+                checklistRunId: true,
+                templateItemId: true,
+                runItemId: true,
+              },
+            })) as SavedAnswerRow;
+
+            savedAnswers.set(item.id, created);
+          }
         }
 
-        const data = {
-          valueBoolean: submitted.valueBoolean,
-          valueText: submitted.valueText,
-          valueNumber: submitted.valueNumber,
-          valueSelect: submitted.valueSelect,
-          notes: submitted.notes,
-          photoUrls: submitted.photoUrls,
+        const runConditionAnswers: RunConditionAnswerInput[] = [];
+
+        for (const item of effectiveItems) {
+          const submitted = submittedMap.get(item.id);
+          const savedAnswer = savedAnswers.get(item.id);
+
+          if (!submitted || !savedAnswer) {
+            continue;
+          }
+
+          runConditionAnswers.push(
+            mapToRunConditionAnswerInput(item, savedAnswer, submitted)
+          );
         }
 
-        if (existing) {
-          await tx.taskChecklistAnswer.update({
-            where: { id: existing.id },
-            data,
-          })
-        } else {
-          await tx.taskChecklistAnswer.create({
-            data: {
-              checklistRunId: runId,
-              templateItemId: item.id,
-              ...data,
+        const conditionResults: CreatedOrUpdatedPropertyConditionResult[] =
+          await createPropertyConditionsFromRun(
+            {
+              organizationId: existingRun.task.organizationId,
+              propertyId: existingRun.task.propertyId,
+              taskId: existingRun.task.id,
+              bookingId: existingRun.task.bookingId ?? null,
+              runId: existingRun.id,
+              templateId: existingRun.templateId ?? null,
+              templateTitle:
+                toNullableString(existingRun.sourceTemplateTitle) ??
+                toNullableString(existingRun.template?.title) ??
+                "Checklist",
+              answers: runConditionAnswers,
+              detectedAt: now,
             },
-          })
+            tx as any
+          );
+
+        const createdOrUpdatedConditionIds = conditionResults.map(
+          (item) => item.id
+        );
+
+        const createdAnswerIds = new Set(
+          runConditionAnswers.map((answer) => answer.answerId)
+        );
+
+        for (const savedAnswer of savedAnswers.values()) {
+          await tx.taskChecklistAnswer.update({
+            where: {
+              id: savedAnswer.id,
+            },
+            data: {
+              issueCreated: createdAnswerIds.has(savedAnswer.id),
+            },
+          });
         }
-      }
 
-      const now = new Date()
-
-      await tx.taskChecklistRun.update({
-        where: {
-          id: runId,
-        },
-        data: {
-          status: "completed",
-          startedAt: body.startedAt ? new Date(body.startedAt) : now,
-          completedAt: body.completedAt ? new Date(body.completedAt) : now,
-        },
-      })
-
-      const refreshedTask = await tx.task.findUnique({
-        where: { id: existingRun.task.id },
-        include: {
-          checklistRun: true,
-          supplyRun: true,
-        },
-      })
-
-      const suppliesCompleted =
-        !refreshedTask?.supplyRun ||
-        refreshedTask.supplyRun.status === "completed"
-
-      if (suppliesCompleted) {
-        await tx.task.update({
-          where: { id: existingRun.task.id },
+        await tx.taskChecklistRun.update({
+          where: {
+            id: runId,
+          },
           data: {
             status: "completed",
-            completedAt: now,
+            startedAt: startedAt ?? now,
+            completedAt: completedAt ?? now,
           },
-        })
+        });
 
-        const latestAssignment = await tx.taskAssignment.findFirst({
-          where: {
-            partnerId: auth.partnerId,
-            taskId: existingRun.task.id,
+        const refreshedTask = (await (tx.task.findUnique as any)({
+          where: { id: existingRun.task.id },
+          include: {
+            checklistRun: true,
+            supplyRun: true,
+            issueRun: true,
           },
-          orderBy: [
-            { assignedAt: "desc" },
-            { createdAt: "desc" },
-          ],
-          select: { id: true },
-        })
+        })) as RefreshedTaskRow | null;
 
-        if (latestAssignment) {
-          await tx.taskAssignment.update({
-            where: { id: latestAssignment.id },
+        const cleaningCompleted =
+          !refreshedTask?.checklistRun ||
+          refreshedTask.checklistRun.status === "completed";
+
+        const suppliesCompleted =
+          !refreshedTask?.supplyRun ||
+          refreshedTask.supplyRun.status === "completed";
+
+        const issuesCompleted =
+          !refreshedTask?.issueRun ||
+          refreshedTask.issueRun.status === "completed";
+
+        if (cleaningCompleted && suppliesCompleted && issuesCompleted) {
+          await tx.task.update({
+            where: { id: existingRun.task.id },
             data: {
               status: "completed",
               completedAt: now,
             },
-          })
-        }
-      }
+          });
 
-      return tx.taskChecklistRun.findUnique({
-        where: { id: runId },
-        include: {
-          template: {
-            include: {
-              items: {
-                orderBy: {
-                  sortOrder: "asc",
+          const latestAssignment: LatestAssignmentRow =
+            await tx.taskAssignment.findFirst({
+              where: {
+                partnerId: auth.partnerId,
+                taskId: existingRun.task.id,
+              },
+              orderBy: [{ assignedAt: "desc" }, { createdAt: "desc" }],
+              select: { id: true },
+            });
+
+          if (latestAssignment) {
+            await tx.taskAssignment.update({
+              where: { id: latestAssignment.id },
+              data: {
+                status: "completed",
+                completedAt: now,
+              },
+            });
+          }
+        }
+
+        const refreshedRun = (await (tx.taskChecklistRun.findUnique as any)({
+          where: { id: runId },
+          include: {
+            template: {
+              include: {
+                items: {
+                  orderBy: {
+                    sortOrder: "asc",
+                  },
+                },
+              },
+            },
+            items: {
+              orderBy: {
+                sortOrder: "asc",
+              },
+            },
+            answers: {
+              orderBy: {
+                createdAt: "asc",
+              },
+            },
+            task: {
+              include: {
+                propertyConditions: {
+                  where: {
+                    taskId: existingRun.task.id,
+                  },
+                  orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+                  select: {
+                    id: true,
+                    propertyId: true,
+                    taskId: true,
+                    bookingId: true,
+                    propertySupplyId: true,
+                    mergeKey: true,
+                    sourceType: true,
+                    sourceLabel: true,
+                    sourceItemId: true,
+                    sourceItemLabel: true,
+                    sourceRunId: true,
+                    sourceAnswerId: true,
+                    conditionType: true,
+                    title: true,
+                    description: true,
+                    status: true,
+                    blockingStatus: true,
+                    severity: true,
+                    managerDecision: true,
+                    managerNotes: true,
+                    createdAt: true,
+                    updatedAt: true,
+                    resolvedAt: true,
+                    dismissedAt: true,
+                  },
                 },
               },
             },
           },
-          answers: true,
-          task: true,
-        },
-      })
-    })
+        })) as RefreshedRunRow;
 
-    return NextResponse.json(result)
+        return {
+          run: refreshedRun,
+          createdOrUpdatedConditionIds,
+        };
+      }
+    );
+
+    const rawConditions: RawPropertyConditionRecord[] = safeArray(
+      result.run?.task?.propertyConditions
+    ).map((condition) =>
+      mapDbConditionToRawRecord({
+        id: condition.id,
+        propertyId: condition.propertyId,
+        taskId: condition.taskId,
+        bookingId: condition.bookingId,
+        propertySupplyId: condition.propertySupplyId,
+        mergeKey: condition.mergeKey ?? null,
+        title: condition.title,
+        description: condition.description,
+        sourceType: condition.sourceType,
+        sourceLabel: condition.sourceLabel,
+        sourceItemId: condition.sourceItemId,
+        sourceItemLabel: condition.sourceItemLabel,
+        sourceRunId: condition.sourceRunId,
+        sourceAnswerId: condition.sourceAnswerId,
+        conditionType: String(condition.conditionType).toLowerCase(),
+        status: String(condition.status).toLowerCase(),
+        blockingStatus: String(condition.blockingStatus).toLowerCase(),
+        severity: String(condition.severity).toLowerCase(),
+        managerDecision: condition.managerDecision
+          ? String(condition.managerDecision).toLowerCase()
+          : null,
+        managerNotes: condition.managerNotes,
+        createdAt: condition.createdAt,
+        updatedAt: condition.updatedAt,
+        resolvedAt: condition.resolvedAt,
+        dismissedAt: condition.dismissedAt,
+      })
+    );
+
+    const conditionSnapshot = buildPropertyConditionSnapshot(rawConditions);
+
+    return NextResponse.json({
+      run: result.run,
+      propertyConditions: {
+        summary: conditionSnapshot.summary,
+        reasons: conditionSnapshot.reasons,
+        active: conditionSnapshot.buckets.active,
+        blocking: conditionSnapshot.buckets.blocking,
+        warning: conditionSnapshot.buckets.warning,
+        monitoring: conditionSnapshot.buckets.monitoring,
+        all: conditionSnapshot.conditions,
+      },
+      createdOrUpdatedConditionIds: result.createdOrUpdatedConditionIds,
+    });
   } catch (error) {
-    console.error("Partner checklist submit POST error:", error)
+    console.error("Partner checklist submit POST error:", error);
     return NextResponse.json(
       { error: "Αποτυχία υποβολής checklist." },
       { status: 500 }
-    )
+    );
   }
 }

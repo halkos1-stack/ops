@@ -86,6 +86,26 @@ function buildTenantWhere(auth: AuthContext) {
   }
 }
 
+function buildPropertySupplyWhere(auth: AuthContext) {
+  if (auth.systemRole === "SUPER_ADMIN") {
+    return {}
+  }
+
+  if (auth.organizationId) {
+    return {
+      property: {
+        organizationId: auth.organizationId,
+      },
+    }
+  }
+
+  return {
+    property: {
+      organizationId: "__no_results__",
+    },
+  }
+}
+
 function lower(value: unknown) {
   return String(value ?? "").trim().toLowerCase()
 }
@@ -99,9 +119,9 @@ function isOpenTaskStatus(status?: string | null) {
     "closed",
     "done",
     "archived",
-    "Ολοκληρωμένη",
-    "Ολοκληρωθηκε",
-    "Ακυρωμένη",
+    "ολοκληρωμένη",
+    "ολοκληρωθηκε",
+    "ακυρωμένη",
   ].includes(s)
 }
 
@@ -125,7 +145,44 @@ function isPendingStatus(status?: string | null) {
   return ["pending", "assigned", "waiting", "open", ""].includes(s)
 }
 
-function classifyQuestionMode(question: string): "data" | "usage" | "mixed" | "briefing" | "risk" {
+function getPreferredSupplyName(
+  supplyItem?: {
+    name?: string | null
+    nameEl?: string | null
+  } | null
+) {
+  return supplyItem?.nameEl ?? supplyItem?.name ?? ""
+}
+
+function getEffectiveTargetLevel(
+  propertySupply?: {
+    targetLevel?: number | null
+    targetStock?: number | null
+  } | null
+) {
+  return propertySupply?.targetLevel ?? propertySupply?.targetStock ?? null
+}
+
+function getEffectiveMinimumThreshold(
+  propertySupply?: {
+    minimumThreshold?: number | null
+    reorderThreshold?: number | null
+    supplyItem?: {
+      minimumStock?: number | null
+    } | null
+  } | null
+) {
+  return (
+    propertySupply?.minimumThreshold ??
+    propertySupply?.reorderThreshold ??
+    propertySupply?.supplyItem?.minimumStock ??
+    null
+  )
+}
+
+function classifyQuestionMode(
+  question: string
+): "data" | "usage" | "mixed" | "briefing" | "risk" {
   const q = lower(question)
 
   const usageKeywords = [
@@ -220,6 +277,7 @@ export async function buildAssistantContext(params: {
 }) {
   const { auth, question, scope } = params
   const tenantWhere = buildTenantWhere(auth)
+  const propertySupplyWhere = buildPropertySupplyWhere(auth)
 
   const todayStart = startOfTodayAthens()
   const todayEnd = endOfTodayAthens()
@@ -472,24 +530,10 @@ export async function buildAssistantContext(params: {
             startedAt: true,
             completedAt: true,
             answers: {
-              select: {
-                id: true,
-                fillLevel: true,
-                notes: true,
+              include: {
                 propertySupply: {
-                  select: {
-                    id: true,
-                    lastUpdatedAt: true,
-                    fillLevel: true,
-                    supplyItem: {
-                      select: {
-                        id: true,
-                        code: true,
-                        name: true,
-                        category: true,
-                        unit: true,
-                      },
-                    },
+                  include: {
+                    supplyItem: true,
                   },
                 },
               },
@@ -552,24 +596,10 @@ export async function buildAssistantContext(params: {
     }),
 
     prisma.propertySupply.findMany({
-      where: {
-        ...tenantWhere,
-      },
+      where: propertySupplyWhere as any,
       orderBy: [{ updatedAt: "desc" }],
       take: 150,
-      select: {
-        id: true,
-        propertyId: true,
-        supplyItemId: true,
-        isActive: true,
-        fillLevel: true,
-        currentStock: true,
-        targetStock: true,
-        reorderThreshold: true,
-        lastUpdatedAt: true,
-        notes: true,
-        createdAt: true,
-        updatedAt: true,
+      include: {
         property: {
           select: {
             id: true,
@@ -579,17 +609,7 @@ export async function buildAssistantContext(params: {
             status: true,
           },
         },
-        supplyItem: {
-          select: {
-            id: true,
-            code: true,
-            name: true,
-            category: true,
-            unit: true,
-            minimumStock: true,
-            isActive: true,
-          },
-        },
+        supplyItem: true,
       },
     }),
 
@@ -641,7 +661,7 @@ export async function buildAssistantContext(params: {
     prisma.taskChecklistRun.findMany({
       where: {
         task: tenantWhere,
-      },
+      } as any,
       orderBy: [{ updatedAt: "desc" }],
       take: 80,
       select: {
@@ -715,7 +735,7 @@ export async function buildAssistantContext(params: {
     prisma.taskSupplyRun.findMany({
       where: {
         task: tenantWhere,
-      },
+      } as any,
       orderBy: [{ updatedAt: "desc" }],
       take: 80,
       select: {
@@ -752,15 +772,9 @@ export async function buildAssistantContext(params: {
           },
         },
         answers: {
-          select: {
-            id: true,
-            fillLevel: true,
-            notes: true,
+          include: {
             propertySupply: {
-              select: {
-                id: true,
-                fillLevel: true,
-                lastUpdatedAt: true,
+              include: {
                 property: {
                   select: {
                     id: true,
@@ -769,15 +783,7 @@ export async function buildAssistantContext(params: {
                     address: true,
                   },
                 },
-                supplyItem: {
-                  select: {
-                    id: true,
-                    code: true,
-                    name: true,
-                    category: true,
-                    unit: true,
-                  },
-                },
+                supplyItem: true,
               },
             },
           },
@@ -787,19 +793,19 @@ export async function buildAssistantContext(params: {
     }),
   ])
 
-  const mappedProperties = properties.map((item) => ({
+  const mappedProperties = properties.map((item: any) => ({
     ...item,
     createdAt: formatDate(item.createdAt),
     updatedAt: formatDate(item.updatedAt),
     propertyLink: propertyLink(item.id),
   }))
 
-  const mappedPartners = partners.map((item) => ({
+  const mappedPartners = partners.map((item: any) => ({
     ...item,
     updatedAt: formatDate(item.updatedAt),
   }))
 
-  const mappedBookings = bookings.map((item) => ({
+  const mappedBookings = bookings.map((item: any) => ({
     ...item,
     checkInDate: formatDate(item.checkInDate),
     checkOutDate: formatDate(item.checkOutDate),
@@ -809,14 +815,14 @@ export async function buildAssistantContext(params: {
     updatedAt: formatDate(item.updatedAt),
     bookingLink: bookingLink(item.id),
     propertyLink: propertyLink(item.propertyId),
-    taskLinks: item.tasks.map((task) => ({
+    taskLinks: item.tasks.map((task: any) => ({
       taskId: task.id,
       title: task.title,
       taskLink: taskLink(task.id),
     })),
   }))
 
-  const mappedTasks = tasks.map((item) => ({
+  const mappedTasks = tasks.map((item: any) => ({
     ...item,
     scheduledDate: formatDate(item.scheduledDate),
     dueDate: formatDate(item.dueDate),
@@ -827,10 +833,10 @@ export async function buildAssistantContext(params: {
     taskLink: taskLink(item.id),
     propertyLink: propertyLink(item.propertyId),
     bookingLink: bookingLink(item.bookingId),
-    latestAssignment: item.assignments[0] ?? null,
+    latestAssignment: item.assignments?.[0] ?? null,
   }))
 
-  const mappedIssues = issues.map((item) => ({
+  const mappedIssues = issues.map((item: any) => ({
     ...item,
     resolvedAt: formatDate(item.resolvedAt),
     createdAt: formatDate(item.createdAt),
@@ -841,51 +847,57 @@ export async function buildAssistantContext(params: {
     bookingLink: bookingLink(item.bookingId),
   }))
 
-  const mappedPropertySupplies = propertySupplies.map((item) => ({
+  const mappedPropertySupplies = propertySupplies.map((item: any) => ({
     ...item,
+    targetLevel: getEffectiveTargetLevel(item),
+    minimumThreshold: getEffectiveMinimumThreshold(item),
+    trackingMode: item.trackingMode ?? "fill_level",
+    isCritical: item.isCritical ?? false,
+    warningThreshold: item.warningThreshold ?? null,
+    supplyName: getPreferredSupplyName(item.supplyItem),
     lastUpdatedAt: formatDate(item.lastUpdatedAt),
     createdAt: formatDate(item.createdAt),
     updatedAt: formatDate(item.updatedAt),
     propertyLink: propertyLink(item.propertyId),
   }))
 
-  const mappedChecklistTemplates = checklistTemplates.map((item) => ({
+  const mappedChecklistTemplates = checklistTemplates.map((item: any) => ({
     ...item,
     createdAt: formatDate(item.createdAt),
     updatedAt: formatDate(item.updatedAt),
     propertyLink: propertyLink(item.propertyId),
   }))
 
-  const mappedChecklistRuns = checklistRuns.map((item) => ({
+  const mappedChecklistRuns = checklistRuns.map((item: any) => ({
     ...item,
     startedAt: formatDate(item.startedAt),
     completedAt: formatDate(item.completedAt),
     createdAt: formatDate(item.createdAt),
     updatedAt: formatDate(item.updatedAt),
     taskLink: taskLink(item.taskId),
-    propertyLink: propertyLink(item.task.property?.id),
-    bookingLink: bookingLink(item.task.booking?.id),
+    propertyLink: propertyLink(item.task?.property?.id),
+    bookingLink: bookingLink(item.task?.booking?.id),
   }))
 
-  const mappedSupplyRuns = supplyRuns.map((item) => ({
+  const mappedSupplyRuns = supplyRuns.map((item: any) => ({
     ...item,
     startedAt: formatDate(item.startedAt),
     completedAt: formatDate(item.completedAt),
     createdAt: formatDate(item.createdAt),
     updatedAt: formatDate(item.updatedAt),
     taskLink: taskLink(item.taskId),
-    propertyLink: propertyLink(item.task.property?.id),
-    bookingLink: bookingLink(item.task.booking?.id),
+    propertyLink: propertyLink(item.task?.property?.id),
+    bookingLink: bookingLink(item.task?.booking?.id),
   }))
 
   const openTasks = mappedTasks
-    .filter((item) => isOpenTaskStatus(item.status))
+    .filter((item: any) => isOpenTaskStatus(item.status))
     .slice(0, 40)
 
   const activeAlerts = mappedTasks
-    .filter((item) => item.alertEnabled)
-    .filter((item) => isOpenTaskStatus(item.status))
-    .sort((a, b) => {
+    .filter((item: any) => item.alertEnabled)
+    .filter((item: any) => isOpenTaskStatus(item.status))
+    .sort((a: any, b: any) => {
       const da = a.alertAt ? new Date(a.alertAt).getTime() : Number.MAX_SAFE_INTEGER
       const db = b.alertAt ? new Date(b.alertAt).getTime() : Number.MAX_SAFE_INTEGER
       return da - db
@@ -893,124 +905,141 @@ export async function buildAssistantContext(params: {
     .slice(0, 30)
 
   const upcomingBookings = mappedBookings
-    .filter((item) => {
+    .filter((item: any) => {
       const checkIn = item.checkInDate ? new Date(item.checkInDate) : null
       return checkIn && checkIn >= todayStart && checkIn <= next7Days
     })
     .slice(0, 40)
 
   const todayCheckOuts = mappedBookings
-    .filter((item) => {
+    .filter((item: any) => {
       const checkOut = item.checkOutDate ? new Date(item.checkOutDate) : null
       return checkOut && checkOut >= todayStart && checkOut <= todayEnd
     })
     .slice(0, 40)
 
   const bookingsWithoutTask = mappedBookings
-    .filter((item) => item.tasks.length === 0)
+    .filter((item: any) => item.tasks.length === 0)
     .slice(0, 40)
 
   const openIssues = mappedIssues
-    .filter((item) => isOpenIssueStatus(item.status))
+    .filter((item: any) => isOpenIssueStatus(item.status))
     .slice(0, 40)
 
   const lowSupplies = mappedPropertySupplies
-    .filter((item) => item.isActive)
-    .filter((item) => isLowFillLevel(item.fillLevel))
+    .filter((item: any) => item.isActive)
+    .filter((item: any) => isLowFillLevel(item.fillLevel))
     .slice(0, 50)
 
   const submittedChecklistRuns = mappedChecklistRuns
-    .filter((item) => isSubmittedStatus(item.status))
+    .filter((item: any) => isSubmittedStatus(item.status))
     .slice(0, 40)
 
   const pendingChecklistRuns = mappedChecklistRuns
-    .filter((item) => isPendingStatus(item.status))
+    .filter((item: any) => isPendingStatus(item.status))
     .slice(0, 40)
 
   const submittedSupplyRuns = mappedSupplyRuns
-    .filter((item) => isSubmittedStatus(item.status))
+    .filter((item: any) => isSubmittedStatus(item.status))
     .slice(0, 40)
 
   const pendingSupplyRuns = mappedSupplyRuns
-    .filter((item) => isPendingStatus(item.status))
+    .filter((item: any) => isPendingStatus(item.status))
     .slice(0, 40)
 
-  const checklistFindings = mappedChecklistRuns.flatMap((run) => {
-    return run.answers
-      .filter((answer) => {
-        const hasIssue = Boolean(answer.issueCreated)
-        const hasNotes = Boolean(answer.notes?.trim())
-        const hasSelect = Boolean(answer.valueSelect && lower(answer.valueSelect) !== "ok")
-        const hasBooleanFail = answer.valueBoolean === false
-        const hasText = Boolean(answer.valueText?.trim())
-        return hasIssue || hasNotes || hasSelect || hasBooleanFail || hasText
-      })
-      .map((answer) => ({
-        checklistRunId: run.id,
-        checklistRunStatus: run.status,
-        taskId: run.task.id,
-        taskTitle: run.task.title,
-        taskStatus: run.task.status,
-        propertyId: run.task.property?.id ?? null,
-        propertyCode: run.task.property?.code ?? null,
-        propertyName: run.task.property?.name ?? null,
-        bookingId: run.task.booking?.id ?? null,
-        bookingExternalId: run.task.booking?.externalBookingId ?? null,
-        templateTitle: run.template.title,
-        itemLabel: answer.templateItem.label,
-        itemType: answer.templateItem.itemType,
-        category: answer.templateItem.category,
-        valueBoolean: answer.valueBoolean,
-        valueText: answer.valueText,
-        valueNumber: answer.valueNumber,
-        valueSelect: answer.valueSelect,
-        notes: answer.notes,
-        issueCreated: answer.issueCreated,
-        taskLink: taskLink(run.task.id),
-        propertyLink: propertyLink(run.task.property?.id),
-        bookingLink: bookingLink(run.task.booking?.id),
-      }))
-  }).slice(0, 80)
+  const checklistFindings = mappedChecklistRuns
+    .flatMap((run: any) => {
+      return (run.answers || [])
+        .filter((answer: any) => {
+          const hasIssue = Boolean(answer.issueCreated)
+          const hasNotes = Boolean(answer.notes?.trim())
+          const hasSelect = Boolean(answer.valueSelect && lower(answer.valueSelect) !== "ok")
+          const hasBooleanFail = answer.valueBoolean === false
+          const hasText = Boolean(answer.valueText?.trim())
+          return hasIssue || hasNotes || hasSelect || hasBooleanFail || hasText
+        })
+        .map((answer: any) => ({
+          checklistRunId: run.id,
+          checklistRunStatus: run.status,
+          taskId: run.task?.id ?? null,
+          taskTitle: run.task?.title ?? null,
+          taskStatus: run.task?.status ?? null,
+          propertyId: run.task?.property?.id ?? null,
+          propertyCode: run.task?.property?.code ?? null,
+          propertyName: run.task?.property?.name ?? null,
+          bookingId: run.task?.booking?.id ?? null,
+          bookingExternalId: run.task?.booking?.externalBookingId ?? null,
+          templateTitle: run.template?.title ?? null,
+          itemLabel: answer.templateItem?.label ?? null,
+          itemType: answer.templateItem?.itemType ?? null,
+          category: answer.templateItem?.category ?? null,
+          valueBoolean: answer.valueBoolean,
+          valueText: answer.valueText,
+          valueNumber: answer.valueNumber,
+          valueSelect: answer.valueSelect,
+          notes: answer.notes,
+          issueCreated: answer.issueCreated,
+          taskLink: taskLink(run.task?.id),
+          propertyLink: propertyLink(run.task?.property?.id),
+          bookingLink: bookingLink(run.task?.booking?.id),
+        }))
+    })
+    .slice(0, 80)
 
-  const supplyFindings = mappedSupplyRuns.flatMap((run) => {
-    return run.answers
-      .filter((answer) => isLowFillLevel(answer.fillLevel) || Boolean(answer.notes?.trim()))
-      .map((answer) => ({
-        supplyRunId: run.id,
-        taskId: run.task.id,
-        taskTitle: run.task.title,
-        taskStatus: run.task.status,
-        propertyId: run.task.property?.id ?? null,
-        propertyCode: run.task.property?.code ?? null,
-        propertyName: run.task.property?.name ?? null,
-        bookingId: run.task.booking?.id ?? null,
-        bookingExternalId: run.task.booking?.externalBookingId ?? null,
-        supplyName: answer.propertySupply.supplyItem.name,
-        supplyCode: answer.propertySupply.supplyItem.code,
-        fillLevel: answer.fillLevel,
-        notes: answer.notes,
-        updatedFillLevel: answer.propertySupply.fillLevel,
-        lastUpdatedAt: answer.propertySupply.lastUpdatedAt,
-        taskLink: taskLink(run.task.id),
-        propertyLink: propertyLink(run.task.property?.id),
-        bookingLink: bookingLink(run.task.booking?.id),
-      }))
-  }).slice(0, 80)
+  const supplyFindings = mappedSupplyRuns
+    .flatMap((run: any) => {
+      return (run.answers || [])
+        .filter((answer: any) => {
+          return isLowFillLevel(answer.fillLevel) || Boolean(answer.notes?.trim())
+        })
+        .map((answer: any) => ({
+          supplyRunId: run.id,
+          taskId: run.task?.id ?? null,
+          taskTitle: run.task?.title ?? null,
+          taskStatus: run.task?.status ?? null,
+          propertyId: run.task?.property?.id ?? null,
+          propertyCode: run.task?.property?.code ?? null,
+          propertyName: run.task?.property?.name ?? null,
+          bookingId: run.task?.booking?.id ?? null,
+          bookingExternalId: run.task?.booking?.externalBookingId ?? null,
+          supplyName: getPreferredSupplyName(answer.propertySupply?.supplyItem),
+          supplyNameLegacy: answer.propertySupply?.supplyItem?.name ?? null,
+          supplyNameEl: (answer.propertySupply?.supplyItem as any)?.nameEl ?? null,
+          supplyNameEn: (answer.propertySupply?.supplyItem as any)?.nameEn ?? null,
+          supplyCode: answer.propertySupply?.supplyItem?.code ?? null,
+          fillLevel: answer.fillLevel,
+          notes: answer.notes,
+          updatedFillLevel: answer.propertySupply?.fillLevel ?? null,
+          currentStock: answer.propertySupply?.currentStock ?? null,
+          targetStock: answer.propertySupply?.targetStock ?? null,
+          reorderThreshold: answer.propertySupply?.reorderThreshold ?? null,
+          targetLevel: getEffectiveTargetLevel(answer.propertySupply),
+          minimumThreshold: getEffectiveMinimumThreshold(answer.propertySupply),
+          trackingMode: answer.propertySupply?.trackingMode ?? "fill_level",
+          isCritical: answer.propertySupply?.isCritical ?? false,
+          warningThreshold: answer.propertySupply?.warningThreshold ?? null,
+          lastUpdatedAt: answer.propertySupply?.lastUpdatedAt ?? null,
+          taskLink: taskLink(run.task?.id),
+          propertyLink: propertyLink(run.task?.property?.id),
+          bookingLink: bookingLink(run.task?.booking?.id),
+        }))
+    })
+    .slice(0, 80)
 
   const scopedProperty = scope?.propertyId
-    ? mappedProperties.find((item) => item.id === scope.propertyId) ?? null
+    ? mappedProperties.find((item: any) => item.id === scope.propertyId) ?? null
     : null
 
   const scopedTask = scope?.taskId
-    ? mappedTasks.find((item) => item.id === scope.taskId) ?? null
+    ? mappedTasks.find((item: any) => item.id === scope.taskId) ?? null
     : null
 
   const scopedBooking = scope?.bookingId
-    ? mappedBookings.find((item) => item.id === scope.bookingId) ?? null
+    ? mappedBookings.find((item: any) => item.id === scope.bookingId) ?? null
     : null
 
   const taskRiskSignals = openTasks
-    .map((task) => {
+    .map((task: any) => {
       const reasons: string[] = []
 
       if (task.alertEnabled && task.alertAt) {
@@ -1062,7 +1091,7 @@ export async function buildAssistantContext(params: {
     .slice(0, 40)
 
   const bookingRiskSignals = upcomingBookings
-    .map((booking) => {
+    .map((booking: any) => {
       const reasons: string[] = []
 
       if (!booking.propertyId) {
@@ -1098,7 +1127,7 @@ export async function buildAssistantContext(params: {
     .slice(0, 40)
 
   const issueRiskSignals = openIssues
-    .map((issue) => ({
+    .map((issue: any) => ({
       issueId: issue.id,
       issueTitle: issue.title,
       issueType: issue.issueType,

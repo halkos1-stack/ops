@@ -40,6 +40,36 @@ type ΦίλτροΠίνακαΕλέγχου =
   | "in_progress"
   | "alerts"
 
+type ΚανονικήΚατάστασηΕργασίας =
+  | "NEW"
+  | "PENDING"
+  | "ASSIGNED"
+  | "WAITING_ACCEPTANCE"
+  | "ACCEPTED"
+  | "IN_PROGRESS"
+  | "COMPLETED"
+  | "CANCELLED"
+  | "UNKNOWN"
+
+function normalizeTaskStatus(
+  status: string | null | undefined
+): ΚανονικήΚατάστασηΕργασίας {
+  const value = String(status || "").trim().toLowerCase()
+
+  if (value === "new") return "NEW"
+  if (value === "pending") return "PENDING"
+  if (value === "assigned") return "ASSIGNED"
+  if (value === "waiting_acceptance" || value === "waiting-acceptance") {
+    return "WAITING_ACCEPTANCE"
+  }
+  if (value === "accepted") return "ACCEPTED"
+  if (value === "in_progress" || value === "in-progress") return "IN_PROGRESS"
+  if (value === "completed") return "COMPLETED"
+  if (value === "cancelled" || value === "canceled") return "CANCELLED"
+
+  return "UNKNOWN"
+}
+
 function normalizeDateOnly(dateValue: string | Date | null | undefined) {
   if (!dateValue) return null
 
@@ -92,9 +122,16 @@ function toDateInputValue(dateValue: Date) {
 }
 
 function είναιΑνοιχτήΕργασία(εργασία: Εργασία) {
-  const κατάσταση = String(εργασία.status || "").toLowerCase()
+  const κατάσταση = normalizeTaskStatus(εργασία.status)
 
-  return ["pending", "assigned", "accepted", "in_progress"].includes(κατάσταση)
+  return [
+    "NEW",
+    "PENDING",
+    "ASSIGNED",
+    "WAITING_ACCEPTANCE",
+    "ACCEPTED",
+    "IN_PROGRESS",
+  ].includes(κατάσταση)
 }
 
 function είναιΣήμερα(dateValue: string | null | undefined) {
@@ -140,14 +177,18 @@ function είναιΜέσαΣεΕύροςΗμερομηνίας(
 }
 
 function getTaskStatusClasses(status: string) {
-  switch (status.toLowerCase()) {
-    case "pending":
+  const normalized = normalizeTaskStatus(status)
+
+  switch (normalized) {
+    case "NEW":
+    case "PENDING":
       return "border border-amber-200 bg-amber-100 text-amber-700"
-    case "assigned":
+    case "ASSIGNED":
+    case "WAITING_ACCEPTANCE":
       return "border border-orange-200 bg-orange-100 text-orange-700"
-    case "accepted":
+    case "ACCEPTED":
       return "border border-sky-200 bg-sky-100 text-sky-700"
-    case "in_progress":
+    case "IN_PROGRESS":
       return "border border-blue-200 bg-blue-100 text-blue-700"
     default:
       return "border border-slate-200 bg-slate-100 text-slate-700"
@@ -199,7 +240,7 @@ function getDashboardTexts(language: "el" | "en") {
   if (language === "en") {
     return {
       locale: "en-GB",
-      title: "Dashboard",
+      title: "Task control board",
       subtitle:
         "Operational control view with open tasks, active alerts and date filters.",
       newTask: "New task",
@@ -215,10 +256,10 @@ function getDashboardTexts(language: "el" | "en") {
       alertsNow: "Active alerts",
       alertsNowHint: "Open tasks with active alert time",
 
-      pendingTasks: "New",
-      pendingTasksHint: "Open tasks waiting for assignment or action",
+      pendingTasks: "New / pending",
+      pendingTasksHint: "Open tasks waiting for assignment or first action",
 
-      assignedTasks: "Assigned",
+      assignedTasks: "Assigned / waiting",
       assignedTasksHint: "Tasks assigned and waiting for acceptance",
 
       acceptedTasks: "Accepted",
@@ -234,14 +275,16 @@ function getDashboardTexts(language: "el" | "en") {
       noTasks: "No open tasks found.",
       noTasksHint: "Try another filter or create a new task.",
 
+      propertyFilter: "Property",
+      allProperties: "All properties",
       fromDate: "From",
       toDate: "To",
       clearDates: "Clear dates",
 
       filterAllOpen: "All open",
       filterToday: "Today",
-      filterPending: "New",
-      filterAssigned: "Assigned",
+      filterPending: "New / pending",
+      filterAssigned: "Assigned / waiting",
       filterAccepted: "Accepted",
       filterInProgress: "In progress",
       filterAlerts: "Alerts",
@@ -256,8 +299,10 @@ function getDashboardTexts(language: "el" | "en") {
       noDescription: "No description available.",
 
       status: {
-        pending: "New",
+        new: "New",
+        pending: "Pending",
         assigned: "Assigned",
+        waiting_acceptance: "Waiting acceptance",
         accepted: "Accepted",
         in_progress: "In progress",
       },
@@ -274,7 +319,7 @@ function getDashboardTexts(language: "el" | "en") {
 
   return {
     locale: "el-GR",
-    title: "Πίνακας ελέγχου",
+    title: "Πίνακας ελέγχου εργασιών",
     subtitle:
       "Λειτουργική εικόνα ελέγχου με ανοιχτές εργασίες, ενεργά alert και φίλτρα ημερομηνιών.",
     newTask: "Νέα εργασία",
@@ -290,10 +335,10 @@ function getDashboardTexts(language: "el" | "en") {
     alertsNow: "Ενεργά alert",
     alertsNowHint: "Ανοιχτές εργασίες με ενεργή ώρα alert",
 
-    pendingTasks: "Νέες",
-    pendingTasksHint: "Ανοιχτές εργασίες που περιμένουν ανάθεση ή ενέργεια",
+    pendingTasks: "Νέες / εκκρεμείς",
+    pendingTasksHint: "Ανοιχτές εργασίες που περιμένουν ανάθεση ή πρώτη ενέργεια",
 
-    assignedTasks: "Ανατεθειμένες",
+    assignedTasks: "Ανατεθειμένες / αναμονή",
     assignedTasksHint: "Εργασίες που έχουν ανατεθεί και περιμένουν αποδοχή",
 
     acceptedTasks: "Αποδεκτές",
@@ -316,8 +361,8 @@ function getDashboardTexts(language: "el" | "en") {
 
     filterAllOpen: "Όλες οι ανοιχτές",
     filterToday: "Σήμερα",
-    filterPending: "Νέες",
-    filterAssigned: "Ανατεθειμένες",
+    filterPending: "Νέες / εκκρεμείς",
+    filterAssigned: "Ανατεθειμένες / αναμονή",
     filterAccepted: "Αποδεκτές",
     filterInProgress: "Σε εξέλιξη",
     filterAlerts: "Alert",
@@ -332,8 +377,10 @@ function getDashboardTexts(language: "el" | "en") {
     noDescription: "Δεν υπάρχει διαθέσιμη περιγραφή.",
 
     status: {
-      pending: "Νέα",
+      new: "Νέα",
+      pending: "Εκκρεμής",
       assigned: "Ανατεθειμένη",
+      waiting_acceptance: "Αναμονή αποδοχής",
       accepted: "Αποδεκτή",
       in_progress: "Σε εξέλιξη",
     },
@@ -350,15 +397,20 @@ function getDashboardTexts(language: "el" | "en") {
 
 function getTaskStatusLabel(language: "el" | "en", status: string) {
   const texts = getDashboardTexts(language)
+  const normalized = normalizeTaskStatus(status)
 
-  switch (status.toLowerCase()) {
-    case "pending":
+  switch (normalized) {
+    case "NEW":
+      return texts.status.new
+    case "PENDING":
       return texts.status.pending
-    case "assigned":
+    case "ASSIGNED":
       return texts.status.assigned
-    case "accepted":
+    case "WAITING_ACCEPTANCE":
+      return texts.status.waiting_acceptance
+    case "ACCEPTED":
       return texts.status.accepted
-    case "in_progress":
+    case "IN_PROGRESS":
       return texts.status.in_progress
     default:
       return status
@@ -469,6 +521,8 @@ function normalizeTaskTitle(
 export default function DashboardPage() {
   const { language } = useAppLanguage()
   const texts = getDashboardTexts(language)
+  const propertyFilterLabel = language === "en" ? "Property" : "Ακίνητο"
+  const allPropertiesLabel = language === "en" ? "All properties" : "Όλα τα ακίνητα"
 
   const σήμερα = useMemo(() => new Date(), [])
   const [εργασίες, setΕργασίες] = useState<Εργασία[]>([])
@@ -476,6 +530,7 @@ export default function DashboardPage() {
   const [error, setError] = useState("")
   const [activeFilter, setActiveFilter] =
     useState<ΦίλτροΠίνακαΕλέγχου>("all_open")
+  const [selectedPropertyId, setSelectedPropertyId] = useState("")
 
   const [ημερομηνίαΑπό, setΗμερομηνίαΑπό] = useState(
     toDateInputValue(σήμερα)
@@ -489,8 +544,6 @@ export default function DashboardPage() {
 
       const params = new URLSearchParams()
       params.set("openOnly", "true")
-      if (ημερομηνίαΑπό) params.set("dateFrom", ημερομηνίαΑπό)
-      if (ημερομηνίαΈως) params.set("dateTo", ημερομηνίαΈως)
 
       const response = await fetch(`/api/tasks?${params.toString()}`, {
         cache: "no-store",
@@ -511,73 +564,106 @@ export default function DashboardPage() {
   }
 
   useEffect(() => {
-    loadDashboardData()
+    void loadDashboardData()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ημερομηνίαΑπό, ημερομηνίαΈως, language])
+  }, [language])
 
   const openTasks = useMemo(() => {
     return εργασίες.filter((εργασία) => είναιΑνοιχτήΕργασία(εργασία))
   }, [εργασίες])
 
-  const tasksToday = useMemo(() => {
-    return openTasks.filter((εργασία) => είναιΣήμερα(εργασία.scheduledDate))
-  }, [openTasks])
+  const propertyOptions = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; code?: string }>()
 
-  const alertTasks = useMemo(() => {
-    return openTasks.filter((εργασία) => είναιΕνεργόAlert(εργασία))
-  }, [openTasks])
+    openTasks.forEach((εργασία) => {
+      const property = εργασία.property
+      if (!property?.id) return
+      map.set(property.id, {
+        id: property.id,
+        name: property.name,
+        code: property.code,
+      })
+    })
 
-  const pendingTasks = useMemo(() => {
-    return openTasks.filter(
-      (εργασία) => String(εργασία.status).toLowerCase() === "pending"
+    return [...map.values()].sort((a, b) =>
+      `${a.name} ${a.code || ""}`.localeCompare(`${b.name} ${b.code || ""}`, texts.locale)
     )
-  }, [openTasks])
+  }, [openTasks, texts.locale])
 
-  const assignedTasks = useMemo(() => {
-    return openTasks.filter(
-      (εργασία) => String(εργασία.status).toLowerCase() === "assigned"
-    )
-  }, [openTasks])
+  const propertyFilteredOpenTasks = useMemo(() => {
+    if (!selectedPropertyId) return openTasks
+    return openTasks.filter((εργασία) => εργασία.propertyId === selectedPropertyId)
+  }, [openTasks, selectedPropertyId])
 
-  const acceptedTasks = useMemo(() => {
-    return openTasks.filter(
-      (εργασία) => String(εργασία.status).toLowerCase() === "accepted"
-    )
-  }, [openTasks])
-
-  const inProgressTasks = useMemo(() => {
-    return openTasks.filter(
-      (εργασία) => String(εργασία.status).toLowerCase() === "in_progress"
-    )
-  }, [openTasks])
-
-  const filteredTasks = useMemo(() => {
-    let result = openTasks.filter((εργασία) =>
+  const dateFilteredOpenTasks = useMemo(() => {
+    return propertyFilteredOpenTasks.filter((εργασία) =>
       είναιΜέσαΣεΕύροςΗμερομηνίας(εργασία, ημερομηνίαΑπό, ημερομηνίαΈως)
     )
+  }, [propertyFilteredOpenTasks, ημερομηνίαΑπό, ημερομηνίαΈως])
+
+  const tasksToday = useMemo(() => {
+    return dateFilteredOpenTasks.filter((εργασία) =>
+      είναιΣήμερα(εργασία.scheduledDate)
+    )
+  }, [dateFilteredOpenTasks])
+
+  const alertTasks = useMemo(() => {
+    return dateFilteredOpenTasks.filter((εργασία) => είναιΕνεργόAlert(εργασία))
+  }, [dateFilteredOpenTasks])
+
+  const pendingTasks = useMemo(() => {
+    return dateFilteredOpenTasks.filter((εργασία) => {
+      const status = normalizeTaskStatus(εργασία.status)
+      return status === "NEW" || status === "PENDING"
+    })
+  }, [dateFilteredOpenTasks])
+
+  const assignedTasks = useMemo(() => {
+    return dateFilteredOpenTasks.filter((εργασία) => {
+      const status = normalizeTaskStatus(εργασία.status)
+      return status === "ASSIGNED" || status === "WAITING_ACCEPTANCE"
+    })
+  }, [dateFilteredOpenTasks])
+
+  const acceptedTasks = useMemo(() => {
+    return dateFilteredOpenTasks.filter(
+      (εργασία) => normalizeTaskStatus(εργασία.status) === "ACCEPTED"
+    )
+  }, [dateFilteredOpenTasks])
+
+  const inProgressTasks = useMemo(() => {
+    return dateFilteredOpenTasks.filter(
+      (εργασία) => normalizeTaskStatus(εργασία.status) === "IN_PROGRESS"
+    )
+  }, [dateFilteredOpenTasks])
+
+  const filteredTasks = useMemo(() => {
+    let result = [...dateFilteredOpenTasks]
 
     switch (activeFilter) {
       case "today":
         result = result.filter((εργασία) => είναιΣήμερα(εργασία.scheduledDate))
         break
       case "pending":
-        result = result.filter(
-          (εργασία) => String(εργασία.status).toLowerCase() === "pending"
-        )
+        result = result.filter((εργασία) => {
+          const status = normalizeTaskStatus(εργασία.status)
+          return status === "NEW" || status === "PENDING"
+        })
         break
       case "assigned":
-        result = result.filter(
-          (εργασία) => String(εργασία.status).toLowerCase() === "assigned"
-        )
+        result = result.filter((εργασία) => {
+          const status = normalizeTaskStatus(εργασία.status)
+          return status === "ASSIGNED" || status === "WAITING_ACCEPTANCE"
+        })
         break
       case "accepted":
         result = result.filter(
-          (εργασία) => String(εργασία.status).toLowerCase() === "accepted"
+          (εργασία) => normalizeTaskStatus(εργασία.status) === "ACCEPTED"
         )
         break
       case "in_progress":
         result = result.filter(
-          (εργασία) => String(εργασία.status).toLowerCase() === "in_progress"
+          (εργασία) => normalizeTaskStatus(εργασία.status) === "IN_PROGRESS"
         )
         break
       case "alerts":
@@ -589,6 +675,11 @@ export default function DashboardPage() {
     }
 
     return [...result].sort((a, b) => {
+      const aIsAlert = είναιΕνεργόAlert(a) ? 1 : 0
+      const bIsAlert = είναιΕνεργόAlert(b) ? 1 : 0
+
+      if (aIsAlert !== bIsAlert) return bIsAlert - aIsAlert
+
       const aDate = new Date(a.scheduledDate).getTime()
       const bDate = new Date(b.scheduledDate).getTime()
 
@@ -603,7 +694,7 @@ export default function DashboardPage() {
 
       return aAlert - bAlert
     })
-  }, [openTasks, activeFilter, ημερομηνίαΑπό, ημερομηνίαΈως])
+  }, [dateFilteredOpenTasks, activeFilter])
 
   if (loading) {
     return (
@@ -670,7 +761,7 @@ export default function DashboardPage() {
         </div>
       ) : null}
 
-      <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <button
           type="button"
           onClick={() => setActiveFilter("all_open")}
@@ -683,7 +774,7 @@ export default function DashboardPage() {
             {texts.openTasks}
           </p>
           <p className="mt-3 text-3xl font-bold text-slate-900">
-            {openTasks.length}
+            {dateFilteredOpenTasks.length}
           </p>
           <p className="mt-2 text-xs text-slate-500">{texts.openTasksHint}</p>
         </button>
@@ -722,7 +813,7 @@ export default function DashboardPage() {
           <p className="mt-2 text-xs text-slate-500">{texts.alertsNowHint}</p>
         </button>
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm">
+        <div className="hidden rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm">
           <p className="text-sm font-medium text-slate-500">
             {texts.fromDate} – {texts.toDate}
           </p>
@@ -832,6 +923,64 @@ export default function DashboardPage() {
             {texts.inProgressTasksHint}
           </p>
         </button>
+      </section>
+
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(220px,1.2fr)_1fr_1fr_auto]">
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              {propertyFilterLabel}
+            </span>
+            <select
+              value={selectedPropertyId}
+              onChange={(e) => setSelectedPropertyId(e.target.value)}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-500"
+            >
+              <option value="">{allPropertiesLabel}</option>
+              {propertyOptions.map((property) => (
+                <option key={property.id} value={property.id}>
+                  {property.name} {property.code ? `· ${property.code}` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              {texts.fromDate}
+            </span>
+            <input
+              type="date"
+              value={ημερομηνίαΑπό}
+              onChange={(e) => setΗμερομηνίαΑπό(e.target.value)}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-500"
+            />
+          </label>
+
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              {texts.toDate}
+            </span>
+            <input
+              type="date"
+              value={ημερομηνίαΈως}
+              onChange={(e) => setΗμερομηνίαΈως(e.target.value)}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-500"
+            />
+          </label>
+
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedPropertyId("")
+              setΗμερομηνίαΑπό(toDateInputValue(new Date()))
+              setΗμερομηνίαΈως("")
+            }}
+            className="mt-auto inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            {texts.clearDates}
+          </button>
+        </div>
       </section>
 
       <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -949,6 +1098,7 @@ export default function DashboardPage() {
                   εργασία.description,
                   language
                 )
+                const isActiveAlert = είναιΕνεργόAlert(εργασία)
 
                 const normalizedTitle = normalizeTaskTitle(
                   εργασία.title,
@@ -958,7 +1108,11 @@ export default function DashboardPage() {
                 return (
                   <div
                     key={εργασία.id}
-                    className="rounded-2xl border border-slate-200 p-4"
+                    className={`rounded-2xl border p-4 ${
+                      isActiveAlert
+                        ? "border-red-200 bg-red-50/40"
+                        : "border-slate-200 bg-white"
+                    }`}
                   >
                     <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                       <div className="min-w-0">
@@ -983,7 +1137,7 @@ export default function DashboardPage() {
                             {getPriorityLabel(language, εργασία.priority)}
                           </span>
 
-                          {είναιΕνεργόAlert(εργασία) ? (
+                          {isActiveAlert ? (
                             <span className="inline-flex rounded-full border border-red-200 bg-red-100 px-3 py-1 text-xs font-semibold text-red-700">
                               {texts.filterAlerts}
                             </span>
@@ -1002,7 +1156,11 @@ export default function DashboardPage() {
                       <div className="flex flex-wrap gap-2">
                         <Link
                           href={`/tasks/${εργασία.id}`}
-                          className="inline-flex items-center rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+                          className={`inline-flex items-center rounded-xl px-4 py-2 text-sm font-semibold text-white ${
+                            isActiveAlert
+                              ? "bg-red-600 hover:bg-red-700"
+                              : "bg-slate-900 hover:bg-slate-800"
+                          }`}
                         >
                           {texts.openTask}
                         </Link>

@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
-import { requireApiAppAccess, canAccessOrganization } from "@/lib/route-access"
+import { requireApiAppAccessWithDevBypass } from "@/lib/dev-api-access"
+import {
+  buildPropertyConditionSnapshot,
+  type RawPropertyConditionRecord,
+} from "@/lib/readiness/property-condition-mappers"
 
 type RouteContext = {
   params: Promise<{
@@ -8,383 +12,1452 @@ type RouteContext = {
   }>
 }
 
+type AuthContext = {
+  systemRole?: "SUPER_ADMIN" | "USER"
+  organizationId?: string | null
+}
+
+type ExtendedRawPropertyConditionRecord = RawPropertyConditionRecord & {
+  taskId?: string | null
+  bookingId?: string | null
+  propertySupplyId?: string | null
+  mergeKey?: string | null
+  description?: string | null
+  managerNotes?: string | null
+  sourceLabel?: string | null
+  sourceItemId?: string | null
+  sourceItemLabel?: string | null
+  sourceRunId?: string | null
+  sourceAnswerId?: string | null
+  firstDetectedAt?: Date | string | null
+  lastDetectedAt?: Date | string | null
+}
+
+function buildTenantWhere(auth: AuthContext) {
+  if (auth.systemRole === "SUPER_ADMIN") {
+    return {}
+  }
+
+  if (auth.organizationId) {
+    return {
+      organizationId: auth.organizationId,
+    }
+  }
+
+  return {
+    organizationId: "__no_results__",
+  }
+}
+
+function hasOwn(obj: unknown, key: string) {
+  return Object.prototype.hasOwnProperty.call(obj ?? {}, key)
+}
+
+function toRequiredString(value: unknown, label: string) {
+  const text = String(value ?? "").trim()
+
+  if (!text) {
+    throw new Error(`Το πεδίο "${label}" είναι υποχρεωτικό.`)
+  }
+
+  return text
+}
+
 function toNullableString(value: unknown) {
   if (value === undefined || value === null) return null
+
   const text = String(value).trim()
-  return text === "" ? null : text
+  return text ? text : null
 }
 
-function toOptionalDate(value: unknown) {
-  const text = toNullableString(value)
-  if (!text) return null
+function toOptionalBoolean(value: unknown) {
+  if (value === undefined) return undefined
+  return Boolean(value)
+}
 
-  const date = new Date(text)
-  if (Number.isNaN(date.getTime())) return null
+function toNullableDate(value: unknown, label: string) {
+  if (value === undefined) return undefined
+  if (value === null || value === "") return null
+
+  const date = new Date(String(value))
+
+  if (Number.isNaN(date.getTime())) {
+    throw new Error(`Το πεδίο "${label}" δεν είναι έγκυρη ημερομηνία.`)
+  }
+
   return date
 }
 
-function toRequiredDate(value: unknown) {
-  const text = toNullableString(value)
-  if (!text) return null
-
-  const date = new Date(text)
-  if (Number.isNaN(date.getTime())) return null
-  return date
+function safeArray<T>(value: T[] | null | undefined): T[] {
+  return Array.isArray(value) ? value : []
 }
 
-function toNullableTime(value: unknown) {
-  const text = toNullableString(value)
-  if (!text) return null
+function normalizeConditionType(value: unknown): "supply" | "issue" | "damage" {
+  if (value === "supply" || value === "issue" || value === "damage") {
+    return value
+  }
 
-  const normalized = text.slice(0, 5)
-  const isValid = /^([01]\d|2[0-3]):([0-5]\d)$/.test(normalized)
-  if (!isValid) return null
-
-  return normalized
+  return "issue"
 }
 
-function getActivePortalTokenFromPartner(
-  partner?: {
-    portalAccessTokens?: Array<{
-      token: string
-      isActive: boolean
-      expiresAt: Date | null
-      createdAt: Date
-    }>
-  } | null
-) {
-  if (!partner?.portalAccessTokens?.length) return null
-
-  const now = Date.now()
-
-  const activeTokens = partner.portalAccessTokens
-    .filter((item) => {
-      if (!item.isActive) return false
-      if (item.expiresAt && new Date(item.expiresAt).getTime() < now) return false
-      return true
-    })
-    .sort((a, b) => {
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    })
-
-  return activeTokens[0]?.token || null
-}
-
-function looksLikeCleaningTemplate(template?: {
-  title?: string | null
-  description?: string | null
-  templateType?: string | null
-  items?: Array<{
-    category?: string | null
-    linkedSupplyItemId?: string | null
-    supplyUpdateMode?: string | null
-  }>
-} | null) {
-  if (!template) return false
-
-  const title = String(template.title || "").toLowerCase()
-  const description = String(template.description || "").toLowerCase()
-  const templateType = String(template.templateType || "").toLowerCase()
-
+function normalizeConditionStatus(
+  value: unknown
+): "open" | "monitoring" | "resolved" | "dismissed" {
   if (
-    templateType === "main" ||
-    templateType === "cleaning" ||
-    title.includes("καθαρ") ||
-    title.includes("clean") ||
-    description.includes("καθαρ") ||
-    description.includes("clean")
+    value === "open" ||
+    value === "monitoring" ||
+    value === "resolved" ||
+    value === "dismissed"
   ) {
-    return true
+    return value
   }
 
-  const items = Array.isArray(template.items) ? template.items : []
-
-  if (items.length === 0) return false
-
-  return items.every((item) => {
-    const category = String(item.category || "").toLowerCase()
-    const mode = String(item.supplyUpdateMode || "").toLowerCase()
-
-    return (
-      !item.linkedSupplyItemId &&
-      mode !== "status_map" &&
-      mode !== "set_stock" &&
-      mode !== "consume" &&
-      mode !== "flag_low" &&
-      !category.includes("supply") &&
-      !category.includes("stock") &&
-      !category.includes("inventory") &&
-      !category.includes("αναλω")
-    )
-  })
+  return "open"
 }
 
-function buildCleaningRunTitle(params: {
-  checklistRun?: {
-    template?: {
-      title?: string | null
-    } | null
-  } | null
-  primaryCleaningTemplate?: {
-    title?: string | null
-  } | null
-}) {
-  return (
-    params.checklistRun?.template?.title ||
-    params.primaryCleaningTemplate?.title ||
-    "Λίστα καθαριότητας"
-  )
+function normalizeConditionBlockingStatus(
+  value: unknown
+): "blocking" | "non_blocking" | "warning" {
+  if (
+    value === "blocking" ||
+    value === "non_blocking" ||
+    value === "warning"
+  ) {
+    return value
+  }
+
+  return "warning"
 }
 
-function buildSuppliesRunTitle() {
-  return "Λίστα αναλωσίμων"
+function normalizeConditionSeverity(
+  value: unknown
+): "low" | "medium" | "high" | "critical" {
+  if (
+    value === "low" ||
+    value === "medium" ||
+    value === "high" ||
+    value === "critical"
+  ) {
+    return value
+  }
+
+  return "medium"
 }
 
-function buildChecklistItemResponse(item: {
-  id: string
-  label: string
-  description: string | null
-  itemType: string
-  sortOrder: number
-  isRequired: boolean
-  requiresPhoto: boolean
-  opensIssueOnFail: boolean
-  optionsText: string | null
-  category: string | null
-  linkedSupplyItemId: string | null
-  supplyUpdateMode: string | null
-  issueTypeOnFail?: string | null
-  issueSeverityOnFail?: string | null
-  failureValuesText?: string | null
-}) {
+function normalizeConditionManagerDecision(
+  value: unknown
+):
+  | "allow_with_issue"
+  | "block_until_resolved"
+  | "monitor"
+  | "resolved"
+  | "dismissed"
+  | null {
+  if (
+    value === "allow_with_issue" ||
+    value === "block_until_resolved" ||
+    value === "monitor" ||
+    value === "resolved" ||
+    value === "dismissed"
+  ) {
+    return value
+  }
+
+  return null
+}
+
+function sortChecklistRun(run: any) {
+  if (!run) return null
+
   return {
-    id: item.id,
-    label: item.label,
-    description: item.description,
-    itemType: item.itemType,
-    sortOrder: item.sortOrder,
-    isRequired: item.isRequired,
-    requiresPhoto: item.requiresPhoto,
-    opensIssueOnFail: item.opensIssueOnFail,
-    optionsText: item.optionsText,
-    category: item.category,
-    linkedSupplyItemId: item.linkedSupplyItemId,
-    supplyUpdateMode: item.supplyUpdateMode,
-    issueTypeOnFail: item.issueTypeOnFail ?? null,
-    issueSeverityOnFail: item.issueSeverityOnFail ?? null,
-    failureValuesText: item.failureValuesText ?? null,
+    ...run,
+    items: safeArray(run.items).sort((a: any, b: any) => {
+      const aOrder = Number(a?.sortOrder ?? 0)
+      const bOrder = Number(b?.sortOrder ?? 0)
+      return aOrder - bOrder
+    }),
+    answers: safeArray(run.answers)
+      .map((answer: any) => ({
+        id: answer.id,
+        checklistItemId: answer?.runItem?.id ?? answer?.templateItem?.id ?? null,
+        itemLabel:
+          answer?.runItem?.labelEn ??
+          answer?.runItem?.label ??
+          answer?.templateItem?.labelEn ??
+          answer?.templateItem?.label ??
+          null,
+        itemType: null,
+        valueBoolean: answer.valueBoolean,
+        valueText: answer.valueText,
+        valueNumber: answer.valueNumber,
+        valueSelect: answer.valueSelect,
+        note: answer.notes ?? null,
+        photoUrls: safeArray(answer.photoUrls),
+        issueCreated: Boolean(answer.issueCreated),
+        linkedSupplyItemId: null,
+        createdAt: answer.createdAt,
+        updatedAt: answer.updatedAt,
+      }))
+      .sort((a: any, b: any) => {
+        const aOrder = Number(
+          run.items?.find((item: any) => item.id === a.checklistItemId)?.sortOrder ?? 0
+        )
+        const bOrder = Number(
+          run.items?.find((item: any) => item.id === b.checklistItemId)?.sortOrder ?? 0
+        )
+        return aOrder - bOrder
+      }),
   }
 }
 
-export async function GET(_: NextRequest, context: RouteContext) {
-  try {
-    const access = await requireApiAppAccess()
+function sortSupplyRun(run: any) {
+  if (!run) return null
 
-    if (!access.ok) {
-      return access.response
-    }
+  return {
+    ...run,
+    items: safeArray(run.items).sort((a: any, b: any) => {
+      const aOrder = Number(a?.sortOrder ?? 0)
+      const bOrder = Number(b?.sortOrder ?? 0)
+      return aOrder - bOrder
+    }),
+    answers: safeArray(run.answers)
+      .map((answer: any) => ({
+        id: answer.id,
+        checklistItemId: answer?.runItem?.id ?? null,
+        itemLabel:
+          answer?.runItem?.labelEn ??
+          answer?.runItem?.label ??
+          answer?.propertySupply?.supplyItem?.nameEn ??
+          answer?.propertySupply?.supplyItem?.nameEl ??
+          answer?.propertySupply?.supplyItem?.name ??
+          null,
+        itemType: "select",
+        valueBoolean: null,
+        valueText: null,
+        valueNumber: answer.quantityValue ?? null,
+        valueSelect: answer.fillLevel ?? null,
+        note: answer.notes ?? null,
+        photoUrls: [],
+        issueCreated: false,
+        linkedSupplyItemId: answer.propertySupplyId ?? null,
+        createdAt: answer.createdAt,
+        updatedAt: answer.updatedAt,
+      }))
+      .sort((a: any, b: any) => {
+        const aOrder = Number(
+          run.items?.find((item: any) => item.id === a.checklistItemId)?.sortOrder ?? 0
+        )
+        const bOrder = Number(
+          run.items?.find((item: any) => item.id === b.checklistItemId)?.sortOrder ?? 0
+        )
+        if (aOrder !== bOrder) return aOrder - bOrder
+        return String(a.itemLabel ?? "").localeCompare(String(b.itemLabel ?? ""))
+      }),
+  }
+}
 
-    const { auth } = access
-    const { taskId } = await context.params
+function sortIssueRun(run: any) {
+  if (!run) return null
 
-    const task = await prisma.task.findUnique({
-      where: { id: taskId },
-      include: {
-        property: {
-          include: {
-            defaultPartner: {
+  return {
+    ...run,
+    template: run.template
+      ? {
+          ...run.template,
+          items: safeArray(run.template.items).sort((a: any, b: any) => {
+            const aOrder = Number(a?.sortOrder ?? 0)
+            const bOrder = Number(b?.sortOrder ?? 0)
+            return aOrder - bOrder
+          }),
+        }
+      : null,
+    items: safeArray(run.items).sort((a: any, b: any) => {
+      const aOrder = Number(a?.sortOrder ?? 0)
+      const bOrder = Number(b?.sortOrder ?? 0)
+      return aOrder - bOrder
+    }),
+    answers: safeArray(run.answers)
+      .map((answer: any) => ({
+        id: answer.id,
+        checklistItemId: answer?.runItem?.id ?? answer?.templateItem?.id ?? null,
+        itemLabel:
+          answer?.runItem?.labelEn ??
+          answer?.runItem?.label ??
+          answer?.templateItem?.labelEn ??
+          answer?.templateItem?.label ??
+          answer?.title ??
+          null,
+        itemType: "text",
+        valueBoolean: null,
+        valueText: answer.description ?? answer.title ?? null,
+        valueNumber: null,
+        valueSelect: answer.reportType ?? null,
+        note: answer.locationText ?? null,
+        photoUrls: safeArray(answer.photoUrls),
+        issueCreated: Boolean(answer.createdIssueId),
+        linkedSupplyItemId: null,
+        createdAt: answer.createdAt,
+        updatedAt: answer.updatedAt,
+      }))
+      .sort((a: any, b: any) => {
+        const aOrder = Number(
+          run.items?.find((item: any) => item.id === a.checklistItemId)?.sortOrder ?? 0
+        )
+        const bOrder = Number(
+          run.items?.find((item: any) => item.id === b.checklistItemId)?.sortOrder ?? 0
+        )
+
+        if (aOrder !== bOrder) return aOrder - bOrder
+
+        const aCreated = new Date(a?.createdAt || 0).getTime()
+        const bCreated = new Date(b?.createdAt || 0).getTime()
+
+        return aCreated - bCreated
+      }),
+  }
+}
+
+function mapDbConditionToRawRecord(condition: {
+  id: string
+  propertyId: string
+  taskId: string | null
+  bookingId: string | null
+  propertySupplyId: string | null
+  mergeKey: string | null
+  title: string
+  description: string | null
+  sourceType: string
+  sourceLabel: string | null
+  sourceItemId: string | null
+  sourceItemLabel: string | null
+  sourceRunId: string | null
+  sourceAnswerId: string | null
+  conditionType: string
+  status: string
+  blockingStatus: string
+  severity: string
+  managerDecision: string | null
+  managerNotes: string | null
+  firstDetectedAt?: Date | null
+  lastDetectedAt?: Date | null
+  createdAt: Date
+  updatedAt: Date
+  resolvedAt: Date | null
+  dismissedAt: Date | null
+}): ExtendedRawPropertyConditionRecord {
+  return {
+    id: condition.id,
+    propertyId: condition.propertyId,
+    title: condition.title,
+    code: toNullableString(condition.sourceLabel),
+    itemKey: toNullableString(condition.sourceItemId),
+    itemLabel: toNullableString(condition.sourceItemLabel),
+    notes:
+      toNullableString(condition.managerNotes) ??
+      toNullableString(condition.description),
+    conditionType: normalizeConditionType(condition.conditionType),
+    status: normalizeConditionStatus(condition.status),
+    blockingStatus: normalizeConditionBlockingStatus(condition.blockingStatus),
+    severity: normalizeConditionSeverity(condition.severity),
+    managerDecision: normalizeConditionManagerDecision(condition.managerDecision),
+    sourceType: toNullableString(condition.sourceType),
+    sourceTaskId: condition.taskId,
+    sourceChecklistRunId: toNullableString(condition.sourceRunId),
+    sourceChecklistAnswerId: toNullableString(condition.sourceAnswerId),
+    createdAt: condition.createdAt,
+    updatedAt: condition.updatedAt,
+    resolvedAt: condition.resolvedAt,
+    dismissedAt: condition.dismissedAt,
+    taskId: condition.taskId,
+    bookingId: condition.bookingId,
+    propertySupplyId: condition.propertySupplyId,
+    mergeKey: condition.mergeKey ?? null,
+    description: condition.description,
+    managerNotes: toNullableString(condition.managerNotes),
+    sourceLabel: toNullableString(condition.sourceLabel),
+    sourceItemId: toNullableString(condition.sourceItemId),
+    sourceItemLabel: toNullableString(condition.sourceItemLabel),
+    sourceRunId: toNullableString(condition.sourceRunId),
+    sourceAnswerId: toNullableString(condition.sourceAnswerId),
+    firstDetectedAt: condition.firstDetectedAt ?? null,
+    lastDetectedAt: condition.lastDetectedAt ?? null,
+  }
+}
+
+async function resolveTaskId(context: RouteContext) {
+  const params = await context.params
+  return String(params.taskId || "").trim()
+}
+
+async function syncTaskRunsForTask(taskId: string) {
+  const task = await prisma.task.findUnique({
+    where: { id: taskId },
+    select: {
+      id: true,
+      propertyId: true,
+      requiresChecklist: true,
+      sendCleaningChecklist: true,
+      sendSuppliesChecklist: true,
+      sendIssuesChecklist: true,
+      checklistRun: {
+        select: {
+          id: true,
+          templateId: true,
+        },
+      },
+      supplyRun: {
+        select: {
+          id: true,
+        },
+      },
+      issueRun: {
+        select: {
+          id: true,
+          templateId: true,
+        },
+      },
+    },
+  })
+
+  if (!task || !task.propertyId) return
+
+  if (task.sendCleaningChecklist && task.requiresChecklist !== false) {
+    const primaryCleaningTemplate = await prisma.propertyChecklistTemplate.findFirst({
+      where: {
+        propertyId: task.propertyId,
+        isPrimary: true,
+        isActive: true,
+        NOT: {
+          templateType: "supplies",
+        },
+      },
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        templateType: true,
+        items: {
+          orderBy: {
+            sortOrder: "asc",
+          },
+          select: {
+            id: true,
+            label: true,
+            labelEn: true,
+            description: true,
+            itemType: true,
+            isRequired: true,
+            sortOrder: true,
+            category: true,
+            requiresPhoto: true,
+            opensIssueOnFail: true,
+            optionsText: true,
+            issueTypeOnFail: true,
+            issueSeverityOnFail: true,
+            failureValuesText: true,
+            linkedSupplyItemId: true,
+            supplyUpdateMode: true,
+            supplyQuantity: true,
+            supplyItem: {
               select: {
                 id: true,
                 name: true,
-                email: true,
-                specialty: true,
+                nameEl: true,
+                nameEn: true,
               },
             },
-            checklistTemplates: {
-              where: {
-                isActive: true,
+          },
+        },
+      },
+      orderBy: {
+        updatedAt: "desc",
+      },
+    })
+
+    if (primaryCleaningTemplate) {
+      if (task.checklistRun) {
+        const shouldUpdateTemplate = task.checklistRun.templateId !== primaryCleaningTemplate.id
+
+        if (shouldUpdateTemplate) {
+          await prisma.$transaction(async (tx) => {
+            await tx.taskChecklistRun.update({
+              where: { id: task.checklistRun!.id },
+              data: {
+                templateId: primaryCleaningTemplate.id,
+                sourceTemplateTitle: primaryCleaningTemplate.title,
+                sourceTemplateDescription: primaryCleaningTemplate.description,
+                templateType: primaryCleaningTemplate.templateType,
               },
-              orderBy: [{ isPrimary: "desc" }, { updatedAt: "desc" }],
-              include: {
-                items: {
-                  orderBy: {
-                    sortOrder: "asc",
-                  },
-                  select: {
-                    id: true,
-                    label: true,
-                    description: true,
-                    itemType: true,
-                    sortOrder: true,
-                    isRequired: true,
-                    requiresPhoto: true,
-                    opensIssueOnFail: true,
-                    optionsText: true,
-                    category: true,
-                    linkedSupplyItemId: true,
-                    supplyUpdateMode: true,
-                    issueTypeOnFail: true,
-                    issueSeverityOnFail: true,
-                    failureValuesText: true,
+            })
+
+            await tx.taskChecklistRunItem.deleteMany({
+              where: {
+                checklistRunId: task.checklistRun!.id,
+              },
+            })
+
+            if (primaryCleaningTemplate.items.length > 0) {
+              await tx.taskChecklistRunItem.createMany({
+                data: primaryCleaningTemplate.items.map((item) => ({
+                  checklistRunId: task.checklistRun!.id,
+                  propertyTemplateItemId: item.id,
+                  label: item.label,
+                  labelEn: item.labelEn,
+                  description: item.description,
+                  itemType: item.itemType,
+                  isRequired: item.isRequired,
+                  sortOrder: item.sortOrder,
+                  category: item.category,
+                  requiresPhoto: item.requiresPhoto,
+                  opensIssueOnFail: item.opensIssueOnFail,
+                  optionsText: item.optionsText,
+                  issueTypeOnFail: item.issueTypeOnFail,
+                  issueSeverityOnFail: item.issueSeverityOnFail,
+                  failureValuesText: item.failureValuesText,
+                  linkedSupplyItemId: item.linkedSupplyItemId,
+                  linkedSupplyItemName: item.supplyItem?.name ?? null,
+                  linkedSupplyItemNameEl: item.supplyItem?.nameEl ?? null,
+                  linkedSupplyItemNameEn: item.supplyItem?.nameEn ?? null,
+                  supplyUpdateMode: item.supplyUpdateMode,
+                  supplyQuantity: item.supplyQuantity,
+                })),
+              })
+            }
+          })
+        }
+      } else {
+        await prisma.$transaction(async (tx) => {
+          const run = await tx.taskChecklistRun.create({
+            data: {
+              taskId: task.id,
+              templateId: primaryCleaningTemplate.id,
+              sourceTemplateTitle: primaryCleaningTemplate.title,
+              sourceTemplateDescription: primaryCleaningTemplate.description,
+              templateType: primaryCleaningTemplate.templateType,
+              status: "pending",
+            },
+            select: {
+              id: true,
+            },
+          })
+
+          if (primaryCleaningTemplate.items.length > 0) {
+            await tx.taskChecklistRunItem.createMany({
+              data: primaryCleaningTemplate.items.map((item) => ({
+                checklistRunId: run.id,
+                propertyTemplateItemId: item.id,
+                label: item.label,
+                labelEn: item.labelEn,
+                description: item.description,
+                itemType: item.itemType,
+                isRequired: item.isRequired,
+                sortOrder: item.sortOrder,
+                category: item.category,
+                requiresPhoto: item.requiresPhoto,
+                opensIssueOnFail: item.opensIssueOnFail,
+                optionsText: item.optionsText,
+                issueTypeOnFail: item.issueTypeOnFail,
+                issueSeverityOnFail: item.issueSeverityOnFail,
+                failureValuesText: item.failureValuesText,
+                linkedSupplyItemId: item.linkedSupplyItemId,
+                linkedSupplyItemName: item.supplyItem?.name ?? null,
+                linkedSupplyItemNameEl: item.supplyItem?.nameEl ?? null,
+                linkedSupplyItemNameEn: item.supplyItem?.nameEn ?? null,
+                supplyUpdateMode: item.supplyUpdateMode,
+                supplyQuantity: item.supplyQuantity,
+              })),
+            })
+          }
+        })
+      }
+    }
+  }
+
+  if (task.sendSuppliesChecklist) {
+    const activeSupplies = await prisma.propertySupply.findMany({
+      where: {
+        propertyId: task.propertyId,
+        isActive: true,
+      },
+      select: {
+        id: true,
+        propertyId: true,
+        supplyItemId: true,
+        fillLevel: true,
+        currentStock: true,
+        targetStock: true,
+        reorderThreshold: true,
+        targetLevel: true,
+        minimumThreshold: true,
+        trackingMode: true,
+        isCritical: true,
+        warningThreshold: true,
+        notes: true,
+        supplyItem: {
+          select: {
+            id: true,
+            code: true,
+            name: true,
+            nameEl: true,
+            nameEn: true,
+            category: true,
+            unit: true,
+          },
+        },
+      },
+      orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+    })
+
+    if (activeSupplies.length > 0) {
+      if (task.supplyRun) {
+        const existingItems = await prisma.taskSupplyRunItem.findMany({
+          where: {
+            taskSupplyRunId: task.supplyRun.id,
+          },
+          select: {
+            id: true,
+            propertySupplyId: true,
+          },
+        })
+
+        const existingPropertySupplyIds = new Set(
+          existingItems
+            .map((item) => item.propertySupplyId)
+            .filter((value): value is string => Boolean(value))
+        )
+
+        const incomingPropertySupplyIds = new Set(activeSupplies.map((item) => item.id))
+
+        const missingSupplies = activeSupplies.filter(
+          (item) => !existingPropertySupplyIds.has(item.id)
+        )
+
+        const obsoleteItemIds = existingItems
+          .filter(
+            (item) =>
+              !item.propertySupplyId ||
+              !incomingPropertySupplyIds.has(item.propertySupplyId)
+          )
+          .map((item) => item.id)
+
+        if (obsoleteItemIds.length > 0) {
+          await prisma.taskSupplyRunItem.deleteMany({
+            where: {
+              id: {
+                in: obsoleteItemIds,
+              },
+            },
+          })
+        }
+
+        if (missingSupplies.length > 0) {
+          const maxSortOrderRow = await prisma.taskSupplyRunItem.findFirst({
+            where: {
+              taskSupplyRunId: task.supplyRun.id,
+            },
+            orderBy: {
+              sortOrder: "desc",
+            },
+            select: {
+              sortOrder: true,
+            },
+          })
+
+          let nextSortOrder = Number(maxSortOrderRow?.sortOrder ?? -1) + 1
+
+          await prisma.taskSupplyRunItem.createMany({
+            data: missingSupplies.map((supply) => {
+              const row = {
+                taskSupplyRunId: task.supplyRun!.id,
+                propertySupplyId: supply.id,
+                supplyItemId: supply.supplyItemId,
+                propertySupplyCode: supply.supplyItem?.code ?? null,
+                label: supply.supplyItem?.nameEl ?? supply.supplyItem?.name ?? "Αναλώσιμο",
+                labelEn: supply.supplyItem?.nameEn ?? null,
+                category: supply.supplyItem?.category ?? null,
+                unit: supply.supplyItem?.unit ?? null,
+                fillLevel: supply.fillLevel,
+                currentStock: supply.currentStock,
+                targetStock: supply.targetStock,
+                reorderThreshold: supply.reorderThreshold,
+                targetLevel: supply.targetLevel,
+                minimumThreshold: supply.minimumThreshold,
+                trackingMode: supply.trackingMode,
+                isCritical: supply.isCritical,
+                warningThreshold: supply.warningThreshold,
+                sortOrder: nextSortOrder,
+                isRequired: true,
+                notes: supply.notes,
+              }
+
+              nextSortOrder += 1
+              return row
+            }),
+          })
+        }
+      } else {
+        await prisma.$transaction(async (tx) => {
+          const run = await tx.taskSupplyRun.create({
+            data: {
+              taskId: task.id,
+              status: "pending",
+            },
+            select: {
+              id: true,
+            },
+          })
+
+          await tx.taskSupplyRunItem.createMany({
+            data: activeSupplies.map((supply, index) => ({
+              taskSupplyRunId: run.id,
+              propertySupplyId: supply.id,
+              supplyItemId: supply.supplyItemId,
+              propertySupplyCode: supply.supplyItem?.code ?? null,
+              label: supply.supplyItem?.nameEl ?? supply.supplyItem?.name ?? "Αναλώσιμο",
+              labelEn: supply.supplyItem?.nameEn ?? null,
+              category: supply.supplyItem?.category ?? null,
+              unit: supply.supplyItem?.unit ?? null,
+              fillLevel: supply.fillLevel,
+              currentStock: supply.currentStock,
+              targetStock: supply.targetStock,
+              reorderThreshold: supply.reorderThreshold,
+              targetLevel: supply.targetLevel,
+              minimumThreshold: supply.minimumThreshold,
+              trackingMode: supply.trackingMode,
+              isCritical: supply.isCritical,
+              warningThreshold: supply.warningThreshold,
+              sortOrder: index,
+              isRequired: true,
+              notes: supply.notes,
+            })),
+          })
+        })
+      }
+    }
+  }
+
+  if (task.sendIssuesChecklist) {
+    const primaryIssueTemplate = await prisma.propertyIssueTemplate.findFirst({
+      where: {
+        propertyId: task.propertyId,
+        isPrimary: true,
+        isActive: true,
+      },
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        items: {
+          orderBy: {
+            sortOrder: "asc",
+          },
+          select: {
+            id: true,
+            label: true,
+            labelEn: true,
+            description: true,
+            sortOrder: true,
+            itemType: true,
+            isRequired: true,
+            allowsIssue: true,
+            allowsDamage: true,
+            defaultIssueType: true,
+            defaultSeverity: true,
+            requiresPhoto: true,
+            affectsHostingByDefault: true,
+            urgentByDefault: true,
+            locationHint: true,
+          },
+        },
+      },
+      orderBy: {
+        updatedAt: "desc",
+      },
+    })
+
+    if (primaryIssueTemplate) {
+      if (task.issueRun) {
+        const shouldUpdateTemplate = task.issueRun.templateId !== primaryIssueTemplate.id
+
+        if (shouldUpdateTemplate) {
+          await prisma.$transaction(async (tx) => {
+            await tx.taskIssueRun.update({
+              where: { id: task.issueRun!.id },
+              data: {
+                templateId: primaryIssueTemplate.id,
+                sourceTemplateTitle: primaryIssueTemplate.title,
+                sourceTemplateDescription: primaryIssueTemplate.description,
+              },
+            })
+
+            await tx.taskIssueRunItem.deleteMany({
+              where: {
+                issueRunId: task.issueRun!.id,
+              },
+            })
+
+            if (primaryIssueTemplate.items.length > 0) {
+              await tx.taskIssueRunItem.createMany({
+                data: primaryIssueTemplate.items.map((item) => ({
+                  issueRunId: task.issueRun!.id,
+                  propertyTemplateItemId: item.id,
+                  label: item.label,
+                  labelEn: item.labelEn,
+                  description: item.description,
+                  sortOrder: item.sortOrder,
+                  itemType: item.itemType,
+                  isRequired: item.isRequired,
+                  allowsIssue: item.allowsIssue,
+                  allowsDamage: item.allowsDamage,
+                  defaultIssueType: item.defaultIssueType,
+                  defaultSeverity: item.defaultSeverity,
+                  requiresPhoto: item.requiresPhoto,
+                  affectsHostingByDefault: item.affectsHostingByDefault,
+                  urgentByDefault: item.urgentByDefault,
+                  locationHint: item.locationHint,
+                })),
+              })
+            }
+          })
+        }
+      } else {
+        await prisma.$transaction(async (tx) => {
+          const run = await tx.taskIssueRun.create({
+            data: {
+              taskId: task.id,
+              templateId: primaryIssueTemplate.id,
+              sourceTemplateTitle: primaryIssueTemplate.title,
+              sourceTemplateDescription: primaryIssueTemplate.description,
+              status: "pending",
+            },
+            select: {
+              id: true,
+            },
+          })
+
+          if (primaryIssueTemplate.items.length > 0) {
+            await tx.taskIssueRunItem.createMany({
+              data: primaryIssueTemplate.items.map((item) => ({
+                issueRunId: run.id,
+                propertyTemplateItemId: item.id,
+                label: item.label,
+                labelEn: item.labelEn,
+                description: item.description,
+                sortOrder: item.sortOrder,
+                itemType: item.itemType,
+                isRequired: item.isRequired,
+                allowsIssue: item.allowsIssue,
+                allowsDamage: item.allowsDamage,
+                defaultIssueType: item.defaultIssueType,
+                defaultSeverity: item.defaultSeverity,
+                requiresPhoto: item.requiresPhoto,
+                affectsHostingByDefault: item.affectsHostingByDefault,
+                urgentByDefault: item.urgentByDefault,
+                locationHint: item.locationHint,
+              })),
+            })
+          }
+        })
+      }
+    }
+  }
+}
+async function getTaskPayload(taskId: string, auth: AuthContext) {
+  const tenantWhere = buildTenantWhere(auth)
+
+  const task = await (prisma.task.findFirst as any)({
+    where: {
+      id: taskId,
+      ...tenantWhere,
+    },
+    select: {
+      id: true,
+      organizationId: true,
+      propertyId: true,
+      bookingId: true,
+      title: true,
+      description: true,
+      taskType: true,
+      source: true,
+      priority: true,
+      status: true,
+      scheduledDate: true,
+      scheduledStartTime: true,
+      scheduledEndTime: true,
+      dueDate: true,
+      completedAt: true,
+      requiresPhotos: true,
+      requiresChecklist: true,
+      requiresApproval: true,
+      sendCleaningChecklist: true,
+      sendSuppliesChecklist: true,
+      sendIssuesChecklist: true,
+      usesCustomizedCleaningChecklist: true,
+      usesCustomizedSuppliesChecklist: true,
+      usesCustomizedIssuesChecklist: true,
+      alertEnabled: true,
+      alertAt: true,
+      notes: true,
+      resultNotes: true,
+      createdAt: true,
+      updatedAt: true,
+      property: {
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          address: true,
+          city: true,
+          region: true,
+          postalCode: true,
+          country: true,
+          type: true,
+          status: true,
+          readinessStatus: true,
+          readinessUpdatedAt: true,
+          readinessReasonsText: true,
+          nextCheckInAt: true,
+          openConditionCount: true,
+          openBlockingConditionCount: true,
+          openWarningConditionCount: true,
+          defaultPartner: {
+            select: {
+              id: true,
+              code: true,
+              name: true,
+              email: true,
+              phone: true,
+              specialty: true,
+              status: true,
+            },
+          },
+        },
+      },
+      booking: {
+        select: {
+          id: true,
+          sourcePlatform: true,
+          externalBookingId: true,
+          externalListingId: true,
+          externalListingName: true,
+          guestName: true,
+          guestPhone: true,
+          guestEmail: true,
+          checkInDate: true,
+          checkOutDate: true,
+          checkInTime: true,
+          checkOutTime: true,
+          status: true,
+          syncStatus: true,
+          needsMapping: true,
+        },
+      },
+      assignments: {
+        select: {
+          id: true,
+          partnerId: true,
+          status: true,
+          assignedAt: true,
+          acceptedAt: true,
+          rejectedAt: true,
+          startedAt: true,
+          completedAt: true,
+          rejectionReason: true,
+          notes: true,          partner: {
+            select: {
+              id: true,
+              code: true,
+              name: true,
+              email: true,
+              phone: true,
+              specialty: true,
+              status: true,
+            },
+          },
+        },
+        orderBy: {
+          assignedAt: "desc",
+        },
+      },
+      checklistRun: {
+        select: {
+          id: true,
+          taskId: true,
+          templateId: true,
+          sourceTemplateTitle: true,
+          sourceTemplateDescription: true,
+          templateType: true,
+          isCustomized: true,
+          status: true,
+          startedAt: true,
+          completedAt: true,
+          createdAt: true,
+          updatedAt: true,
+          template: {
+            select: {
+              id: true,
+              title: true,
+              description: true,
+              templateType: true,
+              isPrimary: true,
+              isActive: true,
+            },
+          },
+          items: {
+            select: {
+              id: true,
+              propertyTemplateItemId: true,
+              label: true,
+              labelEn: true,
+              description: true,
+              itemType: true,
+              isRequired: true,
+              sortOrder: true,
+              category: true,
+              requiresPhoto: true,
+              opensIssueOnFail: true,
+              optionsText: true,
+              issueTypeOnFail: true,
+              issueSeverityOnFail: true,
+              failureValuesText: true,
+              linkedSupplyItemId: true,
+              linkedSupplyItemName: true,
+              linkedSupplyItemNameEl: true,
+              linkedSupplyItemNameEn: true,
+              supplyUpdateMode: true,
+              supplyQuantity: true,
+            },
+          },
+          answers: {
+            select: {
+              id: true,
+              valueBoolean: true,
+              valueText: true,
+              valueNumber: true,
+              valueSelect: true,
+              notes: true,
+              photoUrls: true,
+              issueCreated: true,
+              createdAt: true,
+              updatedAt: true,
+              runItem: {
+                select: {
+                  id: true,
+                  label: true,
+                  labelEn: true,
+                  sortOrder: true,
+                },
+              },
+              templateItem: {
+                select: {
+                  id: true,
+                  label: true,
+                  labelEn: true,
+                  sortOrder: true,
+                },
+              },
+            },
+          },
+        },
+      },
+      supplyRun: {
+        select: {
+          id: true,
+          taskId: true,
+          isCustomized: true,
+          status: true,
+          startedAt: true,
+          completedAt: true,
+          createdAt: true,
+          updatedAt: true,
+          items: {
+            select: {
+              id: true,
+              propertySupplyId: true,
+              supplyItemId: true,
+              propertySupplyCode: true,
+              label: true,
+              labelEn: true,
+              category: true,
+              unit: true,
+              fillLevel: true,
+              currentStock: true,
+              targetStock: true,
+              reorderThreshold: true,
+              targetLevel: true,
+              minimumThreshold: true,
+              trackingMode: true,
+              isCritical: true,
+              warningThreshold: true,
+              sortOrder: true,
+              isRequired: true,
+              notes: true,
+            },
+          },
+          answers: {
+            select: {
+              id: true,
+              propertySupplyId: true,
+              fillLevel: true,
+              quantityValue: true,
+              notes: true,
+              createdAt: true,
+              updatedAt: true,
+              runItem: {
+                select: {
+                  id: true,
+                  label: true,
+                  labelEn: true,
+                  sortOrder: true,
+                },
+              },
+              propertySupply: {
+                select: {
+                  id: true,
+                  propertyId: true,
+                  supplyItemId: true,
+                  isActive: true,
+                  fillLevel: true,
+                  currentStock: true,
+                  targetStock: true,
+                  reorderThreshold: true,
+                  targetLevel: true,
+                  minimumThreshold: true,
+                  trackingMode: true,
+                  isCritical: true,
+                  warningThreshold: true,
+                  lastUpdatedAt: true,
+                  updatedAt: true,
+                  notes: true,
+                  supplyItem: {
+                    select: {
+                      id: true,
+                      code: true,
+                      name: true,
+                      nameEl: true,
+                      nameEn: true,
+                      category: true,
+                      unit: true,
+                      minimumStock: true,
+                      isActive: true,
+                    },
                   },
                 },
               },
             },
-            propertySupplies: {
-              where: {
-                isActive: true,
+          },
+        },
+      },
+      issueRun: {
+        select: {
+          id: true,
+          taskId: true,
+          templateId: true,
+          sourceTemplateTitle: true,
+          sourceTemplateDescription: true,
+          isCustomized: true,
+          status: true,
+          startedAt: true,
+          completedAt: true,
+          createdAt: true,
+          updatedAt: true,
+          template: {
+            select: {
+              id: true,
+              title: true,
+              description: true,
+              isPrimary: true,
+              isActive: true,
+              items: {
+                select: {
+                  id: true,
+                  label: true,
+                  labelEn: true,
+                  description: true,
+                  sortOrder: true,
+                },
+                orderBy: {
+                  sortOrder: "asc",
+                },
               },
-              orderBy: {
-                createdAt: "asc",
+            },
+          },
+          items: {
+            select: {
+              id: true,
+              propertyTemplateItemId: true,
+              label: true,
+              labelEn: true,
+              description: true,
+              sortOrder: true,
+              itemType: true,
+              isRequired: true,
+              allowsIssue: true,
+              allowsDamage: true,
+              defaultIssueType: true,
+              defaultSeverity: true,
+              requiresPhoto: true,
+              affectsHostingByDefault: true,
+              urgentByDefault: true,
+              locationHint: true,
+            },
+          },
+          answers: {
+            select: {
+              id: true,
+              reportType: true,
+              title: true,
+              description: true,
+              severity: true,
+              affectsHosting: true,
+              requiresImmediateAction: true,
+              locationText: true,
+              photoUrls: true,
+              createdIssueId: true,
+              createdAt: true,
+              updatedAt: true,
+              runItem: {
+                select: {
+                  id: true,
+                  label: true,
+                  labelEn: true,
+                  sortOrder: true,
+                },
               },
-              include: {
-                supplyItem: true,
+              templateItem: {
+                select: {
+                  id: true,
+                  label: true,
+                  labelEn: true,
+                  sortOrder: true,
+                },
               },
             },
           },
         },
-        booking: {
+      },
+      activityLogs: {
+        select: {
+          id: true,
+          action: true,
+          message: true,
+          actorType: true,
+          actorName: true,
+          createdAt: true,
+        },
+        orderBy: {
+          createdAt: "desc",
+        },
+      },
+    },
+  })
+
+  if (!task) return null
+
+  const [
+    issues,
+    propertyConditions,
+    primaryCleaningTemplate,
+    activePropertySupplies,
+    primaryIssueTemplate,
+    partners,
+  ] = await Promise.all([
+    prisma.issue.findMany({
+      where: {
+        taskId: task.id,
+        ...tenantWhere,
+      },
+      select: {
+        id: true,
+        organizationId: true,
+        propertyId: true,
+        taskId: true,
+        bookingId: true,
+        issueType: true,
+        title: true,
+        description: true,
+        severity: true,
+        status: true,
+        reportedBy: true,
+        affectsHosting: true,
+        requiresImmediateAction: true,
+        locationText: true,
+        resolutionNotes: true,
+        resolvedAt: true,
+        createdAt: true,
+        updatedAt: true,      },
+      orderBy: {
+        updatedAt: "desc",
+      },
+    }),
+    prisma.propertyCondition.findMany({
+      where: {
+        propertyId: task.propertyId,
+        ...tenantWhere,
+      },
+      select: {
+        id: true,
+        propertyId: true,
+        taskId: true,
+        bookingId: true,
+        propertySupplyId: true,
+        mergeKey: true,
+        sourceType: true,
+        sourceLabel: true,
+        sourceItemId: true,
+        sourceItemLabel: true,
+        sourceRunId: true,
+        sourceAnswerId: true,
+        conditionType: true,
+        title: true,
+        description: true,
+        status: true,
+        blockingStatus: true,
+        severity: true,
+        managerDecision: true,
+        managerNotes: true,
+        firstDetectedAt: true,
+        lastDetectedAt: true,
+        createdAt: true,
+        updatedAt: true,
+        resolvedAt: true,
+        dismissedAt: true,
+      },
+      orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+    }),
+    task.propertyId
+      ? prisma.propertyChecklistTemplate.findFirst({
+          where: {
+            propertyId: task.propertyId,
+            isPrimary: true,
+            isActive: true,
+            NOT: {
+              templateType: "supplies",
+            },
+          },
           select: {
             id: true,
-            sourcePlatform: true,
-            externalBookingId: true,
-            externalListingName: true,
-            guestName: true,
-            checkInDate: true,
-            checkOutDate: true,
-            checkInTime: true,
-            checkOutTime: true,
-            status: true,
+            propertyId: true,
+            title: true,
+            description: true,
+            templateType: true,
+            isPrimary: true,
+            isActive: true,
+            createdAt: true,
+            updatedAt: true,
+            items: {
+              select: {
+                id: true,
+                label: true,
+                labelEn: true,
+                description: true,
+                itemType: true,
+                isRequired: true,
+                sortOrder: true,
+                category: true,
+                requiresPhoto: true,
+                opensIssueOnFail: true,
+                issueTypeOnFail: true,
+                issueSeverityOnFail: true,
+                failureValuesText: true,
+                linkedSupplyItemId: true,
+                supplyUpdateMode: true,
+                supplyQuantity: true,
+              },
+              orderBy: {
+                sortOrder: "asc",
+              },
+            },
           },
-        },
-        assignments: {
-          orderBy: {
-            assignedAt: "desc",
+        })
+      : Promise.resolve(null),
+    task.propertyId
+      ? prisma.propertySupply.findMany({
+          where: {
+            propertyId: task.propertyId,
+            isActive: true,
           },
-          include: {
-            partner: {
+          select: {
+            id: true,
+            propertyId: true,
+            supplyItemId: true,
+            isActive: true,
+            fillLevel: true,
+            currentStock: true,
+            targetStock: true,
+            reorderThreshold: true,
+            targetLevel: true,
+            minimumThreshold: true,
+            trackingMode: true,
+            isCritical: true,
+            warningThreshold: true,
+            lastUpdatedAt: true,
+            updatedAt: true,
+            notes: true,
+            supplyItem: {
               select: {
                 id: true,
                 code: true,
                 name: true,
-                email: true,
-                specialty: true,
-                status: true,
-                portalAccessTokens: {
-                  orderBy: {
-                    createdAt: "desc",
-                  },
-                  select: {
-                    token: true,
-                    isActive: true,
-                    expiresAt: true,
-                    createdAt: true,
-                  },
-                },
+                nameEl: true,
+                nameEn: true,
+                category: true,
+                unit: true,
+                minimumStock: true,
+                isActive: true,
               },
             },
           },
-        },
-        checklistRun: {
-          include: {
-            template: {
-              include: {
-                items: {
-                  orderBy: {
-                    sortOrder: "asc",
-                  },
-                  select: {
-                    id: true,
-                    label: true,
-                    description: true,
-                    itemType: true,
-                    sortOrder: true,
-                    isRequired: true,
-                    requiresPhoto: true,
-                    opensIssueOnFail: true,
-                    optionsText: true,
-                    category: true,
-                    linkedSupplyItemId: true,
-                    supplyUpdateMode: true,
-                    issueTypeOnFail: true,
-                    issueSeverityOnFail: true,
-                    failureValuesText: true,
-                  },
-                },
+          orderBy: [{ updatedAt: "desc" }],
+        })
+      : Promise.resolve([]),
+    task.propertyId
+      ? prisma.propertyIssueTemplate.findFirst({
+          where: {
+            propertyId: task.propertyId,
+            isPrimary: true,
+            isActive: true,
+          },
+          select: {
+            id: true,
+            propertyId: true,
+            title: true,
+            description: true,
+            isPrimary: true,
+            isActive: true,
+            createdAt: true,
+            updatedAt: true,
+            items: {
+              select: {
+                id: true,
+                label: true,
+                labelEn: true,
+                description: true,
+                sortOrder: true,
+                itemType: true,
+                isRequired: true,
+                allowsIssue: true,
+                allowsDamage: true,
+                defaultIssueType: true,
+                defaultSeverity: true,
+                requiresPhoto: true,
+                affectsHostingByDefault: true,
+                urgentByDefault: true,
+                locationHint: true,
               },
-            },
-            answers: {
               orderBy: {
-                createdAt: "asc",
-              },
-              include: {
-                templateItem: {
-                  select: {
-                    id: true,
-                    label: true,
-                    description: true,
-                    itemType: true,
-                    sortOrder: true,
-                    isRequired: true,
-                    requiresPhoto: true,
-                    opensIssueOnFail: true,
-                    optionsText: true,
-                    category: true,
-                    linkedSupplyItemId: true,
-                    supplyUpdateMode: true,
-                    issueTypeOnFail: true,
-                    issueSeverityOnFail: true,
-                    failureValuesText: true,
-                  },
-                },
+                sortOrder: "asc",
               },
             },
           },
-        },
-        supplyRun: {
-          include: {
-            answers: {
-              orderBy: {
-                createdAt: "asc",
-              },
-              include: {
-                propertySupply: {
-                  include: {
-                    supplyItem: true,
-                  },
-                },
-              },
-            },
-          },
-        },
-        activityLogs: {
-          orderBy: {
-            createdAt: "desc",
-          },
-        },
-      },
-    })
-
-    if (!task) {
-      return NextResponse.json({ error: "Η εργασία δεν βρέθηκε." }, { status: 404 })
-    }
-
-    if (!canAccessOrganization(auth, task.organizationId)) {
-      return NextResponse.json(
-        { error: "Δεν έχεις πρόσβαση σε αυτή την εργασία." },
-        { status: 403 }
-      )
-    }
-
-    const partners = await prisma.partner.findMany({
+        })
+      : Promise.resolve(null),
+    prisma.partner.findMany({
       where: {
-        organizationId: task.organizationId,
+        ...tenantWhere,
         status: {
-          in: ["active", "ACTIVE"],
+          not: "inactive",
         },
-      },
-      orderBy: {
-        name: "asc",
       },
       select: {
         id: true,
@@ -394,400 +1467,381 @@ export async function GET(_: NextRequest, context: RouteContext) {
         specialty: true,
         status: true,
       },
-    })
+      orderBy: {
+        name: "asc",
+      },
+    }),
+  ])
 
-    const cleaningTemplates = (task.property?.checklistTemplates || []).filter((template) =>
-      looksLikeCleaningTemplate(template)
+  const cleanedChecklistRun = sortChecklistRun(task.checklistRun)
+  const cleanedSupplyRun = sortSupplyRun(task.supplyRun)
+  const cleanedIssueRun = sortIssueRun(task.issueRun)
+
+  const propertyConditionSnapshot = buildPropertyConditionSnapshot(
+    propertyConditions.map((condition: any) =>
+      mapDbConditionToRawRecord({
+        id: condition.id,
+        propertyId: condition.propertyId,
+        taskId: condition.taskId,
+        bookingId: condition.bookingId,
+        propertySupplyId: condition.propertySupplyId,
+        mergeKey: condition.mergeKey ?? null,
+        title: condition.title,
+        description: condition.description,
+        sourceType: condition.sourceType,
+        sourceLabel: condition.sourceLabel,
+        sourceItemId: condition.sourceItemId,
+        sourceItemLabel: condition.sourceItemLabel,
+        sourceRunId: condition.sourceRunId,
+        sourceAnswerId: condition.sourceAnswerId,
+        conditionType: String(condition.conditionType).toLowerCase(),
+        status: String(condition.status).toLowerCase(),
+        blockingStatus: String(condition.blockingStatus).toLowerCase(),
+        severity: String(condition.severity).toLowerCase(),
+        managerDecision: condition.managerDecision
+          ? String(condition.managerDecision).toLowerCase()
+          : null,
+        managerNotes: condition.managerNotes,
+        firstDetectedAt: condition.firstDetectedAt ?? null,
+        lastDetectedAt: condition.lastDetectedAt ?? null,
+        createdAt: condition.createdAt,
+        updatedAt: condition.updatedAt,
+        resolvedAt: condition.resolvedAt,
+        dismissedAt: condition.dismissedAt,
+      })
     )
+  )
 
-    const primaryCleaningTemplate =
-      cleaningTemplates.find(
-        (template) =>
-          template.isPrimary === true ||
-          String(template.templateType ?? "").toLowerCase() === "main"
-      ) ||
-      cleaningTemplates[0] ||
-      null
+  const conditionsCreatedByThisTask = propertyConditionSnapshot.conditions.filter(
+    (condition) => condition.sourceTaskId === task.id
+  )
 
-    const propertyLists = {
+  const warnings: Array<{ code: string; title: string; message: string; severity: string }> = []
+
+  if (task.sendCleaningChecklist && !primaryCleaningTemplate) {
+    warnings.push({
+      code: "missing_cleaning_template",
+      title: "Λείπει βασική λίστα καθαριότητας",
+      message: "Η εργασία ζητά λίστα καθαριότητας αλλά δεν υπάρχει ενεργή κύρια λίστα στο ακίνητο.",
+      severity: "high",
+    })
+  }
+
+  if (task.sendCleaningChecklist && task.requiresChecklist !== false && !cleanedChecklistRun && primaryCleaningTemplate) {
+    warnings.push({
+      code: "missing_cleaning_run",
+      title: "Λείπει run καθαριότητας",
+      message: "Η εργασία ζητά λίστα καθαριότητας αλλά δεν υπάρχει ακόμη run λίστας.",
+      severity: "medium",
+    })
+  }
+
+  if (task.sendSuppliesChecklist && activePropertySupplies.length === 0) {
+    warnings.push({
+      code: "missing_supplies_items",
+      title: "Δεν υπάρχουν ενεργά αναλώσιμα",
+      message: "Η εργασία ζητά λίστα αναλωσίμων αλλά το ακίνητο δεν έχει ενεργά αναλώσιμα.",
+      severity: "medium",
+    })
+  }
+
+  if (task.sendSuppliesChecklist && !cleanedSupplyRun && activePropertySupplies.length > 0) {
+    warnings.push({
+      code: "missing_supplies_run",
+      title: "Λείπει run αναλωσίμων",
+      message: "Η εργασία ζητά λίστα αναλωσίμων αλλά δεν υπάρχει ακόμη run λίστας.",
+      severity: "medium",
+    })
+  }
+
+  if (task.sendIssuesChecklist && !primaryIssueTemplate) {
+    warnings.push({
+      code: "missing_issues_template",
+      title: "Λείπει βασική λίστα βλαβών και ζημιών",
+      message: "Η εργασία ζητά λίστα βλαβών/ζημιών αλλά δεν υπάρχει ενεργή κύρια λίστα στο ακίνητο.",
+      severity: "high",
+    })
+  }
+
+  if (task.sendIssuesChecklist && !cleanedIssueRun && primaryIssueTemplate) {
+    warnings.push({
+      code: "missing_issues_run",
+      title: "Λείπει run βλαβών και ζημιών",
+      message: "Η εργασία ζητά λίστα βλαβών/ζημιών αλλά δεν υπάρχει ακόμη run λίστας.",
+      severity: "medium",
+    })
+  }
+
+  const shapedTask = {
+    id: task.id,
+    title: task.title,
+    description: task.description,
+    taskType: task.taskType,
+    source: task.source,
+    priority: task.priority,
+    status: task.status,
+    scheduledDate: task.scheduledDate,
+    scheduledStartTime: task.scheduledStartTime,
+    scheduledEndTime: task.scheduledEndTime,
+    notes: task.notes,
+    resultNotes: task.resultNotes,
+    requiresPhotos: task.requiresPhotos,
+    requiresChecklist: task.requiresChecklist,
+    requiresApproval: task.requiresApproval,
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
+    completedAt: task.completedAt,
+    property: task.property,
+    booking: task.booking,
+    partners,
+    assignments: safeArray(task.assignments).map((assignment: any) => ({
+      ...assignment,
+      portalUrl: null,
+    })),
+    cleaningChecklistRun: cleanedChecklistRun,
+    suppliesChecklistRun: cleanedSupplyRun,
+    issuesChecklistRun: cleanedIssueRun,
+    checklistRun: cleanedChecklistRun,
+    activityLogs: safeArray(task.activityLogs),
+    propertyLists: {
       cleaning: {
         availableOnProperty: Boolean(primaryCleaningTemplate),
-        primaryTemplate: primaryCleaningTemplate
-          ? {
-              id: primaryCleaningTemplate.id,
-              title: primaryCleaningTemplate.title,
-              description: primaryCleaningTemplate.description,
-              templateType: primaryCleaningTemplate.templateType,
-              isPrimary: primaryCleaningTemplate.isPrimary,
-              isActive: primaryCleaningTemplate.isActive,
-              updatedAt: primaryCleaningTemplate.updatedAt,
-              items: primaryCleaningTemplate.items.map((item) =>
-                buildChecklistItemResponse(item)
-              ),
-            }
-          : null,
+        primaryTemplate: primaryCleaningTemplate,
       },
       supplies: {
-        availableOnProperty: (task.property?.propertySupplies?.length || 0) > 0,
-        activeSuppliesCount: task.property?.propertySupplies?.length || 0,
-        items: (task.property?.propertySupplies || []).map((propertySupply) => ({
-          id: propertySupply.id,
-          currentStock: propertySupply.currentStock,
-          targetStock: propertySupply.targetStock,
-          reorderThreshold: propertySupply.reorderThreshold,
-          lastUpdatedAt: propertySupply.lastUpdatedAt,
-          fillLevel: propertySupply.fillLevel,
-          supplyItem: {
-            id: propertySupply.supplyItem.id,
-            code: propertySupply.supplyItem.code,
-            name: propertySupply.supplyItem.name,
-            category: propertySupply.supplyItem.category,
-            unit: propertySupply.supplyItem.unit,
-          },
-        })),
+        availableOnProperty: activePropertySupplies.length > 0,
+        activeSuppliesCount: activePropertySupplies.length,
+        items: activePropertySupplies,
       },
+      issues: {
+        availableOnProperty: Boolean(primaryIssueTemplate),
+        activeIssuesCount: issues.filter((issue: any) => {
+          const status = String(issue.status ?? "").toLowerCase()
+          return status !== "resolved" && status !== "dismissed"
+        }).length,
+        items: issues,
+      },
+    },
+    propertyConditions: propertyConditionSnapshot.conditions,
+    issues,
+    warnings,
+    readiness: {
+      status: task.property?.readinessStatus ?? "unknown",
+      blockingCount:
+        task.property?.openBlockingConditionCount ?? propertyConditionSnapshot.summary.blocking ?? 0,
+      warningCount:
+        task.property?.openWarningConditionCount ?? propertyConditionSnapshot.summary.warning ?? 0,
+      openConditionsCount:
+        task.property?.openConditionCount ?? propertyConditionSnapshot.summary.active ?? 0,
+      reasonSummary:
+        safeArray(task.property?.readinessReasonsText)
+          .flatMap((value: any) =>
+            String(value ?? "")
+              .split("\n")
+              .map((part) => part.trim())
+              .filter(Boolean)
+          )
+          .filter(Boolean).length > 0
+          ? safeArray(task.property?.readinessReasonsText)
+              .flatMap((value: any) =>
+                String(value ?? "")
+                  .split("\n")
+                  .map((part) => part.trim())
+                  .filter(Boolean)
+              )
+          : propertyConditionSnapshot.reasons,
+      summary: propertyConditionSnapshot.reasons.join(" · ") || null,
+      nextCheckInAt: task.property?.nextCheckInAt ?? null,
+    },
+    sendCleaningChecklist: Boolean(task.sendCleaningChecklist),
+    sendSuppliesChecklist: Boolean(task.sendSuppliesChecklist),
+    sendIssuesChecklist: Boolean(task.sendIssuesChecklist),
+  }
+
+  return {
+    task: shapedTask,
+  }
+}
+
+export async function GET(req: NextRequest, context: RouteContext) {
+  const access = await requireApiAppAccessWithDevBypass(req)
+  if (!access.ok) return access.response
+
+  try {
+    const taskId = await resolveTaskId(context)
+
+    if (!taskId) {
+      return NextResponse.json({ error: "Λείπει το taskId." }, { status: 400 })
     }
 
-    const cleaningRunTemplateItems = task.checklistRun?.template?.items || []
-    const fallbackCleaningItems = primaryCleaningTemplate?.items || []
+    const payload = await getTaskPayload(taskId, access.auth)
 
-    const cleaningChecklistRun = task.checklistRun
-      ? {
-          id: task.checklistRun.id,
-          title: buildCleaningRunTitle({
-            checklistRun: task.checklistRun,
-            primaryCleaningTemplate,
-          }),
-          status: task.checklistRun.status,
-          startedAt: task.checklistRun.startedAt,
-          completedAt: task.checklistRun.completedAt,
-          submittedAt: task.checklistRun.completedAt,
-          sentAt:
-            task.assignments.find((assignment) => assignment.checklistEmailSentAt)
-              ?.checklistEmailSentAt || null,
-          isActive: task.sendCleaningChecklist,
-          isRequired: task.sendCleaningChecklist,
-          sendToPartner: task.sendCleaningChecklist,
-          checklistType: "cleaning",
-          template: task.checklistRun.template
-            ? {
-                id: task.checklistRun.template.id,
-                title: task.checklistRun.template.title,
-                name: task.checklistRun.template.title,
-                isPrimary: task.checklistRun.template.isPrimary,
-              }
-            : primaryCleaningTemplate
-              ? {
-                  id: primaryCleaningTemplate.id,
-                  title: primaryCleaningTemplate.title,
-                  name: primaryCleaningTemplate.title,
-                  isPrimary: primaryCleaningTemplate.isPrimary,
-                }
-              : null,
-          items: (cleaningRunTemplateItems.length > 0
-            ? cleaningRunTemplateItems
-            : fallbackCleaningItems
-          ).map((item) => buildChecklistItemResponse(item)),
-          answers: task.checklistRun.answers.map((answer) => ({
-            id: answer.id,
-            checklistItemId: answer.templateItemId,
-            itemLabel: answer.templateItem?.label || null,
-            itemType: answer.templateItem?.itemType || null,
-            valueBoolean: answer.valueBoolean,
-            valueText: answer.valueText,
-            valueNumber: answer.valueNumber,
-            valueSelect: answer.valueSelect,
-            note: answer.notes,
-            photoUrl: null,
-            issueCreated: answer.issueCreated,
-            linkedSupplyItemId: answer.templateItem?.linkedSupplyItemId || null,
-            createdAt: answer.createdAt,
-            updatedAt: answer.updatedAt,
-            photoUrls: Array.isArray(answer.photoUrls) ? (answer.photoUrls as string[]) : [],
-            photos: Array.isArray(answer.photoUrls) ? (answer.photoUrls as string[]) : [],
-            attachments: [],
-          })),
-        }
-      : null
-
-    const suppliesChecklistRun = task.supplyRun
-      ? {
-          id: task.supplyRun.id,
-          title: buildSuppliesRunTitle(),
-          status: task.supplyRun.status,
-          startedAt: task.supplyRun.startedAt,
-          completedAt: task.supplyRun.completedAt,
-          submittedAt: task.supplyRun.completedAt,
-          sentAt:
-            task.assignments.find((assignment) => assignment.checklistEmailSentAt)
-              ?.checklistEmailSentAt || null,
-          isActive: task.sendSuppliesChecklist,
-          isRequired: task.sendSuppliesChecklist,
-          sendToPartner: task.sendSuppliesChecklist,
-          checklistType: "supplies",
-          template: null,
-          items: task.supplyRun.answers.map((answer, index) => ({
-            id: answer.propertySupplyId,
-            label: answer.propertySupply.supplyItem.name,
-            description:
-              answer.propertySupply.supplyItem.category ||
-              answer.propertySupply.supplyItem.unit ||
-              "",
-            itemType: "select",
-            sortOrder: index + 1,
-            isRequired: true,
-            requiresPhoto: false,
-            opensIssueOnFail: false,
-            optionsText: "missing\nmedium\nfull",
-            category: "supplies",
-            linkedSupplyItemId: answer.propertySupply.supplyItemId,
-            supplyUpdateMode: "status_map",
-            issueTypeOnFail: null,
-            issueSeverityOnFail: null,
-            failureValuesText: null,
-          })),
-          answers: task.supplyRun.answers.map((answer) => ({
-            id: answer.id,
-            checklistItemId: answer.propertySupplyId,
-            itemLabel: answer.propertySupply.supplyItem.name,
-            itemType: "select",
-            valueBoolean: null,
-            valueText: null,
-            valueNumber: null,
-            valueSelect: answer.fillLevel,
-            note: answer.notes,
-            photoUrl: null,
-            issueCreated: false,
-            linkedSupplyItemId: answer.propertySupply.supplyItemId,
-            createdAt: answer.createdAt,
-            updatedAt: answer.updatedAt,
-            photoUrls: [],
-            photos: [],
-            attachments: [],
-          })),
-        }
-      : null
-
-    const responseTask = {
-      id: task.id,
-      title: task.title,
-      description: task.description,
-      taskType: task.taskType,
-      source: task.source,
-      priority: task.priority,
-      status: task.status,
-      scheduledDate: task.scheduledDate,
-      scheduledStartTime: task.scheduledStartTime,
-      scheduledEndTime: task.scheduledEndTime,
-      dueDate: task.dueDate,
-      completedAt: task.completedAt,
-      notes: task.notes,
-      resultNotes: task.resultNotes,
-      requiresPhotos: task.requiresPhotos,
-      requiresChecklist: task.requiresChecklist,
-      requiresApproval: task.requiresApproval,
-      sendCleaningChecklist: task.sendCleaningChecklist,
-      sendSuppliesChecklist: task.sendSuppliesChecklist,
-      usesCustomizedCleaningChecklist: task.usesCustomizedCleaningChecklist,
-      alertEnabled: task.alertEnabled,
-      alertAt: task.alertAt,
-      createdAt: task.createdAt,
-      updatedAt: task.updatedAt,
-      property: task.property
-        ? {
-            id: task.property.id,
-            code: task.property.code,
-            name: task.property.name,
-            address: task.property.address,
-            city: task.property.city,
-            region: task.property.region,
-            country: task.property.country,
-            status: task.property.status,
-            defaultPartner: task.property.defaultPartner
-              ? {
-                  id: task.property.defaultPartner.id,
-                  name: task.property.defaultPartner.name,
-                  email: task.property.defaultPartner.email,
-                  specialty: task.property.defaultPartner.specialty,
-                }
-              : null,
-          }
-        : null,
-      booking: task.booking,
-      partners,
-      assignments: task.assignments.map((assignment) => {
-        const portalToken = getActivePortalTokenFromPartner(assignment.partner)
-
-        return {
-          id: assignment.id,
-          status: assignment.status,
-          assignedAt: assignment.assignedAt,
-          acceptedAt: assignment.acceptedAt,
-          rejectedAt: assignment.rejectedAt,
-          rejectionReason: assignment.rejectionReason,
-          notes: assignment.notes,
-          portalUrl: portalToken ? `/partner/${portalToken}` : null,
-          partner: assignment.partner
-            ? {
-                id: assignment.partner.id,
-                code: assignment.partner.code,
-                name: assignment.partner.name,
-                email: assignment.partner.email,
-                specialty: assignment.partner.specialty,
-                status: assignment.partner.status,
-              }
-            : null,
-        }
-      }),
-      checklistRun: cleaningChecklistRun,
-      cleaningChecklistRun,
-      suppliesChecklistRun,
-      activityLogs: task.activityLogs.map((log) => ({
-        id: log.id,
-        action: log.action,
-        message: log.message,
-        actorType: log.actorType,
-        actorName: log.actorName,
-        createdAt: log.createdAt,
-      })),
-      propertyLists,
+    if (!payload) {
+      return NextResponse.json({ error: "Δεν βρέθηκε εργασία." }, { status: 404 })
     }
 
-    return NextResponse.json({ task: responseTask })
+    return NextResponse.json(payload)
   } catch (error) {
-    console.error("GET /api/tasks/[taskId] error:", error)
+    console.error("Task GET error:", error)
+
     return NextResponse.json(
-      { error: "Αποτυχία φόρτωσης στοιχείων εργασίας." },
+      { error: "Αποτυχία φόρτωσης εργασίας." },
       { status: 500 }
     )
   }
 }
 
 export async function PATCH(req: NextRequest, context: RouteContext) {
-  try {
-    const access = await requireApiAppAccess()
+  const access = await requireApiAppAccessWithDevBypass(req)
+  if (!access.ok) return access.response
 
-    if (!access.ok) {
-      return access.response
+  try {
+    const taskId = await resolveTaskId(context)
+
+    if (!taskId) {
+      return NextResponse.json({ error: "Λείπει το taskId." }, { status: 400 })
     }
 
-    const { auth } = access
-    const { taskId } = await context.params
-    const body = await req.json().catch(() => ({}))
+    const tenantWhere = buildTenantWhere(access.auth)
 
-    const existingTask = await prisma.task.findUnique({
-      where: { id: taskId },
+    const existingTask = await prisma.task.findFirst({
+      where: {
+        id: taskId,
+        ...tenantWhere,
+      },
       select: {
         id: true,
-        organizationId: true,
       },
     })
 
     if (!existingTask) {
-      return NextResponse.json({ error: "Η εργασία δεν βρέθηκε." }, { status: 404 })
+      return NextResponse.json({ error: "Δεν βρέθηκε εργασία." }, { status: 404 })
     }
 
-    if (!canAccessOrganization(auth, existingTask.organizationId)) {
-      return NextResponse.json(
-        { error: "Δεν έχεις πρόσβαση σε αυτή την εργασία." },
-        { status: 403 }
-      )
+    const body = await req.json().catch(() => ({}))
+    const data: any = {}
+
+    if (hasOwn(body, "title")) {
+      data.title = toRequiredString(body.title, "title")
     }
 
-    let scheduledDateUpdate: Date | undefined
+    if (hasOwn(body, "description")) {
+      data.description = toNullableString(body.description)
+    }
 
-    if (body.scheduledDate !== undefined) {
-      const parsedScheduledDate = toRequiredDate(body.scheduledDate)
+    if (hasOwn(body, "taskType")) {
+      data.taskType = toRequiredString(body.taskType, "taskType")
+    }
 
-      if (!parsedScheduledDate) {
-        return NextResponse.json(
-          { error: "Η ημερομηνία εργασίας είναι υποχρεωτική και πρέπει να είναι έγκυρη." },
-          { status: 400 }
-        )
+    if (hasOwn(body, "priority")) {
+      data.priority = toRequiredString(body.priority, "priority")
+    }
+
+    if (hasOwn(body, "status")) {
+      data.status = toRequiredString(body.status, "status")
+    }
+
+    if (hasOwn(body, "scheduledDate")) {
+      const parsed = toNullableDate(body.scheduledDate, "scheduledDate")
+      if (!parsed) {
+        throw new Error('Το πεδίο "scheduledDate" είναι υποχρεωτικό.')
       }
-
-      scheduledDateUpdate = parsedScheduledDate
+      data.scheduledDate = parsed
     }
 
-    let scheduledStartTimeUpdate: string | null | undefined
-
-    if (body.scheduledStartTime !== undefined) {
-      scheduledStartTimeUpdate = toNullableTime(body.scheduledStartTime)
+    if (hasOwn(body, "scheduledStartTime")) {
+      data.scheduledStartTime = toNullableString(body.scheduledStartTime)
     }
 
-    let scheduledEndTimeUpdate: string | null | undefined
-
-    if (body.scheduledEndTime !== undefined) {
-      scheduledEndTimeUpdate = toNullableTime(body.scheduledEndTime)
+    if (hasOwn(body, "scheduledEndTime")) {
+      data.scheduledEndTime = toNullableString(body.scheduledEndTime)
     }
 
-    let notesUpdate: string | null | undefined
-
-    if (body.notes !== undefined) {
-      notesUpdate = toNullableString(body.notes)
+    if (hasOwn(body, "dueDate")) {
+      data.dueDate = toNullableDate(body.dueDate, "dueDate")
     }
 
-    let resultNotesUpdate: string | null | undefined
-
-    if (body.resultNotes !== undefined) {
-      resultNotesUpdate = toNullableString(body.resultNotes)
+    if (hasOwn(body, "completedAt")) {
+      data.completedAt = toNullableDate(body.completedAt, "completedAt")
     }
 
-    let dueDateUpdate: Date | null | undefined
-
-    if (body.dueDate !== undefined) {
-      dueDateUpdate = toOptionalDate(body.dueDate)
+    if (hasOwn(body, "notes")) {
+      data.notes = toNullableString(body.notes)
     }
 
-    let alertAtUpdate: Date | null | undefined
-
-    if (body.alertAt !== undefined) {
-      alertAtUpdate = toOptionalDate(body.alertAt)
+    if (hasOwn(body, "resultNotes")) {
+      data.resultNotes = toNullableString(body.resultNotes)
     }
 
-    const updatedTask = await prisma.task.update({
-      where: { id: taskId },
-      data: {
-        ...(scheduledDateUpdate !== undefined
-          ? { scheduledDate: scheduledDateUpdate }
-          : {}),
-        ...(scheduledStartTimeUpdate !== undefined
-          ? { scheduledStartTime: scheduledStartTimeUpdate }
-          : {}),
-        ...(scheduledEndTimeUpdate !== undefined
-          ? { scheduledEndTime: scheduledEndTimeUpdate }
-          : {}),
-        ...(notesUpdate !== undefined ? { notes: notesUpdate } : {}),
-        ...(resultNotesUpdate !== undefined ? { resultNotes: resultNotesUpdate } : {}),
-        ...(dueDateUpdate !== undefined ? { dueDate: dueDateUpdate } : {}),
-        ...(body.alertEnabled !== undefined
-          ? { alertEnabled: Boolean(body.alertEnabled) }
-          : {}),
-        ...(alertAtUpdate !== undefined ? { alertAt: alertAtUpdate } : {}),
+    if (hasOwn(body, "alertEnabled")) {
+      data.alertEnabled = toOptionalBoolean(body.alertEnabled)
+    }
+
+    if (hasOwn(body, "alertAt")) {
+      data.alertAt = toNullableDate(body.alertAt, "alertAt")
+    }
+
+    if (hasOwn(body, "requiresPhotos")) {
+      data.requiresPhotos = toOptionalBoolean(body.requiresPhotos)
+    }
+
+    if (hasOwn(body, "requiresChecklist")) {
+      data.requiresChecklist = toOptionalBoolean(body.requiresChecklist)
+    }
+
+    if (hasOwn(body, "requiresApproval")) {
+      data.requiresApproval = toOptionalBoolean(body.requiresApproval)
+    }
+
+    if (hasOwn(body, "sendCleaningChecklist")) {
+      data.sendCleaningChecklist = toOptionalBoolean(body.sendCleaningChecklist)
+    }
+
+    if (hasOwn(body, "sendSuppliesChecklist")) {
+      data.sendSuppliesChecklist = toOptionalBoolean(body.sendSuppliesChecklist)
+    }
+
+    if (hasOwn(body, "sendIssuesChecklist")) {
+      data.sendIssuesChecklist = toOptionalBoolean(body.sendIssuesChecklist)
+    }
+
+    if (hasOwn(body, "usesCustomizedCleaningChecklist")) {
+      data.usesCustomizedCleaningChecklist = toOptionalBoolean(body.usesCustomizedCleaningChecklist)
+    }
+
+    if (hasOwn(body, "usesCustomizedSuppliesChecklist")) {
+      data.usesCustomizedSuppliesChecklist = toOptionalBoolean(body.usesCustomizedSuppliesChecklist)
+    }
+
+    if (hasOwn(body, "usesCustomizedIssuesChecklist")) {
+      data.usesCustomizedIssuesChecklist = toOptionalBoolean(body.usesCustomizedIssuesChecklist)
+    }
+
+    await prisma.task.update({
+      where: {
+        id: taskId,
       },
-      select: {
-        id: true,
-        scheduledDate: true,
-        scheduledStartTime: true,
-        scheduledEndTime: true,
-        dueDate: true,
-        notes: true,
-        resultNotes: true,
-        alertEnabled: true,
-        alertAt: true,
-        updatedAt: true,
-      },
+      data,
     })
 
-    return NextResponse.json({
-      message: "Η εργασία ενημερώθηκε επιτυχώς.",
-      task: updatedTask,
-    })
+    await syncTaskRunsForTask(taskId)
+
+    const payload = await getTaskPayload(taskId, access.auth)
+
+    return NextResponse.json(payload)
   } catch (error) {
-    console.error("PATCH /api/tasks/[taskId] error:", error)
+    console.error("Task PATCH error:", error)
+
     return NextResponse.json(
-      { error: "Αποτυχία ενημέρωσης εργασίας." },
+      {
+        error:
+          error instanceof Error ? error.message : "Αποτυχία ενημέρωσης εργασίας.",
+      },
       { status: 500 }
     )
   }
+}
+
+export async function PUT(req: NextRequest, context: RouteContext) {
+  return PATCH(req, context)
 }

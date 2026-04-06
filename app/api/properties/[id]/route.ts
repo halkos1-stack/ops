@@ -1,50 +1,533 @@
-import { NextRequest, NextResponse } from "next/server"
-import { prisma } from "@/lib/prisma"
-import { requireApiAppAccess, canAccessOrganization } from "@/lib/route-access"
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { requireApiAppAccess, canAccessOrganization } from "@/lib/route-access";
+import {
+  computePropertyReadiness,
+  getReadinessStatusLabel,
+  type ReadinessConditionInput,
+} from "@/lib/readiness/compute-property-readiness";
+import {
+  buildPropertyConditionSnapshot,
+  type RawPropertyConditionRecord,
+} from "@/lib/readiness/property-condition-mappers";
 
 type RouteContext = {
   params: Promise<{
-    id: string
-  }>
+    id: string;
+  }>;
+};
+
+type ExtendedRawPropertyConditionRecord = RawPropertyConditionRecord & {
+  taskId?: string | null;
+  bookingId?: string | null;
+  propertySupplyId?: string | null;
+  mergeKey?: string | null;
+  description?: string | null;
+  managerNotes?: string | null;
+  sourceLabel?: string | null;
+  sourceItemId?: string | null;
+  sourceItemLabel?: string | null;
+  sourceRunId?: string | null;
+  sourceAnswerId?: string | null;
+  firstDetectedAt?: Date | string | null;
+  lastDetectedAt?: Date | string | null;
+};
+
+function safeArray<T>(value: T[] | null | undefined): T[] {
+  return Array.isArray(value) ? value : [];
 }
 
-function toNullableString(value: unknown) {
-  if (value === undefined || value === null) return null
+function toNullableString(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
 
-  const text = String(value).trim()
-  return text === "" ? null : text
+  const text = String(value).trim();
+  return text === "" ? null : text;
 }
 
-function toRequiredString(value: unknown, fieldName: string) {
-  const text = String(value ?? "").trim()
+function toRequiredString(value: unknown, fieldName: string): string {
+  const text = String(value ?? "").trim();
 
   if (!text) {
-    throw new Error(`Το πεδίο "${fieldName}" είναι υποχρεωτικό.`)
+    throw new Error(`Το πεδίο "${fieldName}" είναι υποχρεωτικό.`);
   }
 
-  return text
+  return text;
 }
 
-function toNonNegativeInt(value: unknown, fallback = 0) {
-  if (value === undefined || value === null || value === "") return fallback
+function toNonNegativeInt(value: unknown, fallback = 0): number {
+  if (value === undefined || value === null || value === "") return fallback;
 
-  const num = Number(value)
+  const num = Number(value);
 
-  if (Number.isNaN(num)) return fallback
+  if (Number.isNaN(num)) return fallback;
 
-  return Math.max(0, Math.trunc(num))
+  return Math.max(0, Math.trunc(num));
 }
 
-function normalizePropertyStatus(value: unknown) {
-  const text = String(value ?? "")
-    .trim()
-    .toLowerCase()
+function normalizePropertyStatus(value: unknown): string {
+  const text = String(value ?? "").trim().toLowerCase();
 
   if (["active", "inactive", "maintenance", "archived"].includes(text)) {
-    return text
+    return text;
   }
 
-  return "active"
+  return "active";
+}
+
+function isOpenTaskStatus(status: unknown): boolean {
+  const text = String(status ?? "").trim().toLowerCase();
+
+  return [
+    "new",
+    "pending",
+    "assigned",
+    "waiting_acceptance",
+    "accepted",
+    "in_progress",
+  ].includes(text);
+}
+
+function isIssueOpen(status: unknown): boolean {
+  const text = String(status ?? "").trim().toLowerCase();
+
+  return !["resolved", "closed"].includes(text);
+}
+
+function isActiveBookingStatus(status: unknown): boolean {
+  const text = String(status ?? "").trim().toLowerCase();
+  return text !== "cancelled";
+}
+
+function isBookingPendingTaskCreation(booking: any, now = new Date()): boolean {
+  if (!booking || !isActiveBookingStatus(booking.status)) return false;
+
+  const checkOutDate = new Date(booking.checkOutDate);
+  if (Number.isNaN(checkOutDate.getTime())) return false;
+
+  const startOfToday = new Date(now);
+  startOfToday.setHours(0, 0, 0, 0);
+
+  return checkOutDate >= startOfToday;
+}
+
+function isChecklistSubmitted(status: unknown): boolean {
+  const text = String(status ?? "").trim().toLowerCase();
+
+  return ["submitted", "completed"].includes(text);
+}
+
+function getSupplyStateThree(
+  current: number,
+  target?: number | null,
+  threshold?: number | null
+): "missing" | "medium" | "full" {
+  if (current <= 0) return "missing";
+
+  const safeTarget =
+    typeof target === "number" && Number.isFinite(target) ? target : null;
+
+  const safeThreshold =
+    typeof threshold === "number" && Number.isFinite(threshold)
+      ? threshold
+      : null;
+
+  if (safeTarget !== null && safeTarget > 0 && current >= safeTarget) {
+    return "full";
+  }
+
+  if (safeThreshold !== null && current <= safeThreshold) {
+    return "medium";
+  }
+
+  if (safeTarget !== null && safeTarget > 0 && current < safeTarget) {
+    return "medium";
+  }
+
+  return "full";
+}
+
+function normalizeChecklistRun(run: any) {
+  if (!run) return null;
+
+  return {
+    ...run,
+    answers: safeArray(run.answers).sort((a: any, b: any) => {
+      const aOrder = Number(
+        a?.runItem?.sortOrder ?? a?.templateItem?.sortOrder ?? 0
+      );
+      const bOrder = Number(
+        b?.runItem?.sortOrder ?? b?.templateItem?.sortOrder ?? 0
+      );
+      return aOrder - bOrder;
+    }),
+    items: safeArray(run.items).sort((a: any, b: any) => {
+      const aOrder = Number(a?.sortOrder ?? 0);
+      const bOrder = Number(b?.sortOrder ?? 0);
+      return aOrder - bOrder;
+    }),
+  };
+}
+
+function normalizeSupplyRun(run: any) {
+  if (!run) return null;
+
+  return {
+    ...run,
+    answers: safeArray(run.answers).sort((a: any, b: any) => {
+      const aName = String(
+        a?.runItem?.labelEn ||
+          a?.runItem?.label ||
+          a?.propertySupply?.supplyItem?.nameEn ||
+          a?.propertySupply?.supplyItem?.nameEl ||
+          a?.propertySupply?.supplyItem?.name ||
+          ""
+      ).toLowerCase();
+
+      const bName = String(
+        b?.runItem?.labelEn ||
+          b?.runItem?.label ||
+          b?.propertySupply?.supplyItem?.nameEn ||
+          b?.propertySupply?.supplyItem?.nameEl ||
+          b?.propertySupply?.supplyItem?.name ||
+          ""
+      ).toLowerCase();
+
+      return aName.localeCompare(bName);
+    }),
+    items: safeArray(run.items).sort((a: any, b: any) => {
+      const aOrder = Number(a?.sortOrder ?? 0);
+      const bOrder = Number(b?.sortOrder ?? 0);
+      return aOrder - bOrder;
+    }),
+  };
+}
+
+function normalizeIssueRun(run: any) {
+  if (!run) return null;
+
+  return {
+    ...run,
+    template: run.template
+      ? {
+          ...run.template,
+          items: safeArray(run.template.items).sort((a: any, b: any) => {
+            const aOrder = Number(a?.sortOrder ?? 0);
+            const bOrder = Number(b?.sortOrder ?? 0);
+            return aOrder - bOrder;
+          }),
+        }
+      : null,
+    items: safeArray(run.items).sort((a: any, b: any) => {
+      const aOrder = Number(a?.sortOrder ?? 0);
+      const bOrder = Number(b?.sortOrder ?? 0);
+      return aOrder - bOrder;
+    }),
+    answers: safeArray(run.answers).sort((a: any, b: any) => {
+      const aOrder = Number(
+        a?.runItem?.sortOrder ?? a?.templateItem?.sortOrder ?? 0
+      );
+      const bOrder = Number(
+        b?.runItem?.sortOrder ?? b?.templateItem?.sortOrder ?? 0
+      );
+
+      if (aOrder !== bOrder) return aOrder - bOrder;
+
+      const aCreated = new Date(a?.createdAt || 0).getTime();
+      const bCreated = new Date(b?.createdAt || 0).getTime();
+
+      return aCreated - bCreated;
+    }),
+  };
+}
+
+function mapTaskForPropertyPage(task: any) {
+  const checklistRun = normalizeChecklistRun(task.checklistRun);
+  const supplyRun = normalizeSupplyRun(task.supplyRun);
+  const issueRun = normalizeIssueRun(task.issueRun);
+
+  return {
+    ...task,
+    checklistRun,
+    supplyRun,
+    issueRun,
+    cleaningChecklistRun: checklistRun,
+    suppliesChecklistRun: supplyRun,
+    issuesChecklistRun: issueRun,
+  };
+}
+
+function mapIssueForPropertyPage(issue: any) {
+  return {
+    ...issue,
+    affectsHosting: Boolean(issue?.affectsHosting ?? false),
+    requiresImmediateAction: Boolean(issue?.requiresImmediateAction ?? false),
+  };
+}
+
+function normalizeConditionType(value: unknown): "supply" | "issue" | "damage" {
+  if (value === "supply" || value === "issue" || value === "damage") {
+    return value;
+  }
+
+  return "issue";
+}
+
+function normalizeConditionStatus(
+  value: unknown
+): "open" | "monitoring" | "resolved" | "dismissed" {
+  if (
+    value === "open" ||
+    value === "monitoring" ||
+    value === "resolved" ||
+    value === "dismissed"
+  ) {
+    return value;
+  }
+
+  return "open";
+}
+
+function normalizeConditionBlockingStatus(
+  value: unknown
+): "blocking" | "non_blocking" | "warning" {
+  if (
+    value === "blocking" ||
+    value === "non_blocking" ||
+    value === "warning"
+  ) {
+    return value;
+  }
+
+  return "warning";
+}
+
+function normalizeConditionSeverity(
+  value: unknown
+): "low" | "medium" | "high" | "critical" {
+  if (
+    value === "low" ||
+    value === "medium" ||
+    value === "high" ||
+    value === "critical"
+  ) {
+    return value;
+  }
+
+  return "medium";
+}
+
+function normalizeConditionManagerDecision(
+  value: unknown
+):
+  | "allow_with_issue"
+  | "block_until_resolved"
+  | "monitor"
+  | "resolved"
+  | "dismissed"
+  | null {
+  if (
+    value === "allow_with_issue" ||
+    value === "block_until_resolved" ||
+    value === "monitor" ||
+    value === "resolved" ||
+    value === "dismissed"
+  ) {
+    return value;
+  }
+
+  return null;
+}
+
+function mapDbConditionToRawRecord(condition: {
+  id: string;
+  propertyId: string;
+  taskId: string | null;
+  bookingId: string | null;
+  propertySupplyId: string | null;
+  mergeKey: string | null;
+  title: string;
+  description: string | null;
+  sourceType: string;
+  sourceLabel: string | null;
+  sourceItemId: string | null;
+  sourceItemLabel: string | null;
+  sourceRunId: string | null;
+  sourceAnswerId: string | null;
+  conditionType: string;
+  status: string;
+  blockingStatus: string;
+  severity: string;
+  managerDecision: string | null;
+  managerNotes: string | null;
+  firstDetectedAt: Date;
+  lastDetectedAt: Date;
+  createdAt: Date;
+  updatedAt: Date;
+  resolvedAt: Date | null;
+  dismissedAt: Date | null;
+}): ExtendedRawPropertyConditionRecord {
+  return {
+    id: condition.id,
+    propertyId: condition.propertyId,
+    taskId: condition.taskId,
+    bookingId: condition.bookingId,
+    propertySupplyId: condition.propertySupplyId,
+    mergeKey: condition.mergeKey ?? null,
+    title: condition.title,
+    description: condition.description,
+    sourceType: toNullableString(condition.sourceType),
+    sourceLabel: toNullableString(condition.sourceLabel),
+    sourceItemId: toNullableString(condition.sourceItemId),
+    sourceItemLabel: toNullableString(condition.sourceItemLabel),
+    sourceRunId: toNullableString(condition.sourceRunId),
+    sourceAnswerId: toNullableString(condition.sourceAnswerId),
+    conditionType: normalizeConditionType(condition.conditionType),
+    status: normalizeConditionStatus(condition.status),
+    blockingStatus: normalizeConditionBlockingStatus(condition.blockingStatus),
+    severity: normalizeConditionSeverity(condition.severity),
+    managerDecision: normalizeConditionManagerDecision(
+      condition.managerDecision
+    ),
+    managerNotes: toNullableString(condition.managerNotes),
+    notes:
+      toNullableString(condition.managerNotes) ??
+      toNullableString(condition.description),
+    firstDetectedAt: condition.firstDetectedAt,
+    lastDetectedAt: condition.lastDetectedAt,
+    createdAt: condition.createdAt,
+    updatedAt: condition.updatedAt,
+    resolvedAt: condition.resolvedAt,
+    dismissedAt: condition.dismissedAt,
+    code: toNullableString(condition.sourceLabel),
+    itemKey: toNullableString(condition.sourceItemId),
+    itemLabel: toNullableString(condition.sourceItemLabel),
+    sourceTaskId: condition.taskId,
+    sourceChecklistRunId: toNullableString(condition.sourceRunId),
+    sourceChecklistAnswerId: toNullableString(condition.sourceAnswerId),
+  };
+}
+
+function mapRawConditionToReadinessInput(
+  condition: ExtendedRawPropertyConditionRecord
+): ReadinessConditionInput {
+  return {
+    id: condition.id,
+    propertyId: condition.propertyId,
+    conditionType: normalizeConditionType(condition.conditionType),
+    status: normalizeConditionStatus(condition.status),
+    blockingStatus: normalizeConditionBlockingStatus(condition.blockingStatus),
+    severity: normalizeConditionSeverity(condition.severity),
+    managerDecision: normalizeConditionManagerDecision(
+      condition.managerDecision
+    ),
+    title: condition.title ?? null,
+    description: condition.description ?? condition.managerNotes ?? null,
+    firstDetectedAt: condition.firstDetectedAt ?? null,
+    lastDetectedAt: condition.lastDetectedAt ?? null,
+    createdAt: condition.createdAt ?? null,
+    updatedAt: condition.updatedAt ?? null,
+    resolvedAt: condition.resolvedAt ?? null,
+    dismissedAt: condition.dismissedAt ?? null,
+    sourceType: condition.sourceType ?? null,
+    sourceLabel: condition.sourceLabel ?? null,
+    sourceItemId: condition.sourceItemId ?? null,
+    sourceItemLabel: condition.sourceItemLabel ?? null,
+    sourceRunId: condition.sourceRunId ?? null,
+    sourceAnswerId: condition.sourceAnswerId ?? null,
+    taskId: condition.taskId ?? null,
+    bookingId: condition.bookingId ?? null,
+    propertySupplyId: condition.propertySupplyId ?? null,
+    mergeKey: condition.mergeKey ?? null,
+  };
+}
+
+function buildPropertyReadinessFromConditions(property: any) {
+  const now = new Date();
+
+  const bookings: any[] = safeArray(property.bookings);
+  const nextBooking =
+    bookings
+      .filter((booking: any) => {
+        const checkInDate = new Date(booking.checkInDate);
+        return !Number.isNaN(checkInDate.getTime()) && checkInDate >= now;
+      })
+      .sort(
+        (a: any, b: any) =>
+          new Date(a.checkInDate).getTime() - new Date(b.checkInDate).getTime()
+      )[0] || null;
+
+  const rawConditions: ExtendedRawPropertyConditionRecord[] = safeArray(
+    property.conditions
+  ).map((condition: any) =>
+    mapDbConditionToRawRecord({
+      id: condition.id,
+      propertyId: condition.propertyId,
+      taskId: condition.taskId ?? null,
+      bookingId: condition.bookingId ?? null,
+      propertySupplyId: condition.propertySupplyId ?? null,
+      mergeKey: condition.mergeKey ?? null,
+      title: condition.title,
+      description: condition.description,
+      sourceType: condition.sourceType,
+      sourceLabel: condition.sourceLabel,
+      sourceItemId: condition.sourceItemId,
+      sourceItemLabel: condition.sourceItemLabel,
+      sourceRunId: condition.sourceRunId,
+      sourceAnswerId: condition.sourceAnswerId,
+      conditionType: String(condition.conditionType).toLowerCase(),
+      status: String(condition.status).toLowerCase(),
+      blockingStatus: String(condition.blockingStatus).toLowerCase(),
+      severity: String(condition.severity).toLowerCase(),
+      managerDecision: condition.managerDecision
+        ? String(condition.managerDecision).toLowerCase()
+        : null,
+      managerNotes: condition.managerNotes,
+      firstDetectedAt: condition.firstDetectedAt,
+      lastDetectedAt: condition.lastDetectedAt,
+      createdAt: condition.createdAt,
+      updatedAt: condition.updatedAt,
+      resolvedAt: condition.resolvedAt,
+      dismissedAt: condition.dismissedAt,
+    })
+  );
+
+  const conditionSnapshot = buildPropertyConditionSnapshot(rawConditions);
+
+  const readiness = computePropertyReadiness({
+    now,
+    nextCheckInAt: nextBooking?.checkInDate ?? property.nextCheckInAt ?? null,
+    conditions: rawConditions.map((condition) =>
+      mapRawConditionToReadinessInput(condition)
+    ),
+  });
+
+  return {
+    status: readiness.status,
+    statusLabel: getReadinessStatusLabel(readiness.status, "el"),
+    readinessUpdatedAt: readiness.computedAt,
+    readinessReasonsText: readiness.reasons
+      .map((reason) => reason.message)
+      .join("\n"),
+    nextCheckInAt: readiness.nextCheckInAt,
+    score: readiness.score,
+    explain: readiness.explain,
+    reasons: readiness.reasons,
+    nextActions: readiness.nextActions,
+    counts: readiness.counts,
+    conditionSnapshot,
+    nextBooking: nextBooking
+      ? {
+          id: nextBooking.id,
+          guestName: nextBooking.guestName,
+          checkInDate: nextBooking.checkInDate,
+          checkOutDate: nextBooking.checkOutDate,
+          status: nextBooking.status,
+          checkInTime: nextBooking.checkInTime,
+          checkOutTime: nextBooking.checkOutTime,
+          sourcePlatform: nextBooking.sourcePlatform,
+        }
+      : null,
+  };
 }
 
 async function getPropertyBase(id: string) {
@@ -55,28 +538,110 @@ async function getPropertyBase(id: string) {
       organizationId: true,
       defaultPartnerId: true,
     },
-  })
+  });
 }
 
 async function getFullProperty(id: string) {
-  return prisma.property.findUnique({
+  const property = await (prisma.property.findUnique as any)({
     where: { id },
-    include: {
-      defaultPartner: true,
+    select: {
+      id: true,
+      organizationId: true,
+      code: true,
+      name: true,
+      address: true,
+      city: true,
+      region: true,
+      postalCode: true,
+      country: true,
+      type: true,
+      status: true,
+      bedrooms: true,
+      bathrooms: true,
+      maxGuests: true,
+      notes: true,
+      defaultPartnerId: true,
+      readinessStatus: true,
+      readinessUpdatedAt: true,
+      readinessReasonsText: true,
+      openConditionCount: true,
+      openBlockingConditionCount: true,
+      openWarningConditionCount: true,
+      nextCheckInAt: true,
+      createdAt: true,
+      updatedAt: true,
+
+      defaultPartner: {
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          email: true,
+          phone: true,
+          specialty: true,
+          status: true,
+          notes: true,
+        },
+      },
 
       bookings: {
         orderBy: {
-          checkInDate: "desc",
+          checkInDate: "asc",
         },
         take: 20,
+        select: {
+          id: true,
+          guestName: true,
+          checkInDate: true,
+          checkOutDate: true,
+          status: true,
+          checkInTime: true,
+          checkOutTime: true,
+          sourcePlatform: true,
+          externalBookingId: true,
+          tasks: {
+            select: {
+              id: true,
+            },
+            take: 5,
+          },
+        },
       },
 
       tasks: {
         orderBy: {
           scheduledDate: "desc",
         },
-        take: 30,
-        include: {
+        take: 50,
+        select: {
+          id: true,
+          title: true,
+          description: true,
+          taskType: true,
+          source: true,
+          priority: true,
+          status: true,
+          scheduledDate: true,
+          scheduledStartTime: true,
+          scheduledEndTime: true,
+          dueDate: true,
+          completedAt: true,
+          requiresPhotos: true,
+          requiresApproval: true,
+          requiresChecklist: true,
+          sendCleaningChecklist: true,
+          sendSuppliesChecklist: true,
+          sendIssuesChecklist: true,
+          usesCustomizedCleaningChecklist: true,
+          usesCustomizedSuppliesChecklist: true,
+          usesCustomizedIssuesChecklist: true,
+          alertEnabled: true,
+          alertAt: true,
+          notes: true,
+          resultNotes: true,
+          createdAt: true,
+          updatedAt: true,
+
           booking: {
             select: {
               id: true,
@@ -84,13 +649,25 @@ async function getFullProperty(id: string) {
               checkInDate: true,
               checkOutDate: true,
               status: true,
+              checkInTime: true,
+              checkOutTime: true,
             },
           },
+
           assignments: {
             orderBy: {
               assignedAt: "desc",
             },
-            include: {
+            select: {
+              id: true,
+              status: true,
+              assignedAt: true,
+              acceptedAt: true,
+              rejectedAt: true,
+              startedAt: true,
+              completedAt: true,
+              rejectionReason: true,
+              notes: true,
               partner: {
                 select: {
                   id: true,
@@ -104,20 +681,243 @@ async function getFullProperty(id: string) {
               },
             },
           },
+
           checklistRun: {
-            include: {
+            select: {
+              id: true,
+              taskId: true,
+              templateId: true,
+              sourceTemplateTitle: true,
+              sourceTemplateDescription: true,
+              templateType: true,
+              isCustomized: true,
+              status: true,
+              startedAt: true,
+              completedAt: true,
+              createdAt: true,
+              updatedAt: true,
               template: {
                 select: {
                   id: true,
                   title: true,
+                  description: true,
                   templateType: true,
                   isPrimary: true,
+                  isActive: true,
+                },
+              },
+              items: {
+                select: {
+                  id: true,
+                  propertyTemplateItemId: true,
+                  label: true,
+                  labelEn: true,
+                  description: true,
+                  itemType: true,
+                  isRequired: true,
+                  sortOrder: true,
+                  category: true,
+                  requiresPhoto: true,
+                  opensIssueOnFail: true,
+                  optionsText: true,
+                  issueTypeOnFail: true,
+                  issueSeverityOnFail: true,
+                  failureValuesText: true,
+                  linkedSupplyItemId: true,
+                  linkedSupplyItemName: true,
+                  linkedSupplyItemNameEl: true,
+                  linkedSupplyItemNameEn: true,
+                  supplyUpdateMode: true,
+                  supplyQuantity: true,
                 },
               },
               answers: {
                 select: {
                   id: true,
+                  runItemId: true,
+                  templateItemId: true,
                   issueCreated: true,
+                  valueBoolean: true,
+                  valueText: true,
+                  valueNumber: true,
+                  valueSelect: true,
+                  notes: true,
+                  photoUrls: true,
+                  createdAt: true,
+                  updatedAt: true,
+                  runItem: {
+                    select: {
+                      id: true,
+                      label: true,
+                      labelEn: true,
+                      sortOrder: true,
+                    },
+                  },
+                  templateItem: {
+                    select: {
+                      id: true,
+                      label: true,
+                      labelEn: true,
+                      sortOrder: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+
+          supplyRun: {
+            select: {
+              id: true,
+              taskId: true,
+              isCustomized: true,
+              status: true,
+              startedAt: true,
+              completedAt: true,
+              createdAt: true,
+              updatedAt: true,
+              items: {
+                select: {
+                  id: true,
+                  propertySupplyId: true,
+                  supplyItemId: true,
+                  propertySupplyCode: true,
+                  label: true,
+                  labelEn: true,
+                  category: true,
+                  unit: true,
+                  fillLevel: true,
+                  currentStock: true,
+                  targetStock: true,
+                  reorderThreshold: true,
+                  targetLevel: true,
+                  minimumThreshold: true,
+                  trackingMode: true,
+                  isCritical: true,
+                  warningThreshold: true,
+                  sortOrder: true,
+                  isRequired: true,
+                  notes: true,
+                },
+              },
+              answers: {
+                select: {
+                  id: true,
+                  runItemId: true,
+                  propertySupplyId: true,
+                  fillLevel: true,
+                  quantityValue: true,
+                  notes: true,
+                  runItem: {
+                    select: {
+                      id: true,
+                      label: true,
+                      labelEn: true,
+                      sortOrder: true,
+                    },
+                  },
+                  propertySupply: {
+                    select: {
+                      id: true,
+                      supplyItem: {
+                        select: {
+                          id: true,
+                          name: true,
+                          nameEl: true,
+                          nameEn: true,
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+
+          issueRun: {
+            select: {
+              id: true,
+              taskId: true,
+              templateId: true,
+              sourceTemplateTitle: true,
+              sourceTemplateDescription: true,
+              isCustomized: true,
+              status: true,
+              startedAt: true,
+              completedAt: true,
+              createdAt: true,
+              updatedAt: true,
+              template: {
+                select: {
+                  id: true,
+                  title: true,
+                  description: true,
+                  isPrimary: true,
+                  isActive: true,
+                  items: {
+                    orderBy: {
+                      sortOrder: "asc",
+                    },
+                    select: {
+                      id: true,
+                      label: true,
+                      labelEn: true,
+                      sortOrder: true,
+                    },
+                  },
+                },
+              },
+              items: {
+                select: {
+                  id: true,
+                  propertyTemplateItemId: true,
+                  label: true,
+                  labelEn: true,
+                  description: true,
+                  sortOrder: true,
+                  itemType: true,
+                  isRequired: true,
+                  allowsIssue: true,
+                  allowsDamage: true,
+                  defaultIssueType: true,
+                  defaultSeverity: true,
+                  requiresPhoto: true,
+                  affectsHostingByDefault: true,
+                  urgentByDefault: true,
+                  locationHint: true,
+                },
+              },
+              answers: {
+                select: {
+                  id: true,
+                  runItemId: true,
+                  templateItemId: true,
+                  reportType: true,
+                  title: true,
+                  description: true,
+                  severity: true,
+                  affectsHosting: true,
+                  requiresImmediateAction: true,
+                  locationText: true,
+                  createdIssueId: true,
+                  createdAt: true,
+                  updatedAt: true,
+                  runItem: {
+                    select: {
+                      id: true,
+                      label: true,
+                      labelEn: true,
+                      sortOrder: true,
+                    },
+                  },
+                  templateItem: {
+                    select: {
+                      id: true,
+                      label: true,
+                      labelEn: true,
+                      sortOrder: true,
+                    },
+                  },
                 },
               },
             },
@@ -129,8 +929,22 @@ async function getFullProperty(id: string) {
         orderBy: {
           createdAt: "desc",
         },
-        take: 30,
-        include: {
+        take: 50,
+        select: {
+          id: true,
+          issueType: true,
+          title: true,
+          description: true,
+          severity: true,
+          status: true,
+          reportedBy: true,
+          affectsHosting: true,
+          requiresImmediateAction: true,
+          locationText: true,
+          resolutionNotes: true,
+          resolvedAt: true,
+          createdAt: true,
+          updatedAt: true,
           task: {
             select: {
               id: true,
@@ -138,24 +952,111 @@ async function getFullProperty(id: string) {
               status: true,
             },
           },
-          booking: {
-            select: {
-              id: true,
-              guestName: true,
-              checkInDate: true,
-              checkOutDate: true,
-              status: true,
-            },
-          },
+        },
+      },
+
+      conditions: {
+        orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+        select: {
+          id: true,
+          propertyId: true,
+          taskId: true,
+          bookingId: true,
+          propertySupplyId: true,
+          mergeKey: true,
+          sourceType: true,
+          sourceLabel: true,
+          sourceItemId: true,
+          sourceItemLabel: true,
+          sourceRunId: true,
+          sourceAnswerId: true,
+          conditionType: true,
+          title: true,
+          description: true,
+          locationText: true,
+          status: true,
+          blockingStatus: true,
+          severity: true,
+          managerDecision: true,
+          managerNotes: true,
+          evidence: true,
+          firstDetectedAt: true,
+          lastDetectedAt: true,
+          resolvedAt: true,
+          dismissedAt: true,
+          createdAt: true,
+          updatedAt: true,
         },
       },
 
       checklistTemplates: {
         orderBy: [{ isPrimary: "desc" }, { createdAt: "desc" }],
-        include: {
+        select: {
+          id: true,
+          title: true,
+          description: true,
+          templateType: true,
+          isPrimary: true,
+          isActive: true,
+          createdAt: true,
+          updatedAt: true,
           items: {
             orderBy: {
               sortOrder: "asc",
+            },
+            select: {
+              id: true,
+              label: true,
+              labelEn: true,
+              description: true,
+              itemType: true,
+              isRequired: true,
+              sortOrder: true,
+              category: true,
+              requiresPhoto: true,
+              opensIssueOnFail: true,
+              optionsText: true,
+              issueTypeOnFail: true,
+              issueSeverityOnFail: true,
+              failureValuesText: true,
+              linkedSupplyItemId: true,
+              supplyUpdateMode: true,
+              supplyQuantity: true,
+            },
+          },
+        },
+      },
+
+      issueTemplates: {
+        orderBy: [{ isPrimary: "desc" }, { createdAt: "desc" }],
+        select: {
+          id: true,
+          title: true,
+          description: true,
+          isPrimary: true,
+          isActive: true,
+          createdAt: true,
+          updatedAt: true,
+          items: {
+            orderBy: {
+              sortOrder: "asc",
+            },
+            select: {
+              id: true,
+              label: true,
+              labelEn: true,
+              description: true,
+              sortOrder: true,
+              itemType: true,
+              isRequired: true,
+              allowsIssue: true,
+              allowsDamage: true,
+              defaultIssueType: true,
+              defaultSeverity: true,
+              requiresPhoto: true,
+              affectsHostingByDefault: true,
+              urgentByDefault: true,
+              locationHint: true,
             },
           },
         },
@@ -165,124 +1066,330 @@ async function getFullProperty(id: string) {
         orderBy: {
           updatedAt: "desc",
         },
-        include: {
-          supplyItem: true,
+        select: {
+          id: true,
+          currentStock: true,
+          targetStock: true,
+          reorderThreshold: true,
+          minimumThreshold: true,
+          trackingMode: true,
+          isCritical: true,
+          notes: true,
+          updatedAt: true,
+          lastUpdatedAt: true,
+          fillLevel: true,
+          isActive: true,
+          targetLevel: true,
+          warningThreshold: true,
+          supplyItem: {
+            select: {
+              id: true,
+              code: true,
+              name: true,
+              nameEl: true,
+              nameEn: true,
+              category: true,
+              unit: true,
+              minimumStock: true,
+              isActive: true,
+            },
+          },
         },
-      },
-
-      taskPhotos: {
-        orderBy: {
-          uploadedAt: "desc",
-        },
-        take: 30,
-      },
-
-      events: {
-        orderBy: {
-          createdAt: "desc",
-        },
-        take: 30,
-      },
-
-      activityLogs: {
-        orderBy: {
-          createdAt: "desc",
-        },
-        take: 50,
       },
     },
-  })
+  });
+
+  if (!property) return null;
+
+  const normalizedTasks = safeArray((property as any).tasks).map((task: any) =>
+    mapTaskForPropertyPage(task)
+  );
+
+  const normalizedIssues = safeArray((property as any).issues).map((issue: any) =>
+    mapIssueForPropertyPage(issue)
+  );
+
+  const normalizedSupplies = safeArray((property as any).propertySupplies)
+    .filter((supply: any) => Boolean(supply?.isActive))
+    .map((supply: any) => {
+      const currentStock = Number(supply.currentStock || 0);
+      const targetStock =
+        typeof supply.targetStock === "number" ? supply.targetStock : null;
+
+      const threshold =
+        typeof supply.minimumThreshold === "number"
+          ? supply.minimumThreshold
+          : typeof supply.reorderThreshold === "number"
+            ? supply.reorderThreshold
+            : typeof supply.supplyItem?.minimumStock === "number"
+              ? supply.supplyItem.minimumStock
+              : null;
+
+      const rawFillLevel = String(supply.fillLevel || "").trim().toLowerCase();
+
+      const derivedState =
+        rawFillLevel === "missing" ||
+        rawFillLevel === "medium" ||
+        rawFillLevel === "full" ||
+        rawFillLevel === "low" ||
+        rawFillLevel === "empty"
+          ? rawFillLevel
+          : getSupplyStateThree(currentStock, targetStock, threshold);
+
+      return {
+        ...supply,
+        currentStock,
+        threshold,
+        derivedState,
+      };
+    });
+
+  const openTasks = normalizedTasks.filter((task: any) =>
+    isOpenTaskStatus(task.status)
+  );
+
+  const openIssues = normalizedIssues.filter((issue: any) =>
+    isIssueOpen(issue.status)
+  );
+
+  const pendingCleaningTasks = openTasks.filter(
+    (task: any) => task.sendCleaningChecklist === true
+  );
+
+  const pendingSuppliesTasks = openTasks.filter(
+    (task: any) => task.sendSuppliesChecklist === true
+  );
+
+  const pendingIssuesTasks = openTasks.filter(
+    (task: any) => task.sendIssuesChecklist === true
+  );
+
+  const pendingProofTasks = openTasks.filter((task: any) => {
+    const cleaningPending =
+      task.sendCleaningChecklist === true &&
+      !isChecklistSubmitted(task.cleaningChecklistRun?.status);
+
+    const suppliesPending =
+      task.sendSuppliesChecklist === true &&
+      !isChecklistSubmitted(task.suppliesChecklistRun?.status);
+
+    const issuesPending =
+      task.sendIssuesChecklist === true &&
+      !isChecklistSubmitted(task.issuesChecklistRun?.status);
+
+    return cleaningPending || suppliesPending || issuesPending;
+  });
+
+  const missingCriticalSupplies = normalizedSupplies.filter((supply: any) => {
+    if (!supply.isCritical) return false;
+    return ["missing", "empty", "low"].includes(String(supply.derivedState));
+  });
+
+  const mediumSupplies = normalizedSupplies.filter((supply: any) => {
+    return ["medium", "low"].includes(String(supply.derivedState));
+  });
+
+  const readinessComputed = buildPropertyReadinessFromConditions({
+    ...property,
+    tasks: normalizedTasks,
+    issues: normalizedIssues,
+    propertySupplies: normalizedSupplies,
+  });
+
+  const normalizedChecklistTemplates = safeArray(
+    (property as any).checklistTemplates
+  );
+
+  const normalizedIssueTemplates = safeArray((property as any).issueTemplates);
+  const normalizedBookings = safeArray((property as any).bookings).map(
+    (booking: any) => {
+      const linkedTasks = safeArray(booking.tasks);
+
+      return {
+        ...booking,
+        tasks: linkedTasks,
+        taskCount: linkedTasks.length,
+        hasTask: linkedTasks.length > 0,
+      };
+    }
+  );
+  const bookingsWithoutTask = normalizedBookings.filter((booking: any) =>
+    isBookingPendingTaskCreation(booking)
+  ).filter((booking: any) => booking.hasTask !== true);
+
+  const cleaningTemplate =
+    normalizedChecklistTemplates.find((template: any) => {
+      const templateType = String(template?.templateType || "")
+        .trim()
+        .toLowerCase();
+
+      return template?.isPrimary === true && templateType === "cleaning";
+    }) || null;
+
+  const issuesTemplate =
+    normalizedIssueTemplates.find((template: any) => {
+      return template?.isPrimary === true;
+    }) || null;
+
+  return {
+    ...(property as any),
+    bookings: normalizedBookings,
+    bookingsWithoutTask,
+    bookingsWithoutTaskCount: bookingsWithoutTask.length,
+    tasks: normalizedTasks,
+    issues: normalizedIssues,
+    propertySupplies: normalizedSupplies,
+
+    cleaningTemplate,
+    issuesTemplate,
+
+    checklistHints: {
+      cleaning: "Επιβεβαίωση καθαριότητας και ετοιμότητας χώρου",
+      supplies: "Καταγραφή επιπέδου αναλωσίμων",
+      issues: "Αναφορά ζημιών, βλαβών ή προβλημάτων",
+    },
+
+    readinessStatus: readinessComputed.status,
+    readinessUpdatedAt: readinessComputed.readinessUpdatedAt,
+    readinessReasonsText: readinessComputed.readinessReasonsText,
+    nextCheckInAt: readinessComputed.nextCheckInAt,
+    nextBooking: readinessComputed.nextBooking,
+    readinessSummary: {
+      status: readinessComputed.status,
+      statusLabel: readinessComputed.statusLabel,
+      score: readinessComputed.score,
+      explain: readinessComputed.explain,
+      reasons: readinessComputed.reasons,
+      nextActions: readinessComputed.nextActions,
+      counts: readinessComputed.counts,
+      counters: {
+        openTasks: openTasks.length,
+        pendingCleaningTasks: pendingCleaningTasks.length,
+        pendingSuppliesTasks: pendingSuppliesTasks.length,
+        pendingIssuesTasks: pendingIssuesTasks.length,
+        pendingProofTasks: pendingProofTasks.length,
+        bookingsWithoutTask: bookingsWithoutTask.length,
+        openIssues: openIssues.length,
+        criticalIssues: openIssues.filter((issue: any) =>
+          ["high", "urgent", "critical"].includes(
+            String(issue.severity || "").trim().toLowerCase()
+          )
+        ).length,
+        missingCriticalSupplies: missingCriticalSupplies.length,
+        mediumSupplies: mediumSupplies.length,
+      },
+      conditions: {
+        summary: readinessComputed.conditionSnapshot.summary,
+        reasons: readinessComputed.conditionSnapshot.reasons,
+        active: readinessComputed.conditionSnapshot.buckets.active,
+        blocking: readinessComputed.conditionSnapshot.buckets.blocking,
+        warning: readinessComputed.conditionSnapshot.buckets.warning,
+        monitoring: readinessComputed.conditionSnapshot.buckets.monitoring,
+      },
+    },
+    storedReadinessSummary: {
+      readinessStatus: (property as any).readinessStatus
+        ? String((property as any).readinessStatus).toLowerCase()
+        : null,
+      readinessUpdatedAt: (property as any).readinessUpdatedAt,
+      readinessReasonsText: (property as any).readinessReasonsText,
+      openConditionCount: (property as any).openConditionCount,
+      openBlockingConditionCount: (property as any).openBlockingConditionCount,
+      openWarningConditionCount: (property as any).openWarningConditionCount,
+      nextCheckInAt: (property as any).nextCheckInAt,
+    },
+  };
 }
 
 export async function GET(_req: NextRequest, context: RouteContext) {
   try {
-    const access = await requireApiAppAccess()
+    const access = await requireApiAppAccess();
 
     if (!access.ok) {
-      return access.response
+      return access.response;
     }
 
-    const auth = access.auth
-    const { id } = await context.params
+    const auth = access.auth;
+    const { id } = await context.params;
 
-    const base = await getPropertyBase(id)
+    const base = await getPropertyBase(id);
 
     if (!base) {
       return NextResponse.json(
         { error: "Το ακίνητο δεν βρέθηκε." },
         { status: 404 }
-      )
+      );
     }
 
     if (!canAccessOrganization(auth, base.organizationId)) {
       return NextResponse.json(
         { error: "Δεν έχετε πρόσβαση σε αυτό το ακίνητο." },
         { status: 403 }
-      )
+      );
     }
 
-    const property = await getFullProperty(id)
+    const property = await getFullProperty(id);
 
     if (!property) {
       return NextResponse.json(
         { error: "Το ακίνητο δεν βρέθηκε." },
         { status: 404 }
-      )
+      );
     }
 
-    return NextResponse.json({ property })
+    return NextResponse.json({ property });
   } catch (error) {
-    console.error("GET /api/properties/[id] error:", error)
+    console.error("GET /api/properties/[id] error:", error);
 
     return NextResponse.json(
       { error: "Αποτυχία φόρτωσης ακινήτου." },
       { status: 500 }
-    )
+    );
   }
 }
 
 export async function PUT(req: NextRequest, context: RouteContext) {
   try {
-    const access = await requireApiAppAccess()
+    const access = await requireApiAppAccess();
 
     if (!access.ok) {
-      return access.response
+      return access.response;
     }
 
-    const auth = access.auth
-    const { id } = await context.params
-    const body = await req.json()
+    const auth = access.auth;
+    const { id } = await context.params;
+    const body = await req.json();
 
-    const existing = await getPropertyBase(id)
+    const existing = await getPropertyBase(id);
 
     if (!existing) {
       return NextResponse.json(
         { error: "Το ακίνητο δεν βρέθηκε." },
         { status: 404 }
-      )
+      );
     }
 
     if (!canAccessOrganization(auth, existing.organizationId)) {
       return NextResponse.json(
         { error: "Δεν έχετε πρόσβαση σε αυτό το ακίνητο." },
         { status: 403 }
-      )
+      );
     }
 
-    const code = toRequiredString(body.code, "code")
-    const name = toRequiredString(body.name, "name")
-    const address = toRequiredString(body.address, "address")
-    const city = toRequiredString(body.city, "city")
-    const region = toRequiredString(body.region, "region")
-    const postalCode = toRequiredString(body.postalCode, "postalCode")
-    const country = toRequiredString(body.country, "country")
-    const type = toRequiredString(body.type, "type")
-    const status = normalizePropertyStatus(body.status)
-    const bedrooms = toNonNegativeInt(body.bedrooms, 0)
-    const bathrooms = toNonNegativeInt(body.bathrooms, 0)
-    const maxGuests = toNonNegativeInt(body.maxGuests, 0)
-    const notes = toNullableString(body.notes)
-    const defaultPartnerId = toNullableString(body.defaultPartnerId)
+    const code = toRequiredString(body.code, "code");
+    const name = toRequiredString(body.name, "name");
+    const address = toRequiredString(body.address, "address");
+    const city = toRequiredString(body.city, "city");
+    const region = toRequiredString(body.region, "region");
+    const postalCode = toRequiredString(body.postalCode, "postalCode");
+    const country = toRequiredString(body.country, "country");
+    const type = toRequiredString(body.type, "type");
+    const status = normalizePropertyStatus(body.status);
+    const bedrooms = toNonNegativeInt(body.bedrooms, 0);
+    const bathrooms = toNonNegativeInt(body.bathrooms, 0);
+    const maxGuests = toNonNegativeInt(body.maxGuests, 0);
+    const notes = toNullableString(body.notes);
+    const defaultPartnerId = toNullableString(body.defaultPartnerId);
 
     const duplicateCode = await prisma.property.findFirst({
       where: {
@@ -295,13 +1402,13 @@ export async function PUT(req: NextRequest, context: RouteContext) {
       select: {
         id: true,
       },
-    })
+    });
 
     if (duplicateCode) {
       return NextResponse.json(
         { error: "Υπάρχει ήδη άλλο ακίνητο με αυτόν τον κωδικό." },
         { status: 400 }
-      )
+      );
     }
 
     if (defaultPartnerId) {
@@ -313,17 +1420,20 @@ export async function PUT(req: NextRequest, context: RouteContext) {
         select: {
           id: true,
         },
-      })
+      });
 
       if (!partner) {
         return NextResponse.json(
-          { error: "Ο προεπιλεγμένος συνεργάτης δεν ανήκει στον ίδιο οργανισμό." },
+          {
+            error:
+              "Ο προεπιλεγμένος συνεργάτης δεν ανήκει στον ίδιο οργανισμό.",
+          },
           { status: 400 }
-        )
+        );
       }
     }
 
-    const updated = await prisma.property.update({
+    await prisma.property.update({
       where: { id },
       data: {
         code,
@@ -341,88 +1451,94 @@ export async function PUT(req: NextRequest, context: RouteContext) {
         notes,
         defaultPartnerId,
       },
-    })
+    });
 
-    const property = await getFullProperty(updated.id)
+    const property = await getFullProperty(id);
 
     return NextResponse.json({
       success: true,
       property,
-    })
+    });
   } catch (error) {
-    console.error("PUT /api/properties/[id] error:", error)
+    console.error("PUT /api/properties/[id] error:", error);
 
     const message =
-      error instanceof Error
-        ? error.message
-        : "Αποτυχία ενημέρωσης ακινήτου."
+      error instanceof Error ? error.message : "Αποτυχία ενημέρωσης ακινήτου.";
 
-    return NextResponse.json({ error: message }, { status: 500 })
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
 export async function PATCH(req: NextRequest, context: RouteContext) {
   try {
-    const access = await requireApiAppAccess()
+    const access = await requireApiAppAccess();
 
     if (!access.ok) {
-      return access.response
+      return access.response;
     }
 
-    const auth = access.auth
-    const { id } = await context.params
-    const body = await req.json()
+    const auth = access.auth;
+    const { id } = await context.params;
+    const body = await req.json();
 
-    const existing = await getPropertyBase(id)
+    const existing = await getPropertyBase(id);
 
     if (!existing) {
       return NextResponse.json(
         { error: "Το ακίνητο δεν βρέθηκε." },
         { status: 404 }
-      )
+      );
     }
 
     if (!canAccessOrganization(auth, existing.organizationId)) {
       return NextResponse.json(
         { error: "Δεν έχετε πρόσβαση σε αυτό το ακίνητο." },
         { status: 403 }
-      )
+      );
     }
 
     const data: {
-      code?: string
-      name?: string
-      address?: string
-      city?: string
-      region?: string
-      postalCode?: string
-      country?: string
-      type?: string
-      status?: string
-      bedrooms?: number
-      bathrooms?: number
-      maxGuests?: number
-      notes?: string | null
-      defaultPartnerId?: string | null
-    } = {}
+      code?: string;
+      name?: string;
+      address?: string;
+      city?: string;
+      region?: string;
+      postalCode?: string;
+      country?: string;
+      type?: string;
+      status?: string;
+      bedrooms?: number;
+      bathrooms?: number;
+      maxGuests?: number;
+      notes?: string | null;
+      defaultPartnerId?: string | null;
+    } = {};
 
-    if ("code" in body) data.code = toRequiredString(body.code, "code")
-    if ("name" in body) data.name = toRequiredString(body.name, "name")
-    if ("address" in body) data.address = toRequiredString(body.address, "address")
-    if ("city" in body) data.city = toRequiredString(body.city, "city")
-    if ("region" in body) data.region = toRequiredString(body.region, "region")
-    if ("postalCode" in body) {
-      data.postalCode = toRequiredString(body.postalCode, "postalCode")
+    if ("code" in body) data.code = toRequiredString(body.code, "code");
+    if ("name" in body) data.name = toRequiredString(body.name, "name");
+    if ("address" in body) {
+      data.address = toRequiredString(body.address, "address");
     }
-    if ("country" in body) data.country = toRequiredString(body.country, "country")
-    if ("type" in body) data.type = toRequiredString(body.type, "type")
-    if ("status" in body) data.status = normalizePropertyStatus(body.status)
-    if ("bedrooms" in body) data.bedrooms = toNonNegativeInt(body.bedrooms, 0)
-    if ("bathrooms" in body) data.bathrooms = toNonNegativeInt(body.bathrooms, 0)
-    if ("maxGuests" in body) data.maxGuests = toNonNegativeInt(body.maxGuests, 0)
-    if ("notes" in body) data.notes = toNullableString(body.notes)
+    if ("city" in body) data.city = toRequiredString(body.city, "city");
+    if ("region" in body) data.region = toRequiredString(body.region, "region");
+    if ("postalCode" in body) {
+      data.postalCode = toRequiredString(body.postalCode, "postalCode");
+    }
+    if ("country" in body) {
+      data.country = toRequiredString(body.country, "country");
+    }
+    if ("type" in body) data.type = toRequiredString(body.type, "type");
+    if ("status" in body) data.status = normalizePropertyStatus(body.status);
+    if ("bedrooms" in body) data.bedrooms = toNonNegativeInt(body.bedrooms, 0);
+    if ("bathrooms" in body) {
+      data.bathrooms = toNonNegativeInt(body.bathrooms, 0);
+    }
+    if ("maxGuests" in body) {
+      data.maxGuests = toNonNegativeInt(body.maxGuests, 0);
+    }
+    if ("notes" in body) data.notes = toNullableString(body.notes);
     if ("defaultPartnerId" in body) {
-      data.defaultPartnerId = toNullableString(body.defaultPartnerId)
+      data.defaultPartnerId = toNullableString(body.defaultPartnerId);
     }
 
     if (data.code) {
@@ -437,13 +1553,13 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
         select: {
           id: true,
         },
-      })
+      });
 
       if (duplicateCode) {
         return NextResponse.json(
           { error: "Υπάρχει ήδη άλλο ακίνητο με αυτόν τον κωδικό." },
           { status: 400 }
-        )
+        );
       }
     }
 
@@ -456,35 +1572,36 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
         select: {
           id: true,
         },
-      })
+      });
 
       if (!partner) {
         return NextResponse.json(
-          { error: "Ο προεπιλεγμένος συνεργάτης δεν ανήκει στον ίδιο οργανισμό." },
+          {
+            error:
+              "Ο προεπιλεγμένος συνεργάτης δεν ανήκει στον ίδιο οργανισμό.",
+          },
           { status: 400 }
-        )
+        );
       }
     }
 
     await prisma.property.update({
       where: { id },
       data,
-    })
+    });
 
-    const property = await getFullProperty(id)
+    const property = await getFullProperty(id);
 
     return NextResponse.json({
       success: true,
       property,
-    })
+    });
   } catch (error) {
-    console.error("PATCH /api/properties/[id] error:", error)
+    console.error("PATCH /api/properties/[id] error:", error);
 
     const message =
-      error instanceof Error
-        ? error.message
-        : "Αποτυχία ενημέρωσης ακινήτου."
+      error instanceof Error ? error.message : "Αποτυχία ενημέρωσης ακινήτου.";
 
-    return NextResponse.json({ error: message }, { status: 500 })
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
