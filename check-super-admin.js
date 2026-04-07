@@ -1,8 +1,9 @@
-const { PrismaClient } = require("@prisma/client");
-
-const prisma = new PrismaClient();
+const prismaPromise = import("@prisma/client").then(
+  ({ PrismaClient }) => new PrismaClient()
+)
 
 async function main() {
+  const prisma = await prismaPromise
   const users = await prisma.user.findMany({
     where: { systemRole: "SUPER_ADMIN" },
     select: {
@@ -10,13 +11,14 @@ async function main() {
       name: true,
       isActive: true,
     },
-  });
+  })
 
-  console.log(JSON.stringify(users, null, 2));
+  console.log(JSON.stringify(users, null, 2))
 }
 
 main()
   .catch(console.error)
   .finally(async () => {
-    await prisma.$disconnect();
-  });
+    const prisma = await prismaPromise
+    await prisma.$disconnect()
+  })

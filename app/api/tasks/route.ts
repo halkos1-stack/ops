@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
-import { Prisma } from "@prisma/client"
+import { Prisma, PropertySupplyStateMode } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
 import { requireApiAppAccess, canAccessOrganization } from "@/lib/route-access"
+import { buildCanonicalSupplyWriteData } from "@/lib/supplies/compute-supply-state"
 import {
   filterCanonicalOperationalTasks,
   getOperationalTaskValidity,
@@ -67,6 +68,14 @@ function endOfDay(value: string) {
 
 function safeArray<T>(value: T[] | null | undefined): T[] {
   return Array.isArray(value) ? value : []
+}
+
+function toPrismaSupplyStateMode(
+  mode: "direct_state" | "numeric_thresholds"
+): PropertySupplyStateMode {
+  return mode === "numeric_thresholds"
+    ? PropertySupplyStateMode.NUMERIC_THRESHOLDS
+    : PropertySupplyStateMode.DIRECT_STATE
 }
 
 function toLowerStringOrNull(value: unknown) {
@@ -411,7 +420,10 @@ async function getActivePropertySupplies(propertyId: string) {
     select: {
       id: true,
       fillLevel: true,
+      stateMode: true,
       currentStock: true,
+      mediumThreshold: true,
+      fullThreshold: true,
       targetStock: true,
       reorderThreshold: true,
       targetLevel: true,
@@ -754,6 +766,14 @@ async function syncTaskSupplyRun(params: {
   for (let index = 0; index < propertySupplies.length; index += 1) {
     const propertySupply = propertySupplies[index]
     const existingItem = existingItemMap.get(propertySupply.id)
+    const canonicalSupply = buildCanonicalSupplyWriteData({
+      stateMode: propertySupply.stateMode,
+      fillLevel: propertySupply.fillLevel,
+      currentStock: propertySupply.currentStock,
+      mediumThreshold: propertySupply.mediumThreshold,
+      fullThreshold: propertySupply.fullThreshold,
+      isActive: true,
+    })
 
     if (!existingItem) {
       await prisma.taskSupplyRunItem.create({
@@ -769,15 +789,18 @@ async function syncTaskSupplyRun(params: {
           labelEn: propertySupply.supplyItem?.nameEn ?? null,
           category: propertySupply.supplyItem?.category ?? null,
           unit: propertySupply.supplyItem?.unit ?? null,
-          fillLevel: propertySupply.fillLevel,
-          currentStock: propertySupply.currentStock,
-          targetStock: propertySupply.targetStock,
-          reorderThreshold: propertySupply.reorderThreshold,
-          targetLevel: propertySupply.targetLevel,
-          minimumThreshold: propertySupply.minimumThreshold,
-          trackingMode: propertySupply.trackingMode,
+          fillLevel: canonicalSupply.fillLevel,
+          stateMode: toPrismaSupplyStateMode(canonicalSupply.stateMode),
+          currentStock: canonicalSupply.currentStock,
+          mediumThreshold: canonicalSupply.mediumThreshold,
+          fullThreshold: canonicalSupply.fullThreshold,
+          targetStock: canonicalSupply.targetStock,
+          reorderThreshold: canonicalSupply.reorderThreshold,
+          targetLevel: canonicalSupply.targetLevel,
+          minimumThreshold: canonicalSupply.minimumThreshold,
+          trackingMode: canonicalSupply.trackingMode,
           isCritical: propertySupply.isCritical,
-          warningThreshold: propertySupply.warningThreshold,
+          warningThreshold: canonicalSupply.warningThreshold,
           sortOrder: index,
           isRequired: true,
           notes: propertySupply.notes,
@@ -798,15 +821,18 @@ async function syncTaskSupplyRun(params: {
           labelEn: propertySupply.supplyItem?.nameEn ?? null,
           category: propertySupply.supplyItem?.category ?? null,
           unit: propertySupply.supplyItem?.unit ?? null,
-          fillLevel: propertySupply.fillLevel,
-          currentStock: propertySupply.currentStock,
-          targetStock: propertySupply.targetStock,
-          reorderThreshold: propertySupply.reorderThreshold,
-          targetLevel: propertySupply.targetLevel,
-          minimumThreshold: propertySupply.minimumThreshold,
-          trackingMode: propertySupply.trackingMode,
+          fillLevel: canonicalSupply.fillLevel,
+          stateMode: toPrismaSupplyStateMode(canonicalSupply.stateMode),
+          currentStock: canonicalSupply.currentStock,
+          mediumThreshold: canonicalSupply.mediumThreshold,
+          fullThreshold: canonicalSupply.fullThreshold,
+          targetStock: canonicalSupply.targetStock,
+          reorderThreshold: canonicalSupply.reorderThreshold,
+          targetLevel: canonicalSupply.targetLevel,
+          minimumThreshold: canonicalSupply.minimumThreshold,
+          trackingMode: canonicalSupply.trackingMode,
           isCritical: propertySupply.isCritical,
-          warningThreshold: propertySupply.warningThreshold,
+          warningThreshold: canonicalSupply.warningThreshold,
           sortOrder: index,
           isRequired: true,
           notes: propertySupply.notes,

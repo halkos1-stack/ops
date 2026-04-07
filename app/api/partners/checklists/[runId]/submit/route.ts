@@ -9,6 +9,7 @@ import {
   type RunConditionAnswerInput,
   type CreatedOrUpdatedPropertyConditionResult,
 } from "@/lib/checklists/create-property-conditions-from-run";
+import { resolveMergedPropertyConditionsNotSeenInRun } from "@/lib/checklists/merge-property-conditions";
 import { validateChecklistSubmitAnswers } from "@/lib/checklists/checklist-proof-rules";
 import {
   buildPropertyConditionSnapshot,
@@ -77,12 +78,6 @@ type LatestAssignmentRow = {
   id: string;
 } | null;
 
-type RefreshedTaskRow = {
-  checklistRun?: { status?: string | null } | null;
-  supplyRun?: { status?: string | null } | null;
-  issueRun?: { status?: string | null } | null;
-} | null;
-
 type RefreshedRunConditionRow = {
   id: string;
   propertyId: string;
@@ -115,32 +110,6 @@ type RefreshedRunRow = {
     propertyConditions?: RefreshedRunConditionRow[] | null;
   } | null;
 } | null;
-
-type ExistingRunRow = {
-  id: string;
-  templateId?: string | null;
-  sourceTemplateTitle?: string | null;
-  template?: {
-    title?: string | null;
-    items?: unknown[] | null;
-  } | null;
-  items?: unknown[] | null;
-  answers?: Array<{
-    id: string;
-    runItemId?: string | null;
-    templateItemId?: string | null;
-  }> | null;
-  task: {
-    id: string;
-    organizationId: string;
-    propertyId: string;
-    bookingId?: string | null;
-    status: string;
-    sendCleaningChecklist: boolean;
-    sendSuppliesChecklist: boolean;
-    sendIssuesChecklist: boolean;
-  };
-};
 
 type SubmitTransactionResult = {
   run: RefreshedRunRow;
@@ -404,7 +373,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
     const startedAt = toNullableDate(body.startedAt, "startedAt");
     const completedAt = toNullableDate(body.completedAt, "completedAt");
 
-    const existingRun = (await (prisma.taskChecklistRun.findFirst as any)({
+    const existingRun = await prisma.taskChecklistRun.findFirst({
       where: {
         id: runId,
         task: {
@@ -440,7 +409,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
           },
         },
       },
-    })) as ExistingRunRow | null;
+    });
 
     if (!existingRun) {
       return NextResponse.json(
@@ -456,6 +425,16 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
     const effectiveItems: EffectiveChecklistItem[] =
       runItems.length > 0 ? runItems : fallbackTemplateItems;
+
+    if (runItems.length === 0) {
+      return NextResponse.json(
+        {
+          error:
+            "Το checklist run δεν έχει materialized run items και δεν μπορεί να δεχτεί canonical submit.",
+        },
+        { status: 409 }
+      );
+    }
 
     const itemIds = new Set(effectiveItems.map((item) => item.id));
 
@@ -529,7 +508,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
           };
 
           if (existing) {
-            const updated = (await (tx.taskChecklistAnswer.update as any)({
+            const updated = await tx.taskChecklistAnswer.update({
               where: { id: existing.id },
               data,
               select: {
@@ -538,24 +517,18 @@ export async function POST(req: NextRequest, context: RouteContext) {
                 templateItemId: true,
                 runItemId: true,
               },
-            })) as SavedAnswerRow;
+            });
 
             savedAnswers.set(item.id, updated);
           } else {
-            const createData =
-              runItems.length > 0
-                ? {
-                    checklistRunId: runId,
-                    runItemId: item.id,
-                    ...data,
-                  }
-                : {
-                    checklistRunId: runId,
-                    templateItemId: item.id,
-                    ...data,
-                  };
+            const createData = {
+              checklistRunId: runId,
+              runItemId: item.id,
+              templateItemId: item.propertyTemplateItemId ?? item.id,
+              ...data,
+            };
 
-            const created = (await (tx.taskChecklistAnswer.create as any)({
+            const created = await tx.taskChecklistAnswer.create({
               data: createData,
               select: {
                 id: true,
@@ -563,7 +536,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
                 templateItemId: true,
                 runItemId: true,
               },
-            })) as SavedAnswerRow;
+            });
 
             savedAnswers.set(item.id, created);
           }
@@ -600,8 +573,19 @@ export async function POST(req: NextRequest, context: RouteContext) {
               answers: runConditionAnswers,
               detectedAt: now,
             },
-            tx as any
+            tx
           );
+
+        await resolveMergedPropertyConditionsNotSeenInRun(
+          {
+            organizationId: existingRun.task.organizationId,
+            propertyId: existingRun.task.propertyId,
+            mergeKeysToKeepOpen: conditionResults.map((item) => item.mergeKey),
+            sourceRunId: existingRun.id,
+            resolvedAt: now,
+          },
+          tx
+        );
 
         const createdOrUpdatedConditionIds = conditionResults.map(
           (item) => item.id
@@ -633,14 +617,14 @@ export async function POST(req: NextRequest, context: RouteContext) {
           },
         });
 
-        const refreshedTask = (await (tx.task.findUnique as any)({
+        const refreshedTask = await tx.task.findUnique({
           where: { id: existingRun.task.id },
           include: {
             checklistRun: true,
             supplyRun: true,
             issueRun: true,
           },
-        })) as RefreshedTaskRow | null;
+        });
 
         const cleaningCompleted =
           !refreshedTask?.checklistRun ||
@@ -684,7 +668,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
           }
         }
 
-        const refreshedRun = (await (tx.taskChecklistRun.findUnique as any)({
+        const refreshedRun = await tx.taskChecklistRun.findUnique({
           where: { id: runId },
           include: {
             template: {
@@ -743,7 +727,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
               },
             },
           },
-        })) as RefreshedRunRow;
+        });
 
         return {
           run: refreshedRun,

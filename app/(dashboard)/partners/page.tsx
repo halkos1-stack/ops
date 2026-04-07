@@ -33,6 +33,20 @@ type PortalAccessResponse = {
   } | null
 }
 
+type PortalAccessPayload = PortalAccessResponse | { error?: string } | null
+
+function getPortalApiError(data: PortalAccessPayload) {
+  if (data && "error" in data && typeof data.error === "string") {
+    return data.error
+  }
+
+  return null
+}
+
+function isPortalAccessResponse(data: PortalAccessPayload): data is PortalAccessResponse {
+  return Boolean(data && "partner" in data)
+}
+
 function getTexts(language: "el" | "en") {
   if (language === "en") {
     return {
@@ -338,20 +352,18 @@ export default function PartnersPage() {
         method: "POST",
       })
 
-      const data = (await res.json().catch(() => null)) as PortalAccessResponse | null
+      const data = (await res.json().catch(() => null)) as PortalAccessPayload
 
       if (!res.ok) {
-        throw new Error(
-          data && "error" in (data as any)
-            ? (data as any).error
-            : texts.portalCreateFailed
-        )
+        throw new Error(getPortalApiError(data) ?? texts.portalCreateFailed)
       }
 
-      setPortalPartnerName(data?.partner?.name || "")
-      setPortalUrl(data?.portalAccess?.portalUrl || "")
-      setPortalCreatedAt(data?.portalAccess?.createdAt || null)
-      setPortalLastUsedAt(data?.portalAccess?.lastUsedAt || null)
+      const payload = isPortalAccessResponse(data) ? data : null
+
+      setPortalPartnerName(payload?.partner?.name || "")
+      setPortalUrl(payload?.portalAccess?.portalUrl || "")
+      setPortalCreatedAt(payload?.portalAccess?.createdAt || null)
+      setPortalLastUsedAt(payload?.portalAccess?.lastUsedAt || null)
       setPortalSuccess(texts.portalCreateSuccess)
       setShowPortalBox(true)
     } catch (err) {
@@ -375,24 +387,22 @@ export default function PartnersPage() {
         cache: "no-store",
       })
 
-      const data = (await res.json().catch(() => null)) as PortalAccessResponse | null
+      const data = (await res.json().catch(() => null)) as PortalAccessPayload
 
       if (!res.ok) {
-        throw new Error(
-          data && "error" in (data as any)
-            ? (data as any).error
-            : texts.portalLoadFailed
-        )
+        throw new Error(getPortalApiError(data) ?? texts.portalLoadFailed)
       }
 
-      if (!data?.portalAccess?.portalUrl) {
+      const payload = isPortalAccessResponse(data) ? data : null
+
+      if (!payload?.portalAccess?.portalUrl) {
         throw new Error(texts.portalMissing)
       }
 
-      setPortalPartnerName(data?.partner?.name || "")
-      setPortalUrl(data?.portalAccess?.portalUrl || "")
-      setPortalCreatedAt(data?.portalAccess?.createdAt || null)
-      setPortalLastUsedAt(data?.portalAccess?.lastUsedAt || null)
+      setPortalPartnerName(payload?.partner?.name || "")
+      setPortalUrl(payload?.portalAccess?.portalUrl || "")
+      setPortalCreatedAt(payload?.portalAccess?.createdAt || null)
+      setPortalLastUsedAt(payload?.portalAccess?.lastUsedAt || null)
       setPortalSuccess(texts.portalLoadSuccess)
       setShowPortalBox(true)
     } catch (err) {

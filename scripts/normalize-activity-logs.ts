@@ -65,7 +65,7 @@ function normalizeQuotedText(value: string) {
 }
 
 function normalizeActivityMessage(rawMessage: string) {
-  let message = normalizeQuotedText(rawMessage)
+  const message = normalizeQuotedText(rawMessage)
   if (!message) return message
 
   let match =

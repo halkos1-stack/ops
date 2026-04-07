@@ -1602,6 +1602,34 @@ function getWarningMessage(warning: TaskWarning | string, language: "el" | "en")
   )
 }
 
+type ParsedTaskResponse = {
+  error?: string
+  message?: string
+  task?: TaskDetails
+}
+
+function parseJsonSafely(raw: string): ParsedTaskResponse | null {
+  try {
+    return raw ? (JSON.parse(raw) as ParsedTaskResponse) : null
+  } catch {
+    return null
+  }
+}
+
+function extractTaskDetails(payload: ParsedTaskResponse | null): TaskDetails | null {
+  if (!payload) return null
+
+  if (payload.task) {
+    return payload.task
+  }
+
+  if ("id" in payload && typeof payload.id === "string") {
+    return payload as unknown as TaskDetails
+  }
+
+  return null
+}
+
 function Badge({
   children,
   tone = "slate",
@@ -2249,19 +2277,17 @@ export default function TaskDetailsPage() {
       })
 
       const raw = await res.text()
-      let json: any = null
-
-      try {
-        json = raw ? JSON.parse(raw) : null
-      } catch {
-        json = null
-      }
+      const json = parseJsonSafely(raw)
 
       if (!res.ok) {
         throw new Error(json?.error || raw || texts.common.loadingErrorFallback)
       }
 
-      const nextTask: TaskDetails = json?.task || json
+      const nextTask = extractTaskDetails(json)
+
+      if (!nextTask) {
+        throw new Error(texts.common.loadingErrorFallback)
+      }
       setTask(nextTask)
 
       setScheduleForm({
@@ -2639,13 +2665,7 @@ export default function TaskDetailsPage() {
       })
 
       const raw = await res.text()
-      let json: any = null
-
-      try {
-        json = raw ? JSON.parse(raw) : null
-      } catch {
-        json = null
-      }
+      const json = parseJsonSafely(raw)
 
       if (!res.ok) {
         throw new Error(json?.error || raw || texts.schedule.modalDescription)
@@ -2682,13 +2702,7 @@ export default function TaskDetailsPage() {
       })
 
       const raw = await res.text()
-      let json: any = null
-
-      try {
-        json = raw ? JSON.parse(raw) : null
-      } catch {
-        json = null
-      }
+      const json = parseJsonSafely(raw)
 
       if (!res.ok) {
         throw new Error(json?.error || raw || texts.assignment.modalDescription)
@@ -2741,13 +2755,7 @@ export default function TaskDetailsPage() {
       })
 
       const raw = await res.text()
-      let json: any = null
-
-      try {
-        json = raw ? JSON.parse(raw) : null
-      } catch {
-        json = null
-      }
+      const json = parseJsonSafely(raw)
 
       if (!res.ok) {
         throw new Error(json?.error || raw || texts.editor.modalDescription)

@@ -1,5 +1,6 @@
 import { PrismaAdapter } from "@next-auth/prisma-adapter"
 import type { NextAuthOptions } from "next-auth"
+import type { JWT } from "next-auth/jwt"
 import CredentialsProvider from "next-auth/providers/credentials"
 import bcrypt from "bcryptjs"
 import { prisma } from "@/lib/prisma"
@@ -106,17 +107,17 @@ export const authOptions: NextAuthOptions = {
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
-        ;(token as any).id = user.id
-        ;(token as any).systemRole = (user as any).systemRole ?? "USER"
-        ;(token as any).organizationId = (user as any).organizationId ?? null
-        ;(token as any).organizationRole = (user as any).organizationRole ?? null
-        ;(token as any).organizationName = (user as any).organizationName ?? null
-        ;(token as any).organizationSlug = (user as any).organizationSlug ?? null
+        token.id = user.id
+        token.systemRole = user.systemRole ?? "USER"
+        token.organizationId = user.organizationId ?? null
+        token.organizationRole = user.organizationRole ?? null
+        token.organizationName = user.organizationName ?? null
+        token.organizationSlug = user.organizationSlug ?? null
       }
 
-      if ((token as any).id) {
+      if (token.id) {
         const dbUser = await prisma.user.findUnique({
-          where: { id: String((token as any).id) },
+          where: { id: String(token.id) },
           include: {
             memberships: {
               where: {
@@ -136,13 +137,13 @@ export const authOptions: NextAuthOptions = {
           return {}
         }
 
-        ;(token as any).systemRole = dbUser.systemRole
+        token.systemRole = dbUser.systemRole
 
         if (dbUser.systemRole === "SUPER_ADMIN") {
-          ;(token as any).organizationId = null
-          ;(token as any).organizationRole = null
-          ;(token as any).organizationName = null
-          ;(token as any).organizationSlug = null
+          token.organizationId = null
+          token.organizationRole = null
+          token.organizationName = null
+          token.organizationSlug = null
           return token
         }
 
@@ -153,10 +154,10 @@ export const authOptions: NextAuthOptions = {
           return {}
         }
 
-        ;(token as any).organizationId = membership.organizationId
-        ;(token as any).organizationRole = membership.role
-        ;(token as any).organizationName = membership.organization.name
-        ;(token as any).organizationSlug = membership.organization.slug
+        token.organizationId = membership.organizationId
+        token.organizationRole = membership.role
+        token.organizationName = membership.organization.name
+        token.organizationSlug = membership.organization.slug
       }
 
       return token
@@ -167,21 +168,19 @@ export const authOptions: NextAuthOptions = {
         return session
       }
 
-      if (!(token as any).id) {
+      const authToken = token as JWT
+
+      if (!authToken.id) {
         session.expires = new Date(0).toISOString()
         return session
       }
 
-      ;(session.user as any).id = (token as any).id
-      ;(session.user as any).systemRole = (token as any).systemRole ?? "USER"
-      ;(session.user as any).organizationId =
-        (token as any).organizationId ?? null
-      ;(session.user as any).organizationRole =
-        (token as any).organizationRole ?? null
-      ;(session.user as any).organizationName =
-        (token as any).organizationName ?? null
-      ;(session.user as any).organizationSlug =
-        (token as any).organizationSlug ?? null
+      session.user.id = authToken.id
+      session.user.systemRole = authToken.systemRole ?? "USER"
+      session.user.organizationId = authToken.organizationId ?? null
+      session.user.organizationRole = authToken.organizationRole ?? null
+      session.user.organizationName = authToken.organizationName ?? null
+      session.user.organizationSlug = authToken.organizationSlug ?? null
 
       return session
     },

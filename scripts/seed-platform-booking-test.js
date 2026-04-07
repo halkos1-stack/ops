@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 
-const { PrismaClient } = require("@prisma/client")
-
-const prisma = new PrismaClient()
+let prisma = null
+const prismaReady = import("@prisma/client").then(({ PrismaClient }) => {
+  prisma = new PrismaClient()
+  return prisma
+})
 
 const TEST_MARKER = "[PLATFORM_BOOKING_TEST]"
 const DEFAULT_PLATFORM = "airbnb"
@@ -277,6 +279,7 @@ async function seedBookingsForProperties(properties, platformArg) {
 }
 
 async function main() {
+  await prismaReady
   const args = parseArgs(process.argv)
   const organization = await ensureOrganizationExists(args.organizationId)
   const properties = await getOrganizationProperties(
@@ -345,5 +348,7 @@ main()
     process.exitCode = 1
   })
   .finally(async () => {
-    await prisma.$disconnect()
+    if (prisma) {
+      await prisma.$disconnect()
+    }
   })

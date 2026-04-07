@@ -348,13 +348,18 @@ function getReadinessImpact(
 }
 
 function getReadinessStatusSuggestion(
-  effectiveStatus: PropertyConditionStatus
+  effectiveStatus: PropertyConditionStatus,
+  effectiveBlockingStatus: PropertyConditionBlockingStatus
 ): PropertyReadinessStatus {
   if (!getIsActive(effectiveStatus)) {
     return "ready"
   }
 
-  return "not_ready"
+  if (effectiveBlockingStatus === "blocking") {
+    return "not_ready"
+  }
+
+  return "borderline"
 }
 
 function getSortPriority(
@@ -458,7 +463,10 @@ export function normalizePropertyConditionRules(
     effectiveStatus,
     effectiveBlockingStatus
   )
-  const readinessStatusSuggestion = getReadinessStatusSuggestion(effectiveStatus)
+  const readinessStatusSuggestion = getReadinessStatusSuggestion(
+    effectiveStatus,
+    effectiveBlockingStatus
+  )
 
   return {
     id: input.id,
@@ -586,8 +594,12 @@ export function getPropertyConditionReadableImpactLine(
 
   if (!normalized.isActive) {
     pieces.push("readiness impact: none")
+  } else if (normalized.readinessImpact === "blocking") {
+    pieces.push("readiness impact: property is not ready until explicit resolution")
   } else {
-    pieces.push("readiness impact: property stays not ready until explicit resolution")
+    pieces.push(
+      "readiness impact: property stays borderline until explicit resolution"
+    )
   }
 
   return pieces.join(" | ")

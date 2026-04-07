@@ -14,7 +14,7 @@ function toNullableString(value: unknown) {
   return text === "" ? null : text
 }
 
-function mapIssueToIncidentLike(issue: any) {
+function mapIssueToIncidentLike(issue: IncidentIssueLike) {
   return {
     id: issue.id,
     code: `ISS-${String(issue.id).slice(-8).toUpperCase()}`,
@@ -177,4 +177,29 @@ export async function DELETE(_req: NextRequest, context: RouteContext) {
       { status: 500 }
     )
   }
+}
+type IncidentIssueLike = {
+  id: string
+  propertyId: string
+  taskId: string | null
+  issueType: string
+  title: string
+  description: string | null
+  severity: string
+  status: string
+  createdAt: Date
+  updatedAt: Date
+  property: {
+    id: string
+    code: string
+    name: string
+    address?: string | null
+    city?: string | null
+  } | null
+  task: {
+    id: string
+    title: string
+    status: string
+    scheduledDate?: Date | null
+  } | null
 }

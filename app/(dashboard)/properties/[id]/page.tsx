@@ -20,6 +20,7 @@ import {
   normalizeTaskTitleText,
 } from "@/lib/i18n/normalizers"
 import { getSupplyDisplayName } from "@/lib/supply-presets"
+import { buildCanonicalSupplySnapshot } from "@/lib/supplies/compute-supply-state"
 
 type PartnerOption = {
   id: string
@@ -251,6 +252,9 @@ type PropertyDetail = {
   propertySupplies?: Array<{
     id: string
     currentStock: number
+    stateMode?: string | null
+    mediumThreshold?: number | null
+    fullThreshold?: number | null
     targetStock?: number | null
     reorderThreshold?: number | null
     minimumThreshold?: number | null
@@ -492,12 +496,6 @@ function normalizeLooseText(value: unknown) {
     .replace(/-+/g, "_")
 }
 
-function toNumericOrNull(value: unknown) {
-  if (value === undefined || value === null || value === "") return null
-  const numeric = Number(value)
-  return Number.isFinite(numeric) ? numeric : null
-}
-
 function isOpenTaskStatus(status?: string | null) {
   return OPEN_TASK_STATUSES.includes(normalizeTaskStatus(status) as (typeof OPEN_TASK_STATUSES)[number])
 }
@@ -574,16 +572,6 @@ function calendarToneClasses(tone: CalendarTone) {
   return "border-slate-200 bg-white"
 }
 
-function getSupplyStateThree(current: number, target?: number | null, threshold?: number | null): "missing" | "medium" | "full" {
-  if (current <= 0) return "missing"
-  const safeTarget = typeof target === "number" && Number.isFinite(target) ? target : null
-  const safeThreshold = typeof threshold === "number" && Number.isFinite(threshold) ? threshold : null
-  if (safeTarget !== null && safeTarget > 0 && current >= safeTarget) return "full"
-  if (safeThreshold !== null && current <= safeThreshold) return "medium"
-  if (safeTarget !== null && safeTarget > 0 && current < safeTarget) return "medium"
-  return "full"
-}
-
 function isTodayOpenTask(task: NonNullable<PropertyDetail["tasks"]>[number], now: Date) {
   if (!isOpenTaskStatus(task.status)) return false
   const scheduledDate = normalizeDate(task.scheduledDate)
@@ -602,23 +590,20 @@ function isDamageIssue(issue: NonNullable<PropertyDetail["issues"]>[number]) {
 }
 
 function isSupplyShortage(supply: NonNullable<PropertyDetail["propertySupplies"]>[number]) {
-  const currentStock = toNumericOrNull(supply.currentStock)
-  const minimumThreshold = toNumericOrNull(supply.minimumThreshold)
-  const reorderThreshold = toNumericOrNull(supply.reorderThreshold)
-  const supplyMinimumStock = toNumericOrNull(supply.supplyItem?.minimumStock)
-  const derivedState = normalizeLooseText(supply.derivedState)
+  const canonical = buildCanonicalSupplySnapshot({
+    isActive: true,
+    stateMode: supply.stateMode,
+    fillLevel: supply.derivedState,
+    currentStock: supply.currentStock,
+    mediumThreshold: supply.mediumThreshold,
+    fullThreshold: supply.fullThreshold,
+    minimumThreshold: supply.minimumThreshold,
+    reorderThreshold: supply.reorderThreshold,
+    targetStock: supply.targetStock,
+    supplyMinimumStock: supply.supplyItem?.minimumStock,
+  })
 
-  if (["missing", "empty", "low"].includes(derivedState)) {
-    return true
-  }
-
-  const threshold = minimumThreshold ?? reorderThreshold ?? supplyMinimumStock
-
-  if (currentStock !== null && threshold !== null) {
-    return currentStock <= threshold
-  }
-
-  return currentStock !== null && currentStock <= 0
+  return canonical.isShortage
 }
 
 function isActiveBookingStatus(status?: string | null) {
@@ -1868,13 +1853,19 @@ export default function PropertyDetailPage() {
 
   const supplyRows = useMemo<SupplyRowView[]>(() => {
     const rows = safeArray(property?.propertySupplies).map((supply) => {
-      const current = Number(supply.currentStock || 0)
-      const target = supply.targetStock ?? null
-      const threshold = supply.minimumThreshold ?? supply.reorderThreshold ?? supply.supplyItem?.minimumStock ?? null
-      const derivedState =
-        supply.derivedState === "missing" || supply.derivedState === "medium" || supply.derivedState === "full"
-          ? supply.derivedState
-          : getSupplyStateThree(current, target, threshold)
+      const canonical = buildCanonicalSupplySnapshot({
+        isActive: true,
+        stateMode: supply.stateMode,
+        fillLevel: supply.derivedState,
+        currentStock: supply.currentStock,
+        mediumThreshold: supply.mediumThreshold,
+        fullThreshold: supply.fullThreshold,
+        minimumThreshold: supply.minimumThreshold,
+        reorderThreshold: supply.reorderThreshold,
+        targetStock: supply.targetStock,
+        supplyMinimumStock: supply.supplyItem?.minimumStock,
+      })
+      const derivedState = canonical.derivedState
 
       return {
         ...supply,

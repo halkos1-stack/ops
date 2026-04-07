@@ -30,27 +30,19 @@ export function LanguageProvider({
 }: {
   children: React.ReactNode
 }) {
-  const [language, setLanguageState] = useState<AppLanguage>("el")
-  const [isHydrated, setIsHydrated] = useState(false)
+  const [language, setLanguageState] = useState<AppLanguage>(() => {
+    if (typeof window === "undefined") {
+      return "el"
+    }
+
+    return normalizeLanguage(window.localStorage.getItem(STORAGE_KEY))
+  })
 
   useEffect(() => {
-    const storedValue =
-      typeof window !== "undefined"
-        ? window.localStorage.getItem(STORAGE_KEY)
-        : null
-
-    const normalized = normalizeLanguage(storedValue)
-    setLanguageState(normalized)
-    document.documentElement.lang = normalized
-    setIsHydrated(true)
-  }, [])
-
-  useEffect(() => {
-    if (!isHydrated) return
-
+    if (typeof window === "undefined") return
     window.localStorage.setItem(STORAGE_KEY, language)
     document.documentElement.lang = language
-  }, [language, isHydrated])
+  }, [language])
 
   const value = useMemo<LanguageContextValue>(
     () => ({

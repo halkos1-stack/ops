@@ -1,4 +1,14 @@
+import { PropertySupplyStateMode } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
+import { buildCanonicalSupplyWriteData } from "@/lib/supplies/compute-supply-state"
+
+function toPrismaSupplyStateMode(
+  mode: "direct_state" | "numeric_thresholds"
+): PropertySupplyStateMode {
+  return mode === "numeric_thresholds"
+    ? PropertySupplyStateMode.NUMERIC_THRESHOLDS
+    : PropertySupplyStateMode.DIRECT_STATE
+}
 
 export async function findPrimaryChecklistTemplate(
   organizationId: string,
@@ -178,7 +188,10 @@ export async function syncTaskSupplyRun(params: {
       id: true,
       supplyItemId: true,
       fillLevel: true,
+      stateMode: true,
       currentStock: true,
+      mediumThreshold: true,
+      fullThreshold: true,
       targetStock: true,
       reorderThreshold: true,
       targetLevel: true,
@@ -265,6 +278,15 @@ export async function syncTaskSupplyRun(params: {
       },
     })
 
+    const canonicalSupply = buildCanonicalSupplyWriteData({
+      stateMode: propertySupply.stateMode,
+      fillLevel: propertySupply.fillLevel,
+      currentStock: propertySupply.currentStock,
+      mediumThreshold: propertySupply.mediumThreshold,
+      fullThreshold: propertySupply.fullThreshold,
+      isActive: true,
+    })
+
     if (!runItem) {
       runItem = await prisma.taskSupplyRunItem.create({
         data: {
@@ -276,21 +298,53 @@ export async function syncTaskSupplyRun(params: {
           labelEn: null,
           category: propertySupply.supplyItem.category,
           unit: propertySupply.supplyItem.unit,
-          fillLevel: propertySupply.fillLevel,
-          currentStock: propertySupply.currentStock,
-          targetStock: propertySupply.targetStock,
-          reorderThreshold: propertySupply.reorderThreshold,
-          targetLevel: propertySupply.targetLevel,
-          minimumThreshold: propertySupply.minimumThreshold,
-          trackingMode: propertySupply.trackingMode,
+          fillLevel: canonicalSupply.fillLevel,
+          stateMode: toPrismaSupplyStateMode(canonicalSupply.stateMode),
+          currentStock: canonicalSupply.currentStock,
+          mediumThreshold: canonicalSupply.mediumThreshold,
+          fullThreshold: canonicalSupply.fullThreshold,
+          targetStock: canonicalSupply.targetStock,
+          reorderThreshold: canonicalSupply.reorderThreshold,
+          targetLevel: canonicalSupply.targetLevel,
+          minimumThreshold: canonicalSupply.minimumThreshold,
+          trackingMode: canonicalSupply.trackingMode,
           isCritical: propertySupply.isCritical,
-          warningThreshold: propertySupply.warningThreshold,
+          warningThreshold: canonicalSupply.warningThreshold,
           sortOrder: Array.from(activePropertySupplyIds).indexOf(propertySupply.id),
           isRequired: true,
           notes: propertySupply.notes,
         },
         select: {
           id: true,
+        },
+      })
+    } else {
+      await prisma.taskSupplyRunItem.update({
+        where: {
+          id: runItem.id,
+        },
+        data: {
+          supplyItemId: propertySupply.supplyItemId,
+          propertySupplyCode: propertySupply.supplyItem.code,
+          label: propertySupply.supplyItem.name,
+          labelEn: null,
+          category: propertySupply.supplyItem.category,
+          unit: propertySupply.supplyItem.unit,
+          fillLevel: canonicalSupply.fillLevel,
+          stateMode: toPrismaSupplyStateMode(canonicalSupply.stateMode),
+          currentStock: canonicalSupply.currentStock,
+          mediumThreshold: canonicalSupply.mediumThreshold,
+          fullThreshold: canonicalSupply.fullThreshold,
+          targetStock: canonicalSupply.targetStock,
+          reorderThreshold: canonicalSupply.reorderThreshold,
+          targetLevel: canonicalSupply.targetLevel,
+          minimumThreshold: canonicalSupply.minimumThreshold,
+          trackingMode: canonicalSupply.trackingMode,
+          isCritical: propertySupply.isCritical,
+          warningThreshold: canonicalSupply.warningThreshold,
+          sortOrder: Array.from(activePropertySupplyIds).indexOf(propertySupply.id),
+          isRequired: true,
+          notes: propertySupply.notes,
         },
       })
     }

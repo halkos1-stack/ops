@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { Prisma, PropertySupplyStateMode } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
 import { requireApiAppAccessWithDevBypass } from "@/lib/dev-api-access"
 import { getOperationalTaskValidity } from "@/lib/tasks/ops-task-contract"
@@ -6,6 +7,7 @@ import {
   buildPropertyConditionSnapshot,
   type RawPropertyConditionRecord,
 } from "@/lib/readiness/property-condition-mappers"
+import { buildCanonicalSupplyWriteData } from "@/lib/supplies/compute-supply-state"
 
 type RouteContext = {
   params: Promise<{
@@ -16,6 +18,14 @@ type RouteContext = {
 type AuthContext = {
   systemRole?: "SUPER_ADMIN" | "USER"
   organizationId?: string | null
+}
+
+function toPrismaSupplyStateMode(
+  mode: "direct_state" | "numeric_thresholds"
+): PropertySupplyStateMode {
+  return mode === "numeric_thresholds"
+    ? PropertySupplyStateMode.NUMERIC_THRESHOLDS
+    : PropertySupplyStateMode.DIRECT_STATE
 }
 
 type ExtendedRawPropertyConditionRecord = RawPropertyConditionRecord & {
@@ -32,6 +42,80 @@ type ExtendedRawPropertyConditionRecord = RawPropertyConditionRecord & {
   sourceAnswerId?: string | null
   firstDetectedAt?: Date | string | null
   lastDetectedAt?: Date | string | null
+}
+
+type LooseRecord = Record<string, unknown>
+
+type SortableRunItem = {
+  id?: string | null
+  sortOrder?: number | null
+  label?: string | null
+  labelEn?: string | null
+}
+
+type ChecklistRunAnswerRecord = {
+  id: string
+  runItem?: SortableRunItem | null
+  templateItem?: SortableRunItem | null
+  valueBoolean?: boolean | null
+  valueText?: string | null
+  valueNumber?: number | null
+  valueSelect?: string | null
+  notes?: string | null
+  photoUrls?: unknown
+  issueCreated?: boolean | null
+  createdAt?: Date | string | null
+  updatedAt?: Date | string | null
+}
+
+type SupplyRunAnswerRecord = {
+  id: string
+  runItem?: SortableRunItem | null
+  propertySupplyId?: string | null
+  propertySupply?: {
+    supplyItem?: {
+      name?: string | null
+      nameEl?: string | null
+      nameEn?: string | null
+    } | null
+  } | null
+  quantityValue?: number | null
+  fillLevel?: string | null
+  notes?: string | null
+  createdAt?: Date | string | null
+  updatedAt?: Date | string | null
+}
+
+type IssueRunAnswerRecord = {
+  id: string
+  runItem?: SortableRunItem | null
+  templateItem?: SortableRunItem | null
+  reportType?: string | null
+  title?: string | null
+  description?: string | null
+  locationText?: string | null
+  photoUrls?: unknown
+  createdIssueId?: string | null
+  createdAt?: Date | string | null
+  updatedAt?: Date | string | null
+}
+
+type ChecklistRunRecord = LooseRecord & {
+  items?: SortableRunItem[] | null
+  answers?: ChecklistRunAnswerRecord[] | null
+}
+
+type SupplyRunRecord = LooseRecord & {
+  items?: SortableRunItem[] | null
+  answers?: SupplyRunAnswerRecord[] | null
+}
+
+type IssueRunRecord = LooseRecord & {
+  items?: SortableRunItem[] | null
+  answers?: IssueRunAnswerRecord[] | null
+  template?: {
+    items?: SortableRunItem[] | null
+  } | null
 }
 
 function buildTenantWhere(auth: AuthContext) {
@@ -167,18 +251,18 @@ function normalizeConditionManagerDecision(
   return null
 }
 
-function sortChecklistRun(run: any) {
+function sortChecklistRun(run: ChecklistRunRecord | null | undefined) {
   if (!run) return null
 
   return {
     ...run,
-    items: safeArray(run.items).sort((a: any, b: any) => {
+    items: safeArray(run.items).sort((a, b) => {
       const aOrder = Number(a?.sortOrder ?? 0)
       const bOrder = Number(b?.sortOrder ?? 0)
       return aOrder - bOrder
     }),
     answers: safeArray(run.answers)
-      .map((answer: any) => ({
+      .map((answer) => ({
         id: answer.id,
         checklistItemId: answer?.runItem?.id ?? answer?.templateItem?.id ?? null,
         itemLabel:
@@ -193,36 +277,36 @@ function sortChecklistRun(run: any) {
         valueNumber: answer.valueNumber,
         valueSelect: answer.valueSelect,
         note: answer.notes ?? null,
-        photoUrls: safeArray(answer.photoUrls),
+        photoUrls: safeArray(answer.photoUrls as string[] | null | undefined),
         issueCreated: Boolean(answer.issueCreated),
         linkedSupplyItemId: null,
         createdAt: answer.createdAt,
         updatedAt: answer.updatedAt,
       }))
-      .sort((a: any, b: any) => {
+      .sort((a, b) => {
         const aOrder = Number(
-          run.items?.find((item: any) => item.id === a.checklistItemId)?.sortOrder ?? 0
+          run.items?.find((item) => item.id === a.checklistItemId)?.sortOrder ?? 0
         )
         const bOrder = Number(
-          run.items?.find((item: any) => item.id === b.checklistItemId)?.sortOrder ?? 0
+          run.items?.find((item) => item.id === b.checklistItemId)?.sortOrder ?? 0
         )
         return aOrder - bOrder
       }),
   }
 }
 
-function sortSupplyRun(run: any) {
+function sortSupplyRun(run: SupplyRunRecord | null | undefined) {
   if (!run) return null
 
   return {
     ...run,
-    items: safeArray(run.items).sort((a: any, b: any) => {
+    items: safeArray(run.items).sort((a, b) => {
       const aOrder = Number(a?.sortOrder ?? 0)
       const bOrder = Number(b?.sortOrder ?? 0)
       return aOrder - bOrder
     }),
     answers: safeArray(run.answers)
-      .map((answer: any) => ({
+      .map((answer) => ({
         id: answer.id,
         checklistItemId: answer?.runItem?.id ?? null,
         itemLabel:
@@ -244,12 +328,12 @@ function sortSupplyRun(run: any) {
         createdAt: answer.createdAt,
         updatedAt: answer.updatedAt,
       }))
-      .sort((a: any, b: any) => {
+      .sort((a, b) => {
         const aOrder = Number(
-          run.items?.find((item: any) => item.id === a.checklistItemId)?.sortOrder ?? 0
+          run.items?.find((item) => item.id === a.checklistItemId)?.sortOrder ?? 0
         )
         const bOrder = Number(
-          run.items?.find((item: any) => item.id === b.checklistItemId)?.sortOrder ?? 0
+          run.items?.find((item) => item.id === b.checklistItemId)?.sortOrder ?? 0
         )
         if (aOrder !== bOrder) return aOrder - bOrder
         return String(a.itemLabel ?? "").localeCompare(String(b.itemLabel ?? ""))
@@ -257,7 +341,7 @@ function sortSupplyRun(run: any) {
   }
 }
 
-function sortIssueRun(run: any) {
+function sortIssueRun(run: IssueRunRecord | null | undefined) {
   if (!run) return null
 
   return {
@@ -265,20 +349,20 @@ function sortIssueRun(run: any) {
     template: run.template
       ? {
           ...run.template,
-          items: safeArray(run.template.items).sort((a: any, b: any) => {
+          items: safeArray(run.template.items).sort((a, b) => {
             const aOrder = Number(a?.sortOrder ?? 0)
             const bOrder = Number(b?.sortOrder ?? 0)
             return aOrder - bOrder
           }),
         }
       : null,
-    items: safeArray(run.items).sort((a: any, b: any) => {
+    items: safeArray(run.items).sort((a, b) => {
       const aOrder = Number(a?.sortOrder ?? 0)
       const bOrder = Number(b?.sortOrder ?? 0)
       return aOrder - bOrder
     }),
     answers: safeArray(run.answers)
-      .map((answer: any) => ({
+      .map((answer) => ({
         id: answer.id,
         checklistItemId: answer?.runItem?.id ?? answer?.templateItem?.id ?? null,
         itemLabel:
@@ -294,18 +378,18 @@ function sortIssueRun(run: any) {
         valueNumber: null,
         valueSelect: answer.reportType ?? null,
         note: answer.locationText ?? null,
-        photoUrls: safeArray(answer.photoUrls),
+        photoUrls: safeArray(answer.photoUrls as string[] | null | undefined),
         issueCreated: Boolean(answer.createdIssueId),
         linkedSupplyItemId: null,
         createdAt: answer.createdAt,
         updatedAt: answer.updatedAt,
       }))
-      .sort((a: any, b: any) => {
+      .sort((a, b) => {
         const aOrder = Number(
-          run.items?.find((item: any) => item.id === a.checklistItemId)?.sortOrder ?? 0
+          run.items?.find((item) => item.id === a.checklistItemId)?.sortOrder ?? 0
         )
         const bOrder = Number(
-          run.items?.find((item: any) => item.id === b.checklistItemId)?.sortOrder ?? 0
+          run.items?.find((item) => item.id === b.checklistItemId)?.sortOrder ?? 0
         )
 
         if (aOrder !== bOrder) return aOrder - bOrder
@@ -585,7 +669,10 @@ async function syncTaskRunsForTask(taskId: string) {
         propertyId: true,
         supplyItemId: true,
         fillLevel: true,
+        stateMode: true,
         currentStock: true,
+        mediumThreshold: true,
+        fullThreshold: true,
         targetStock: true,
         reorderThreshold: true,
         targetLevel: true,
@@ -668,6 +755,13 @@ async function syncTaskRunsForTask(taskId: string) {
 
           await prisma.taskSupplyRunItem.createMany({
             data: missingSupplies.map((supply) => {
+              const canonical = buildCanonicalSupplyWriteData({
+                stateMode: supply.stateMode,
+                fillLevel: supply.fillLevel,
+                currentStock: supply.currentStock,
+                mediumThreshold: supply.mediumThreshold,
+                fullThreshold: supply.fullThreshold,
+              })
               const row = {
                 taskSupplyRunId: task.supplyRun!.id,
                 propertySupplyId: supply.id,
@@ -677,15 +771,18 @@ async function syncTaskRunsForTask(taskId: string) {
                 labelEn: supply.supplyItem?.nameEn ?? null,
                 category: supply.supplyItem?.category ?? null,
                 unit: supply.supplyItem?.unit ?? null,
-                fillLevel: supply.fillLevel,
-                currentStock: supply.currentStock,
-                targetStock: supply.targetStock,
-                reorderThreshold: supply.reorderThreshold,
-                targetLevel: supply.targetLevel,
-                minimumThreshold: supply.minimumThreshold,
-                trackingMode: supply.trackingMode,
+                fillLevel: canonical.fillLevel,
+                stateMode: toPrismaSupplyStateMode(canonical.stateMode),
+                currentStock: canonical.currentStock,
+                mediumThreshold: canonical.mediumThreshold,
+                fullThreshold: canonical.fullThreshold,
+                targetStock: canonical.targetStock,
+                reorderThreshold: canonical.reorderThreshold,
+                targetLevel: canonical.targetLevel,
+                minimumThreshold: canonical.minimumThreshold,
+                trackingMode: canonical.trackingMode,
                 isCritical: supply.isCritical,
-                warningThreshold: supply.warningThreshold,
+                warningThreshold: canonical.warningThreshold,
                 sortOrder: nextSortOrder,
                 isRequired: true,
                 notes: supply.notes,
@@ -709,7 +806,16 @@ async function syncTaskRunsForTask(taskId: string) {
           })
 
           await tx.taskSupplyRunItem.createMany({
-            data: activeSupplies.map((supply, index) => ({
+            data: activeSupplies.map((supply, index) => {
+              const canonical = buildCanonicalSupplyWriteData({
+                stateMode: supply.stateMode,
+                fillLevel: supply.fillLevel,
+                currentStock: supply.currentStock,
+                mediumThreshold: supply.mediumThreshold,
+                fullThreshold: supply.fullThreshold,
+              })
+
+              return ({
               taskSupplyRunId: run.id,
               propertySupplyId: supply.id,
               supplyItemId: supply.supplyItemId,
@@ -718,19 +824,23 @@ async function syncTaskRunsForTask(taskId: string) {
               labelEn: supply.supplyItem?.nameEn ?? null,
               category: supply.supplyItem?.category ?? null,
               unit: supply.supplyItem?.unit ?? null,
-              fillLevel: supply.fillLevel,
-              currentStock: supply.currentStock,
-              targetStock: supply.targetStock,
-              reorderThreshold: supply.reorderThreshold,
-              targetLevel: supply.targetLevel,
-              minimumThreshold: supply.minimumThreshold,
-              trackingMode: supply.trackingMode,
+              fillLevel: canonical.fillLevel,
+                stateMode: toPrismaSupplyStateMode(canonical.stateMode),
+              currentStock: canonical.currentStock,
+              mediumThreshold: canonical.mediumThreshold,
+              fullThreshold: canonical.fullThreshold,
+              targetStock: canonical.targetStock,
+              reorderThreshold: canonical.reorderThreshold,
+              targetLevel: canonical.targetLevel,
+              minimumThreshold: canonical.minimumThreshold,
+              trackingMode: canonical.trackingMode,
               isCritical: supply.isCritical,
-              warningThreshold: supply.warningThreshold,
+              warningThreshold: canonical.warningThreshold,
               sortOrder: index,
               isRequired: true,
               notes: supply.notes,
-            })),
+            })
+            }),
           })
         })
       }
@@ -866,7 +976,7 @@ async function syncTaskRunsForTask(taskId: string) {
 async function getTaskPayload(taskId: string, auth: AuthContext) {
   const tenantWhere = buildTenantWhere(auth)
 
-  const task = await (prisma.task.findFirst as any)({
+  const task = await prisma.task.findFirst({
     where: {
       id: taskId,
       ...tenantWhere,
@@ -1384,7 +1494,10 @@ async function getTaskPayload(taskId: string, auth: AuthContext) {
             supplyItemId: true,
             isActive: true,
             fillLevel: true,
+            stateMode: true,
             currentStock: true,
+            mediumThreshold: true,
+            fullThreshold: true,
             targetStock: true,
             reorderThreshold: true,
             targetLevel: true,
@@ -1479,7 +1592,7 @@ async function getTaskPayload(taskId: string, auth: AuthContext) {
   const cleanedIssueRun = sortIssueRun(task.issueRun)
 
   const propertyConditionSnapshot = buildPropertyConditionSnapshot(
-    propertyConditions.map((condition: any) =>
+    propertyConditions.map((condition) =>
       mapDbConditionToRawRecord({
         id: condition.id,
         propertyId: condition.propertyId,
@@ -1513,11 +1626,11 @@ async function getTaskPayload(taskId: string, auth: AuthContext) {
     )
   )
 
-  const conditionsCreatedByThisTask = propertyConditionSnapshot.conditions.filter(
-    (condition) => condition.sourceTaskId === task.id
-  )
-
   const warnings: Array<{ code: string; title: string; message: string; severity: string }> = []
+  const readinessReasonLines = String(task.property?.readinessReasonsText ?? "")
+    .split("\n")
+    .map((part) => part.trim())
+    .filter(Boolean)
 
   if (task.sendCleaningChecklist && !primaryCleaningTemplate) {
     warnings.push({
@@ -1596,7 +1709,7 @@ async function getTaskPayload(taskId: string, auth: AuthContext) {
     property: task.property,
     booking: task.booking,
     partners,
-    assignments: safeArray(task.assignments).map((assignment: any) => ({
+    assignments: safeArray(task.assignments).map((assignment) => ({
       ...assignment,
       portalUrl: null,
     })),
@@ -1617,7 +1730,7 @@ async function getTaskPayload(taskId: string, auth: AuthContext) {
       },
       issues: {
         availableOnProperty: Boolean(primaryIssueTemplate),
-        activeIssuesCount: issues.filter((issue: any) => {
+        activeIssuesCount: issues.filter((issue) => {
           const status = String(issue.status ?? "").toLowerCase()
           return status !== "resolved" && status !== "dismissed"
         }).length,
@@ -1636,21 +1749,8 @@ async function getTaskPayload(taskId: string, auth: AuthContext) {
       openConditionsCount:
         task.property?.openConditionCount ?? propertyConditionSnapshot.summary.active ?? 0,
       reasonSummary:
-        safeArray(task.property?.readinessReasonsText)
-          .flatMap((value: any) =>
-            String(value ?? "")
-              .split("\n")
-              .map((part) => part.trim())
-              .filter(Boolean)
-          )
-          .filter(Boolean).length > 0
-          ? safeArray(task.property?.readinessReasonsText)
-              .flatMap((value: any) =>
-                String(value ?? "")
-                  .split("\n")
-                  .map((part) => part.trim())
-                  .filter(Boolean)
-              )
+        readinessReasonLines.length > 0
+          ? readinessReasonLines
           : propertyConditionSnapshot.reasons,
       summary: propertyConditionSnapshot.reasons.join(" · ") || null,
       nextCheckInAt: task.property?.nextCheckInAt ?? null,
@@ -1725,7 +1825,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     }
 
     const body = await req.json().catch(() => ({}))
-    const data: any = {}
+    const data: Prisma.TaskUncheckedUpdateInput = {}
 
     if (hasOwn(body, "title")) {
       data.title = toRequiredString(body.title, "title")
@@ -1835,7 +1935,9 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       .trim()
       .toLowerCase()
     const finalBookingId =
-      data.bookingId !== undefined ? data.bookingId : existingTask.bookingId
+      data.bookingId !== undefined
+        ? toNullableString(data.bookingId)
+        : existingTask.bookingId
 
     if (finalSource === "booking" && !finalBookingId) {
       return NextResponse.json(

@@ -15,6 +15,7 @@ import {
   normalizeTaskStatus,
 } from "@/lib/i18n/normalizers"
 import { getPropertiesPageTexts } from "@/lib/i18n/translations"
+import { buildCanonicalSupplySnapshot } from "@/lib/supplies/compute-supply-state"
 
 type PartnerOption = {
   id: string
@@ -29,7 +30,10 @@ type PropertySupplyListItem = {
   id: string
   isActive?: boolean
   fillLevel?: string | null
+  stateMode?: string | null
   currentStock?: number | null
+  mediumThreshold?: number | null
+  fullThreshold?: number | null
   targetStock?: number | null
   reorderThreshold?: number | null
   targetLevel?: number | null
@@ -37,6 +41,7 @@ type PropertySupplyListItem = {
   trackingMode?: string | null
   isCritical?: boolean
   warningThreshold?: number | null
+  derivedState?: string | null
   updatedAt?: string | null
   lastUpdatedAt?: string | null
   supplyItem?: {
@@ -224,12 +229,6 @@ function normalizeLooseText(value: unknown) {
     .replace(/-+/g, "_")
 }
 
-function toNumericOrNull(value: unknown) {
-  if (value === undefined || value === null || value === "") return null
-  const numeric = Number(value)
-  return Number.isFinite(numeric) ? numeric : null
-}
-
 function getMetricCardClasses(active: boolean) {
   if (active) {
     return "border-slate-900 bg-slate-900 text-white"
@@ -309,28 +308,23 @@ function isSupplyShortage(supply: PropertySupplyListItem) {
     return false
   }
 
-  const fillLevel = normalizeLooseText(supply.fillLevel)
-  if (["missing", "empty", "low"].includes(fillLevel)) {
-    return true
-  }
+  const canonical = buildCanonicalSupplySnapshot({
+    isActive: supply.isActive,
+    stateMode: supply.stateMode,
+    fillLevel: supply.derivedState ?? supply.fillLevel,
+    currentStock: supply.currentStock,
+    mediumThreshold: supply.mediumThreshold,
+    fullThreshold: supply.fullThreshold,
+    minimumThreshold: supply.minimumThreshold,
+    reorderThreshold: supply.reorderThreshold,
+    warningThreshold: supply.warningThreshold,
+    targetLevel: supply.targetLevel,
+    targetStock: supply.targetStock,
+    trackingMode: supply.trackingMode,
+    supplyMinimumStock: supply.supplyItem?.minimumStock,
+  })
 
-  const currentStock = toNumericOrNull(supply.currentStock)
-  const minimumThreshold = toNumericOrNull(supply.minimumThreshold)
-  const reorderThreshold = toNumericOrNull(supply.reorderThreshold)
-  const warningThreshold = toNumericOrNull(supply.warningThreshold)
-  const supplyMinimumStock = toNumericOrNull(supply.supplyItem?.minimumStock)
-
-  const threshold =
-    minimumThreshold ??
-    reorderThreshold ??
-    warningThreshold ??
-    supplyMinimumStock
-
-  if (currentStock !== null && threshold !== null) {
-    return currentStock <= threshold
-  }
-
-  return false
+  return canonical.isShortage
 }
 
 function getOperationalCountsForToday(

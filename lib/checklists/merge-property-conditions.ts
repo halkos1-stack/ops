@@ -43,7 +43,7 @@ export type ResolveMergedPropertyConditionsInput = {
 }
 
 export type ResolveMergedPropertyConditionsResult = {
-  resolvedIds: string[]
+  monitoringIds: string[]
   keptOpenIds: string[]
   notSeenIds: string[]
 }
@@ -324,6 +324,9 @@ export async function resolveMergedPropertyConditionsNotSeenInRun(
     select: {
       id: true,
       mergeKey: true,
+      blockingStatus: true,
+      managerDecision: true,
+      description: true,
     },
   })
 
@@ -341,8 +344,44 @@ export async function resolveMergedPropertyConditionsNotSeenInRun(
     })
     .map((condition) => condition.id)
 
+  const monitoringIds: string[] = []
+
+  for (const condition of openConditions.filter((row) => notSeenIds.includes(row.id))) {
+    const currentDescription = toNullableString(condition.description)
+    const monitoringNote =
+      "Latest relevant execution proof did not re-detect this condition. The condition moved to monitoring and remains active until explicit resolution or dismissal."
+
+    const nextBlockingStatus =
+      normalizeManagerDecision(condition.managerDecision) ===
+      "BLOCK_UNTIL_RESOLVED"
+        ? "BLOCKING"
+        : "WARNING"
+
+    const updated = await db.propertyCondition.update({
+      where: {
+        id: condition.id,
+      },
+      data: {
+        status: "MONITORING",
+        blockingStatus: nextBlockingStatus,
+        description: currentDescription
+          ? `${currentDescription}\n\n${monitoringNote}`
+          : monitoringNote,
+        ...(input.resolvedAt instanceof Date &&
+        !Number.isNaN(input.resolvedAt.getTime())
+          ? { lastDetectedAt: input.resolvedAt }
+          : {}),
+      },
+      select: {
+        id: true,
+      },
+    })
+
+    monitoringIds.push(updated.id)
+  }
+
   return {
-    resolvedIds: [],
+    monitoringIds,
     keptOpenIds,
     notSeenIds,
   }

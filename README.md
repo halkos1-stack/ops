@@ -156,7 +156,7 @@ Partner token → dashboard → urgent items → task execution → schedule / c
 
 Η σωστή κατεύθυνση για το OPS είναι:
 
-1. ενοποίηση auth / access παντού
+1. ενοποίηση auth / access παντούnpm 
 2. ενοποίηση readiness backend λογικής
 3. cleanup των route files
 4. διάσπαση βαριών property pages

@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import Link from "next/link"
 import { use, useEffect, useMemo, useState } from "react"
@@ -72,11 +72,11 @@ function formatDate(value: string) {
 function getRoleLabel(role: "ORG_ADMIN" | "MANAGER" | "PARTNER") {
   switch (role) {
     case "ORG_ADMIN":
-      return "Διαχειριστής οργανισμού"
+      return "Ξ”ΞΉΞ±Ο‡ΞµΞΉΟΞΉΟƒΟ„Ξ®Ο‚ ΞΏΟΞ³Ξ±Ξ½ΞΉΟƒΞΌΞΏΟ"
     case "MANAGER":
       return "Manager"
     case "PARTNER":
-      return "Συνεργάτης"
+      return "Ξ£Ο…Ξ½ΞµΟΞ³Ξ¬Ο„Ξ·Ο‚"
     default:
       return role
   }
@@ -137,12 +137,12 @@ function UserCard({
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <h3 className="text-base font-bold text-slate-900">
-                {user.name ?? "—"}
+                {user.name ?? "β€”"}
               </h3>
 
               {isPrimary ? (
                 <span className="inline-flex rounded-full bg-blue-100 px-3 py-1 text-[11px] font-semibold text-blue-700">
-                  Βασικός διαχειριστής
+                  Ξ’Ξ±ΟƒΞΉΞΊΟΟ‚ Ξ΄ΞΉΞ±Ο‡ΞµΞΉΟΞΉΟƒΟ„Ξ®Ο‚
                 </span>
               ) : null}
 
@@ -159,7 +159,7 @@ function UserCard({
                     : "bg-amber-100 text-amber-700"
                 }`}
               >
-                {user.isActive ? "Ενεργός" : "Ανενεργός"}
+                {user.isActive ? "Ξ•Ξ½ΞµΟΞ³ΟΟ‚" : "Ξ‘Ξ½ΞµΞ½ΞµΟΞ³ΟΟ‚"}
               </span>
             </div>
 
@@ -173,7 +173,7 @@ function UserCard({
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:min-w-[360px]">
             <div className="rounded-2xl bg-slate-50 px-4 py-3">
               <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                Τρέχων ρόλος
+                Ξ¤ΟΞ­Ο‡Ο‰Ξ½ ΟΟΞ»ΞΏΟ‚
               </p>
               <p className="mt-1 text-sm font-semibold text-slate-900">
                 {getRoleLabel(user.organizationRole)}
@@ -182,7 +182,7 @@ function UserCard({
 
             <div className="rounded-2xl bg-slate-50 px-4 py-3">
               <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                Δημιουργία
+                Ξ”Ξ·ΞΌΞΉΞΏΟ…ΟΞ³Ξ―Ξ±
               </p>
               <p className="mt-1 text-sm font-semibold text-slate-900">
                 {formatDate(user.userCreatedAt)}
@@ -194,7 +194,7 @@ function UserCard({
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,260px)_minmax(0,1fr)]">
           <div className="rounded-2xl border border-slate-200 p-4">
             <label className="mb-2 block text-sm font-medium text-slate-700">
-              Ρόλος οργανισμού
+              Ξ΅ΟΞ»ΞΏΟ‚ ΞΏΟΞ³Ξ±Ξ½ΞΉΟƒΞΌΞΏΟ
             </label>
 
             {allowRoleControls ? (
@@ -215,8 +215,8 @@ function UserCard({
 
                 <p className="mt-2 text-xs text-slate-500">
                   {roleChanged
-                    ? `Νέα επιλογή: ${getRoleLabel(draftRole)}`
-                    : "Δεν υπάρχουν μη αποθηκευμένες αλλαγές ρόλου."}
+                    ? `ΞΞ­Ξ± ΞµΟ€ΞΉΞ»ΞΏΞ³Ξ®: ${getRoleLabel(draftRole)}`
+                    : "Ξ”ΞµΞ½ Ο…Ο€Ξ¬ΟΟ‡ΞΏΟ…Ξ½ ΞΌΞ· Ξ±Ο€ΞΏΞΈΞ·ΞΊΞµΟ…ΞΌΞ­Ξ½ΞµΟ‚ Ξ±Ξ»Ξ»Ξ±Ξ³Ξ­Ο‚ ΟΟΞ»ΞΏΟ…."}
                 </p>
               </>
             ) : (
@@ -226,7 +226,7 @@ function UserCard({
                 </div>
 
                 <p className="mt-2 text-xs text-slate-500">
-                  Ο βασικός διαχειριστής δεν μπορεί να αλλάξει ρόλο.
+                  Ξ Ξ²Ξ±ΟƒΞΉΞΊΟΟ‚ Ξ΄ΞΉΞ±Ο‡ΞµΞΉΟΞΉΟƒΟ„Ξ®Ο‚ Ξ΄ΞµΞ½ ΞΌΟ€ΞΏΟΞµΞ― Ξ½Ξ± Ξ±Ξ»Ξ»Ξ¬ΞΎΞµΞΉ ΟΟΞ»ΞΏ.
                 </p>
               </>
             )}
@@ -234,7 +234,7 @@ function UserCard({
 
           <div className="rounded-2xl border border-slate-200 p-4">
             <p className="mb-3 text-sm font-medium text-slate-700">
-              Ενέργειες χρήστη
+              Ξ•Ξ½Ξ­ΟΞ³ΞµΞΉΞµΟ‚ Ο‡ΟΞ®ΟƒΟ„Ξ·
             </p>
 
             <div className="flex flex-wrap gap-2">
@@ -243,7 +243,7 @@ function UserCard({
                 disabled={isSuperAdminUser}
                 className="inline-flex rounded-xl border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Επεξεργασία
+                Ξ•Ο€ΞµΞΎΞµΟΞ³Ξ±ΟƒΞ―Ξ±
               </button>
 
               <button
@@ -251,7 +251,7 @@ function UserCard({
                 disabled={updatingUserId === user.userId || isSuperAdminUser}
                 className="inline-flex rounded-xl border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Πρόσκληση
+                Ξ ΟΟΟƒΞΊΞ»Ξ·ΟƒΞ·
               </button>
 
               {allowRoleControls ? (
@@ -262,7 +262,7 @@ function UserCard({
                   }
                   className="inline-flex rounded-xl border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Αποθήκευση ρόλου
+                  Ξ‘Ο€ΞΏΞΈΞ®ΞΊΞµΟ…ΟƒΞ· ΟΟΞ»ΞΏΟ…
                 </button>
               ) : null}
 
@@ -271,7 +271,7 @@ function UserCard({
                 disabled={updatingUserId === user.userId || isSuperAdminUser}
                 className="inline-flex rounded-xl border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Προσωρινός κωδικός
+                Ξ ΟΞΏΟƒΟ‰ΟΞΉΞ½ΟΟ‚ ΞΊΟ‰Ξ΄ΞΉΞΊΟΟ‚
               </button>
 
               {!isPrimary ? (
@@ -281,25 +281,25 @@ function UserCard({
                   className="inline-flex rounded-xl border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {updatingUserId === user.userId
-                    ? "Αποθήκευση..."
+                    ? "Ξ‘Ο€ΞΏΞΈΞ®ΞΊΞµΟ…ΟƒΞ·..."
                     : user.isActive
-                      ? "Απενεργοποίηση"
-                      : "Ενεργοποίηση"}
+                      ? "Ξ‘Ο€ΞµΞ½ΞµΟΞ³ΞΏΟ€ΞΏΞ―Ξ·ΟƒΞ·"
+                      : "Ξ•Ξ½ΞµΟΞ³ΞΏΟ€ΞΏΞ―Ξ·ΟƒΞ·"}
                 </button>
               ) : null}
             </div>
 
             {isPrimary ? (
               <p className="mt-3 text-xs font-medium text-blue-700">
-                Ο βασικός διαχειριστής οργανισμού επιτρέπεται να αλλάζει μόνο στοιχεία
-                χρήστη, πρόσκληση ενεργοποίησης και κωδικό.
+                Ξ Ξ²Ξ±ΟƒΞΉΞΊΟΟ‚ Ξ΄ΞΉΞ±Ο‡ΞµΞΉΟΞΉΟƒΟ„Ξ®Ο‚ ΞΏΟΞ³Ξ±Ξ½ΞΉΟƒΞΌΞΏΟ ΞµΟ€ΞΉΟ„ΟΞ­Ο€ΞµΟ„Ξ±ΞΉ Ξ½Ξ± Ξ±Ξ»Ξ»Ξ¬Ξ¶ΞµΞΉ ΞΌΟΞ½ΞΏ ΟƒΟ„ΞΏΞΉΟ‡ΞµΞ―Ξ±
+                Ο‡ΟΞ®ΟƒΟ„Ξ·, Ο€ΟΟΟƒΞΊΞ»Ξ·ΟƒΞ· ΞµΞ½ΞµΟΞ³ΞΏΟ€ΞΏΞ―Ξ·ΟƒΞ·Ο‚ ΞΊΞ±ΞΉ ΞΊΟ‰Ξ΄ΞΉΞΊΟ.
               </p>
             ) : null}
 
             {isSuperAdminUser ? (
               <p className="mt-3 text-xs font-medium text-indigo-700">
-                Ο χρήστης SUPER_ADMIN εμφανίζεται μόνο πληροφοριακά και δεν
-                επιτρέπεται επεξεργασία από αυτή τη σελίδα.
+                Ξ Ο‡ΟΞ®ΟƒΟ„Ξ·Ο‚ SUPER_ADMIN ΞµΞΌΟ†Ξ±Ξ½Ξ―Ξ¶ΞµΟ„Ξ±ΞΉ ΞΌΟΞ½ΞΏ Ο€Ξ»Ξ·ΟΞΏΟ†ΞΏΟΞΉΞ±ΞΊΞ¬ ΞΊΞ±ΞΉ Ξ΄ΞµΞ½
+                ΞµΟ€ΞΉΟ„ΟΞ­Ο€ΞµΟ„Ξ±ΞΉ ΞµΟ€ΞµΞΎΞµΟΞ³Ξ±ΟƒΞ―Ξ± Ξ±Ο€Ο Ξ±Ο…Ο„Ξ® Ο„Ξ· ΟƒΞµΞ»Ξ―Ξ΄Ξ±.
               </p>
             ) : null}
           </div>
@@ -345,7 +345,11 @@ export default function SuperAdminOrganizationUsersPage({ params }: PageProps) {
       const data = (await readJsonSafely(res)) as UsersResponse | null
 
       if (!res.ok) {
-        throw new Error(data && "error" in data ? (data as any).error : "Αποτυχία φόρτωσης χρηστών.")
+        throw new Error(
+          data && "error" in data && typeof data.error === "string"
+            ? data.error
+            : "Ξ‘Ο€ΞΏΟ„Ο…Ο‡Ξ―Ξ± Ο†ΟΟΟ„Ο‰ΟƒΞ·Ο‚ Ο‡ΟΞ·ΟƒΟ„ΟΞ½."
+        )
       }
 
       setOrganization(data?.organization ?? null)
@@ -363,7 +367,7 @@ export default function SuperAdminOrganizationUsersPage({ params }: PageProps) {
       setRoleDrafts(drafts)
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : "Άγνωστο σφάλμα φόρτωσης χρηστών."
+        err instanceof Error ? err.message : "Ξ†Ξ³Ξ½Ο‰ΟƒΟ„ΞΏ ΟƒΟ†Ξ¬Ξ»ΞΌΞ± Ο†ΟΟΟ„Ο‰ΟƒΞ·Ο‚ Ο‡ΟΞ·ΟƒΟ„ΟΞ½."
       setError(message)
     } finally {
       setLoading(false)
@@ -442,15 +446,15 @@ export default function SuperAdminOrganizationUsersPage({ params }: PageProps) {
       const data = await readJsonSafely(res)
 
       if (!res.ok) {
-        throw new Error(data?.error || "Αποτυχία δημιουργίας χρήστη.")
+        throw new Error(data?.error || "Ξ‘Ο€ΞΏΟ„Ο…Ο‡Ξ―Ξ± Ξ΄Ξ·ΞΌΞΉΞΏΟ…ΟΞ³Ξ―Ξ±Ο‚ Ο‡ΟΞ®ΟƒΟ„Ξ·.")
       }
 
       setForm(initialFormState)
-      setSuccess("Ο βασικός διαχειριστής οργανισμού δημιουργήθηκε επιτυχώς.")
+      setSuccess("Ξ Ξ²Ξ±ΟƒΞΉΞΊΟΟ‚ Ξ΄ΞΉΞ±Ο‡ΞµΞΉΟΞΉΟƒΟ„Ξ®Ο‚ ΞΏΟΞ³Ξ±Ξ½ΞΉΟƒΞΌΞΏΟ Ξ΄Ξ·ΞΌΞΉΞΏΟ…ΟΞ³Ξ®ΞΈΞ·ΞΊΞµ ΞµΟ€ΞΉΟ„Ο…Ο‡ΟΟ‚.")
       await loadUsers()
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : "Άγνωστο σφάλμα δημιουργίας χρήστη."
+        err instanceof Error ? err.message : "Ξ†Ξ³Ξ½Ο‰ΟƒΟ„ΞΏ ΟƒΟ†Ξ¬Ξ»ΞΌΞ± Ξ΄Ξ·ΞΌΞΉΞΏΟ…ΟΞ³Ξ―Ξ±Ο‚ Ο‡ΟΞ®ΟƒΟ„Ξ·."
       setError(message)
     } finally {
       setSaving(false)
@@ -479,19 +483,19 @@ export default function SuperAdminOrganizationUsersPage({ params }: PageProps) {
       const data = await readJsonSafely(res)
 
       if (!res.ok) {
-        throw new Error(data?.error || "Αποτυχία ενημέρωσης χρήστη.")
+        throw new Error(data?.error || "Ξ‘Ο€ΞΏΟ„Ο…Ο‡Ξ―Ξ± ΞµΞ½Ξ·ΞΌΞ­ΟΟ‰ΟƒΞ·Ο‚ Ο‡ΟΞ®ΟƒΟ„Ξ·.")
       }
 
       setSuccess(
         !user.isActive
-          ? "Ο χρήστης ενεργοποιήθηκε επιτυχώς."
-          : "Ο χρήστης απενεργοποιήθηκε επιτυχώς."
+          ? "Ξ Ο‡ΟΞ®ΟƒΟ„Ξ·Ο‚ ΞµΞ½ΞµΟΞ³ΞΏΟ€ΞΏΞΉΞ®ΞΈΞ·ΞΊΞµ ΞµΟ€ΞΉΟ„Ο…Ο‡ΟΟ‚."
+          : "Ξ Ο‡ΟΞ®ΟƒΟ„Ξ·Ο‚ Ξ±Ο€ΞµΞ½ΞµΟΞ³ΞΏΟ€ΞΏΞΉΞ®ΞΈΞ·ΞΊΞµ ΞµΟ€ΞΉΟ„Ο…Ο‡ΟΟ‚."
       )
 
       await loadUsers()
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : "Άγνωστο σφάλμα ενημέρωσης χρήστη."
+        err instanceof Error ? err.message : "Ξ†Ξ³Ξ½Ο‰ΟƒΟ„ΞΏ ΟƒΟ†Ξ¬Ξ»ΞΌΞ± ΞµΞ½Ξ·ΞΌΞ­ΟΟ‰ΟƒΞ·Ο‚ Ο‡ΟΞ®ΟƒΟ„Ξ·."
       setError(message)
     } finally {
       setUpdatingUserId(null)
@@ -526,14 +530,14 @@ export default function SuperAdminOrganizationUsersPage({ params }: PageProps) {
       const data = await readJsonSafely(res)
 
       if (!res.ok) {
-        throw new Error(data?.error || "Αποτυχία αλλαγής ρόλου.")
+        throw new Error(data?.error || "Ξ‘Ο€ΞΏΟ„Ο…Ο‡Ξ―Ξ± Ξ±Ξ»Ξ»Ξ±Ξ³Ξ®Ο‚ ΟΟΞ»ΞΏΟ….")
       }
 
-      setSuccess("Ο ρόλος χρήστη ενημερώθηκε επιτυχώς.")
+      setSuccess("Ξ ΟΟΞ»ΞΏΟ‚ Ο‡ΟΞ®ΟƒΟ„Ξ· ΞµΞ½Ξ·ΞΌΞµΟΟΞΈΞ·ΞΊΞµ ΞµΟ€ΞΉΟ„Ο…Ο‡ΟΟ‚.")
       await loadUsers()
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : "Άγνωστο σφάλμα αλλαγής ρόλου."
+        err instanceof Error ? err.message : "Ξ†Ξ³Ξ½Ο‰ΟƒΟ„ΞΏ ΟƒΟ†Ξ¬Ξ»ΞΌΞ± Ξ±Ξ»Ξ»Ξ±Ξ³Ξ®Ο‚ ΟΟΞ»ΞΏΟ…."
       setError(message)
     } finally {
       setUpdatingUserId(null)
@@ -542,7 +546,7 @@ export default function SuperAdminOrganizationUsersPage({ params }: PageProps) {
 
   async function handleResetPassword(user: UserRow) {
     const temporaryPassword = window.prompt(
-      `Νέος προσωρινός κωδικός για ${user.email}`,
+      `ΞΞ­ΞΏΟ‚ Ο€ΟΞΏΟƒΟ‰ΟΞΉΞ½ΟΟ‚ ΞΊΟ‰Ξ΄ΞΉΞΊΟΟ‚ Ξ³ΞΉΞ± ${user.email}`,
       ""
     )
 
@@ -571,14 +575,14 @@ export default function SuperAdminOrganizationUsersPage({ params }: PageProps) {
       const data = await readJsonSafely(res)
 
       if (!res.ok) {
-        throw new Error(data?.error || "Αποτυχία επαναφοράς κωδικού.")
+        throw new Error(data?.error || "Ξ‘Ο€ΞΏΟ„Ο…Ο‡Ξ―Ξ± ΞµΟ€Ξ±Ξ½Ξ±Ο†ΞΏΟΞ¬Ο‚ ΞΊΟ‰Ξ΄ΞΉΞΊΞΏΟ.")
       }
 
-      setSuccess("Ο προσωρινός κωδικός ενημερώθηκε επιτυχώς.")
+      setSuccess("Ξ Ο€ΟΞΏΟƒΟ‰ΟΞΉΞ½ΟΟ‚ ΞΊΟ‰Ξ΄ΞΉΞΊΟΟ‚ ΞµΞ½Ξ·ΞΌΞµΟΟΞΈΞ·ΞΊΞµ ΞµΟ€ΞΉΟ„Ο…Ο‡ΟΟ‚.")
       await loadUsers()
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : "Άγνωστο σφάλμα επαναφοράς κωδικού."
+        err instanceof Error ? err.message : "Ξ†Ξ³Ξ½Ο‰ΟƒΟ„ΞΏ ΟƒΟ†Ξ¬Ξ»ΞΌΞ± ΞµΟ€Ξ±Ξ½Ξ±Ο†ΞΏΟΞ¬Ο‚ ΞΊΟ‰Ξ΄ΞΉΞΊΞΏΟ."
       setError(message)
     } finally {
       setUpdatingUserId(null)
@@ -601,21 +605,21 @@ export default function SuperAdminOrganizationUsersPage({ params }: PageProps) {
       const data = await readJsonSafely(res)
 
       if (!res.ok) {
-        throw new Error(data?.error || "Αποτυχία αποστολής πρόσκλησης.")
+        throw new Error(data?.error || "Ξ‘Ο€ΞΏΟ„Ο…Ο‡Ξ―Ξ± Ξ±Ο€ΞΏΟƒΟ„ΞΏΞ»Ξ®Ο‚ Ο€ΟΟΟƒΞΊΞ»Ξ·ΟƒΞ·Ο‚.")
       }
 
       if (data?.sent) {
-        setSuccess("Η πρόσκληση ενεργοποίησης στάλθηκε επιτυχώς.")
+        setSuccess("Ξ— Ο€ΟΟΟƒΞΊΞ»Ξ·ΟƒΞ· ΞµΞ½ΞµΟΞ³ΞΏΟ€ΞΏΞ―Ξ·ΟƒΞ·Ο‚ ΟƒΟ„Ξ¬Ξ»ΞΈΞ·ΞΊΞµ ΞµΟ€ΞΉΟ„Ο…Ο‡ΟΟ‚.")
       } else if (data?.activationUrl) {
         setSuccess(
-          `Το SMTP δεν είναι ρυθμισμένο. Link ενεργοποίησης: ${data.activationUrl}`
+          `Ξ¤ΞΏ SMTP Ξ΄ΞµΞ½ ΞµΞ―Ξ½Ξ±ΞΉ ΟΟ…ΞΈΞΌΞΉΟƒΞΌΞ­Ξ½ΞΏ. Link ΞµΞ½ΞµΟΞ³ΞΏΟ€ΞΏΞ―Ξ·ΟƒΞ·Ο‚: ${data.activationUrl}`
         )
       } else {
-        setSuccess(data?.message || "Η πρόσκληση δημιουργήθηκε.")
+        setSuccess(data?.message || "Ξ— Ο€ΟΟΟƒΞΊΞ»Ξ·ΟƒΞ· Ξ΄Ξ·ΞΌΞΉΞΏΟ…ΟΞ³Ξ®ΞΈΞ·ΞΊΞµ.")
       }
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : "Άγνωστο σφάλμα αποστολής πρόσκλησης."
+        err instanceof Error ? err.message : "Ξ†Ξ³Ξ½Ο‰ΟƒΟ„ΞΏ ΟƒΟ†Ξ¬Ξ»ΞΌΞ± Ξ±Ο€ΞΏΟƒΟ„ΞΏΞ»Ξ®Ο‚ Ο€ΟΟΟƒΞΊΞ»Ξ·ΟƒΞ·Ο‚."
       setError(message)
     } finally {
       setUpdatingUserId(null)
@@ -669,15 +673,15 @@ export default function SuperAdminOrganizationUsersPage({ params }: PageProps) {
       const data = await readJsonSafely(res)
 
       if (!res.ok) {
-        throw new Error(data?.error || "Αποτυχία επεξεργασίας χρήστη.")
+        throw new Error(data?.error || "Ξ‘Ο€ΞΏΟ„Ο…Ο‡Ξ―Ξ± ΞµΟ€ΞµΞΎΞµΟΞ³Ξ±ΟƒΞ―Ξ±Ο‚ Ο‡ΟΞ®ΟƒΟ„Ξ·.")
       }
 
-      setSuccess("Τα στοιχεία χρήστη ενημερώθηκαν επιτυχώς.")
+      setSuccess("Ξ¤Ξ± ΟƒΟ„ΞΏΞΉΟ‡ΞµΞ―Ξ± Ο‡ΟΞ®ΟƒΟ„Ξ· ΞµΞ½Ξ·ΞΌΞµΟΟΞΈΞ·ΞΊΞ±Ξ½ ΞµΟ€ΞΉΟ„Ο…Ο‡ΟΟ‚.")
       setEditForm(null)
       await loadUsers()
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : "Άγνωστο σφάλμα επεξεργασίας χρήστη."
+        err instanceof Error ? err.message : "Ξ†Ξ³Ξ½Ο‰ΟƒΟ„ΞΏ ΟƒΟ†Ξ¬Ξ»ΞΌΞ± ΞµΟ€ΞµΞΎΞµΟΞ³Ξ±ΟƒΞ―Ξ±Ο‚ Ο‡ΟΞ®ΟƒΟ„Ξ·."
       setError(message)
     } finally {
       setUpdatingUserId(null)
@@ -695,13 +699,13 @@ export default function SuperAdminOrganizationUsersPage({ params }: PageProps) {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500">
-              Χρήστες οργανισμού
+              Ξ§ΟΞ®ΟƒΟ„ΞµΟ‚ ΞΏΟΞ³Ξ±Ξ½ΞΉΟƒΞΌΞΏΟ
             </p>
             <h1 className="mt-2 text-3xl font-bold text-slate-900">
-              {organization?.name ?? "Φόρτωση οργανισμού..."}
+              {organization?.name ?? "Ξ¦ΟΟΟ„Ο‰ΟƒΞ· ΞΏΟΞ³Ξ±Ξ½ΞΉΟƒΞΌΞΏΟ..."}
             </h1>
             <p className="mt-2 text-sm text-slate-600">
-              Διαχείριση βασικού διαχειριστή και επιπλέον managers του οργανισμού.
+              Ξ”ΞΉΞ±Ο‡ΞµΞ―ΟΞΉΟƒΞ· Ξ²Ξ±ΟƒΞΉΞΊΞΏΟ Ξ΄ΞΉΞ±Ο‡ΞµΞΉΟΞΉΟƒΟ„Ξ® ΞΊΞ±ΞΉ ΞµΟ€ΞΉΟ€Ξ»Ξ­ΞΏΞ½ managers Ο„ΞΏΟ… ΞΏΟΞ³Ξ±Ξ½ΞΉΟƒΞΌΞΏΟ.
             </p>
           </div>
 
@@ -710,21 +714,21 @@ export default function SuperAdminOrganizationUsersPage({ params }: PageProps) {
               href={`/super-admin/organizations/${organizationId}`}
               className="inline-flex rounded-2xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
             >
-              Επιστροφή στον οργανισμό
+              Ξ•Ο€ΞΉΟƒΟ„ΟΞΏΟ†Ξ® ΟƒΟ„ΞΏΞ½ ΞΏΟΞ³Ξ±Ξ½ΞΉΟƒΞΌΟ
             </Link>
 
             <button
               onClick={loadUsers}
               className="inline-flex rounded-2xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
             >
-              Ανανέωση
+              Ξ‘Ξ½Ξ±Ξ½Ξ­Ο‰ΟƒΞ·
             </button>
 
             <button
               onClick={() => setShowCreateForm((prev) => !prev)}
               className="inline-flex rounded-2xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
             >
-              {showCreateForm ? "Απόκρυψη φόρμας" : "Νέος χρήστης"}
+              {showCreateForm ? "Ξ‘Ο€ΟΞΊΟΟ…ΟΞ· Ο†ΟΟΞΌΞ±Ο‚" : "ΞΞ­ΞΏΟ‚ Ο‡ΟΞ®ΟƒΟ„Ξ·Ο‚"}
             </button>
           </div>
         </div>
@@ -732,22 +736,22 @@ export default function SuperAdminOrganizationUsersPage({ params }: PageProps) {
 
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 2xl:grid-cols-5">
         <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Σύνολο χρηστών</p>
+          <p className="text-sm text-slate-500">Ξ£ΟΞ½ΞΏΞ»ΞΏ Ο‡ΟΞ·ΟƒΟ„ΟΞ½</p>
           <p className="mt-2 text-3xl font-bold text-slate-900">{stats.total}</p>
         </div>
 
         <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Ενεργοί</p>
+          <p className="text-sm text-slate-500">Ξ•Ξ½ΞµΟΞ³ΞΏΞ―</p>
           <p className="mt-2 text-3xl font-bold text-emerald-600">{stats.active}</p>
         </div>
 
         <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Ανενεργοί</p>
+          <p className="text-sm text-slate-500">Ξ‘Ξ½ΞµΞ½ΞµΟΞ³ΞΏΞ―</p>
           <p className="mt-2 text-3xl font-bold text-amber-600">{stats.inactive}</p>
         </div>
 
         <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm text-slate-500">Διαχειριστές οργανισμού</p>
+          <p className="text-sm text-slate-500">Ξ”ΞΉΞ±Ο‡ΞµΞΉΟΞΉΟƒΟ„Ξ­Ο‚ ΞΏΟΞ³Ξ±Ξ½ΞΉΟƒΞΌΞΏΟ</p>
           <p className="mt-2 text-3xl font-bold text-slate-900">{stats.orgAdmins}</p>
         </div>
 
@@ -761,10 +765,10 @@ export default function SuperAdminOrganizationUsersPage({ params }: PageProps) {
         <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <h2 className="text-xl font-bold text-slate-900">
-              Φίλτρα διαχείρισης χρηστών
+              Ξ¦Ξ―Ξ»Ο„ΟΞ± Ξ΄ΞΉΞ±Ο‡ΞµΞ―ΟΞΉΟƒΞ·Ο‚ Ο‡ΟΞ·ΟƒΟ„ΟΞ½
             </h2>
             <p className="mt-1 text-sm text-slate-600">
-              Αναζήτηση και έλεγχος χρηστών ανά κατάσταση πρόσβασης.
+              Ξ‘Ξ½Ξ±Ξ¶Ξ®Ο„Ξ·ΟƒΞ· ΞΊΞ±ΞΉ Ξ­Ξ»ΞµΞ³Ο‡ΞΏΟ‚ Ο‡ΟΞ·ΟƒΟ„ΟΞ½ Ξ±Ξ½Ξ¬ ΞΊΞ±Ο„Ξ¬ΟƒΟ„Ξ±ΟƒΞ· Ο€ΟΟΟƒΞ²Ξ±ΟƒΞ·Ο‚.
             </p>
           </div>
 
@@ -772,27 +776,27 @@ export default function SuperAdminOrganizationUsersPage({ params }: PageProps) {
             onClick={resetFilters}
             className="inline-flex rounded-2xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
           >
-            Καθαρισμός φίλτρων
+            ΞΞ±ΞΈΞ±ΟΞΉΟƒΞΌΟΟ‚ Ο†Ξ―Ξ»Ο„ΟΟ‰Ξ½
           </button>
         </div>
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <div>
             <label className="mb-2 block text-sm font-medium text-slate-700">
-              Αναζήτηση
+              Ξ‘Ξ½Ξ±Ξ¶Ξ®Ο„Ξ·ΟƒΞ·
             </label>
             <input
               type="text"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Όνομα ή email..."
+              placeholder="ΞΞ½ΞΏΞΌΞ± Ξ® email..."
               className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-slate-900"
             />
           </div>
 
           <div>
             <label className="mb-2 block text-sm font-medium text-slate-700">
-              Κατάσταση
+              ΞΞ±Ο„Ξ¬ΟƒΟ„Ξ±ΟƒΞ·
             </label>
             <select
               value={statusFilter}
@@ -801,9 +805,9 @@ export default function SuperAdminOrganizationUsersPage({ params }: PageProps) {
               }
               className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-slate-900"
             >
-              <option value="ALL">Όλοι</option>
-              <option value="ACTIVE">Μόνο ενεργοί</option>
-              <option value="INACTIVE">Μόνο ανενεργοί</option>
+              <option value="ALL">ΞΞ»ΞΏΞΉ</option>
+              <option value="ACTIVE">ΞΟΞ½ΞΏ ΞµΞ½ΞµΟΞ³ΞΏΞ―</option>
+              <option value="INACTIVE">ΞΟΞ½ΞΏ Ξ±Ξ½ΞµΞ½ΞµΟΞ³ΞΏΞ―</option>
             </select>
           </div>
         </div>
@@ -825,9 +829,9 @@ export default function SuperAdminOrganizationUsersPage({ params }: PageProps) {
         <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
-              <h2 className="text-xl font-bold text-slate-900">Επεξεργασία χρήστη</h2>
+              <h2 className="text-xl font-bold text-slate-900">Ξ•Ο€ΞµΞΎΞµΟΞ³Ξ±ΟƒΞ―Ξ± Ο‡ΟΞ®ΟƒΟ„Ξ·</h2>
               <p className="mt-1 text-sm text-slate-600">
-                Ενημέρωσε βασικά στοιχεία χρήστη.
+                Ξ•Ξ½Ξ·ΞΌΞ­ΟΟ‰ΟƒΞµ Ξ²Ξ±ΟƒΞΉΞΊΞ¬ ΟƒΟ„ΞΏΞΉΟ‡ΞµΞ―Ξ± Ο‡ΟΞ®ΟƒΟ„Ξ·.
               </p>
             </div>
 
@@ -835,7 +839,7 @@ export default function SuperAdminOrganizationUsersPage({ params }: PageProps) {
               onClick={() => setEditForm(null)}
               className="inline-flex rounded-2xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
             >
-              Κλείσιμο
+              ΞΞ»ΞµΞ―ΟƒΞΉΞΌΞΏ
             </button>
           </div>
 
@@ -845,7 +849,7 @@ export default function SuperAdminOrganizationUsersPage({ params }: PageProps) {
           >
             <div>
               <label className="mb-2 block text-sm font-medium text-slate-700">
-                Ονοματεπώνυμο
+                ΞΞ½ΞΏΞΌΞ±Ο„ΞµΟ€ΟΞ½Ο…ΞΌΞΏ
               </label>
               <input
                 type="text"
@@ -889,14 +893,14 @@ export default function SuperAdminOrganizationUsersPage({ params }: PageProps) {
 
             <div>
               <label className="mb-2 block text-sm font-medium text-slate-700">
-                Ρόλος οργανισμού
+                Ξ΅ΟΞ»ΞΏΟ‚ ΞΏΟΞ³Ξ±Ξ½ΞΉΟƒΞΌΞΏΟ
               </label>
               <select
                 value={editForm.organizationRole}
                 disabled
                 className="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm outline-none opacity-70"
               >
-                <option value="ORG_ADMIN">Διαχειριστής οργανισμού</option>
+                <option value="ORG_ADMIN">Ξ”ΞΉΞ±Ο‡ΞµΞΉΟΞΉΟƒΟ„Ξ®Ο‚ ΞΏΟΞ³Ξ±Ξ½ΞΉΟƒΞΌΞΏΟ</option>
                 <option value="MANAGER">Manager</option>
               </select>
             </div>
@@ -920,7 +924,7 @@ export default function SuperAdminOrganizationUsersPage({ params }: PageProps) {
                   className="h-4 w-4"
                 />
                 <span className="text-sm font-medium text-slate-700">
-                  Ο χρήστης είναι ενεργός
+                  Ξ Ο‡ΟΞ®ΟƒΟ„Ξ·Ο‚ ΞµΞ―Ξ½Ξ±ΞΉ ΞµΞ½ΞµΟΞ³ΟΟ‚
                 </span>
               </label>
             </div>
@@ -928,8 +932,8 @@ export default function SuperAdminOrganizationUsersPage({ params }: PageProps) {
             {editForm.isPrimaryOrgAdmin ? (
               <div className="md:col-span-2">
                 <p className="text-xs font-medium text-blue-700">
-                  Ο βασικός διαχειριστής οργανισμού δεν μπορεί να αλλάξει ρόλο ή να
-                  απενεργοποιηθεί.
+                  Ξ Ξ²Ξ±ΟƒΞΉΞΊΟΟ‚ Ξ΄ΞΉΞ±Ο‡ΞµΞΉΟΞΉΟƒΟ„Ξ®Ο‚ ΞΏΟΞ³Ξ±Ξ½ΞΉΟƒΞΌΞΏΟ Ξ΄ΞµΞ½ ΞΌΟ€ΞΏΟΞµΞ― Ξ½Ξ± Ξ±Ξ»Ξ»Ξ¬ΞΎΞµΞΉ ΟΟΞ»ΞΏ Ξ® Ξ½Ξ±
+                  Ξ±Ο€ΞµΞ½ΞµΟΞ³ΞΏΟ€ΞΏΞΉΞ·ΞΈΞµΞ―.
                 </p>
               </div>
             ) : null}
@@ -941,8 +945,8 @@ export default function SuperAdminOrganizationUsersPage({ params }: PageProps) {
                 className="inline-flex rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {updatingUserId === editForm.userId
-                  ? "Αποθήκευση..."
-                  : "Αποθήκευση αλλαγών"}
+                  ? "Ξ‘Ο€ΞΏΞΈΞ®ΞΊΞµΟ…ΟƒΞ·..."
+                  : "Ξ‘Ο€ΞΏΞΈΞ®ΞΊΞµΟ…ΟƒΞ· Ξ±Ξ»Ξ»Ξ±Ξ³ΟΞ½"}
               </button>
             </div>
           </form>
@@ -954,24 +958,24 @@ export default function SuperAdminOrganizationUsersPage({ params }: PageProps) {
           <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <div>
               <h2 className="text-xl font-bold text-slate-900">
-                Βασικός διαχειριστής οργανισμού
+                Ξ’Ξ±ΟƒΞΉΞΊΟΟ‚ Ξ΄ΞΉΞ±Ο‡ΞµΞΉΟΞΉΟƒΟ„Ξ®Ο‚ ΞΏΟΞ³Ξ±Ξ½ΞΉΟƒΞΌΞΏΟ
               </h2>
               <p className="mt-2 text-sm text-slate-600">
-                Από τη σελίδα SUPER ADMIN δημιουργείται μόνο ο ένας και μοναδικός
-                βασικός διαχειριστής του οργανισμού.
+                Ξ‘Ο€Ο Ο„Ξ· ΟƒΞµΞ»Ξ―Ξ΄Ξ± SUPER ADMIN Ξ΄Ξ·ΞΌΞΉΞΏΟ…ΟΞ³ΞµΞ―Ο„Ξ±ΞΉ ΞΌΟΞ½ΞΏ ΞΏ Ξ­Ξ½Ξ±Ο‚ ΞΊΞ±ΞΉ ΞΌΞΏΞ½Ξ±Ξ΄ΞΉΞΊΟΟ‚
+                Ξ²Ξ±ΟƒΞΉΞΊΟΟ‚ Ξ΄ΞΉΞ±Ο‡ΞµΞΉΟΞΉΟƒΟ„Ξ®Ο‚ Ο„ΞΏΟ… ΞΏΟΞ³Ξ±Ξ½ΞΉΟƒΞΌΞΏΟ.
               </p>
             </div>
 
             {primaryOrgAdmin ? (
               <div className="mt-6 rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
-                Ο οργανισμός έχει ήδη βασικό διαχειριστή. Δεν επιτρέπεται δημιουργία
-                δεύτερου από αυτή τη σελίδα.
+                Ξ ΞΏΟΞ³Ξ±Ξ½ΞΉΟƒΞΌΟΟ‚ Ξ­Ο‡ΞµΞΉ Ξ®Ξ΄Ξ· Ξ²Ξ±ΟƒΞΉΞΊΟ Ξ΄ΞΉΞ±Ο‡ΞµΞΉΟΞΉΟƒΟ„Ξ®. Ξ”ΞµΞ½ ΞµΟ€ΞΉΟ„ΟΞ­Ο€ΞµΟ„Ξ±ΞΉ Ξ΄Ξ·ΞΌΞΉΞΏΟ…ΟΞ³Ξ―Ξ±
+                Ξ΄ΞµΟΟ„ΞµΟΞΏΟ… Ξ±Ο€Ο Ξ±Ο…Ο„Ξ® Ο„Ξ· ΟƒΞµΞ»Ξ―Ξ΄Ξ±.
               </div>
             ) : (
               <form onSubmit={handleCreateUser} className="mt-6 space-y-4">
                 <div>
                   <label className="mb-2 block text-sm font-medium text-slate-700">
-                    Ονοματεπώνυμο
+                    ΞΞ½ΞΏΞΌΞ±Ο„ΞµΟ€ΟΞ½Ο…ΞΌΞΏ
                   </label>
                   <input
                     type="text"
@@ -979,7 +983,7 @@ export default function SuperAdminOrganizationUsersPage({ params }: PageProps) {
                     onChange={(event) =>
                       setForm((prev) => ({ ...prev, name: event.target.value }))
                     }
-                    placeholder="π.χ. Νίκος Παπαδάκης"
+                    placeholder="Ο€.Ο‡. ΞΞ―ΞΊΞΏΟ‚ Ξ Ξ±Ο€Ξ±Ξ΄Ξ¬ΞΊΞ·Ο‚"
                     className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-slate-900"
                     required
                   />
@@ -1003,7 +1007,7 @@ export default function SuperAdminOrganizationUsersPage({ params }: PageProps) {
 
                 <div>
                   <label className="mb-2 block text-sm font-medium text-slate-700">
-                    Προσωρινός κωδικός
+                    Ξ ΟΞΏΟƒΟ‰ΟΞΉΞ½ΟΟ‚ ΞΊΟ‰Ξ΄ΞΉΞΊΟΟ‚
                   </label>
                   <input
                     type="text"
@@ -1011,7 +1015,7 @@ export default function SuperAdminOrganizationUsersPage({ params }: PageProps) {
                     onChange={(event) =>
                       setForm((prev) => ({ ...prev, password: event.target.value }))
                     }
-                    placeholder="τουλάχιστον 6 χαρακτήρες"
+                    placeholder="Ο„ΞΏΟ…Ξ»Ξ¬Ο‡ΞΉΟƒΟ„ΞΏΞ½ 6 Ο‡Ξ±ΟΞ±ΞΊΟ„Ξ®ΟΞµΟ‚"
                     className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-slate-900"
                     required
                   />
@@ -1019,10 +1023,10 @@ export default function SuperAdminOrganizationUsersPage({ params }: PageProps) {
 
                 <div>
                   <label className="mb-2 block text-sm font-medium text-slate-700">
-                    Ρόλος οργανισμού
+                    Ξ΅ΟΞ»ΞΏΟ‚ ΞΏΟΞ³Ξ±Ξ½ΞΉΟƒΞΌΞΏΟ
                   </label>
                   <div className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
-                    Διαχειριστής οργανισμού
+                    Ξ”ΞΉΞ±Ο‡ΞµΞΉΟΞΉΟƒΟ„Ξ®Ο‚ ΞΏΟΞ³Ξ±Ξ½ΞΉΟƒΞΌΞΏΟ
                   </div>
                 </div>
 
@@ -1036,7 +1040,7 @@ export default function SuperAdminOrganizationUsersPage({ params }: PageProps) {
                     className="h-4 w-4"
                   />
                   <span className="text-sm font-medium text-slate-700">
-                    Ο χρήστης να είναι ενεργός από την αρχή
+                    Ξ Ο‡ΟΞ®ΟƒΟ„Ξ·Ο‚ Ξ½Ξ± ΞµΞ―Ξ½Ξ±ΞΉ ΞµΞ½ΞµΟΞ³ΟΟ‚ Ξ±Ο€Ο Ο„Ξ·Ξ½ Ξ±ΟΟ‡Ξ®
                   </span>
                 </label>
 
@@ -1045,7 +1049,7 @@ export default function SuperAdminOrganizationUsersPage({ params }: PageProps) {
                   disabled={saving}
                   className="w-full rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {saving ? "Αποθήκευση..." : "Δημιουργία βασικού διαχειριστή"}
+                  {saving ? "Ξ‘Ο€ΞΏΞΈΞ®ΞΊΞµΟ…ΟƒΞ·..." : "Ξ”Ξ·ΞΌΞΉΞΏΟ…ΟΞ³Ξ―Ξ± Ξ²Ξ±ΟƒΞΉΞΊΞΏΟ Ξ΄ΞΉΞ±Ο‡ΞµΞΉΟΞΉΟƒΟ„Ξ®"}
                 </button>
               </form>
             )}
@@ -1054,10 +1058,10 @@ export default function SuperAdminOrganizationUsersPage({ params }: PageProps) {
           <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-6 shadow-sm">
             <div className="flex min-h-[280px] flex-col items-center justify-center text-center">
               <h2 className="text-xl font-bold text-slate-900">
-                Η φόρμα δημιουργίας είναι κρυφή
+                Ξ— Ο†ΟΟΞΌΞ± Ξ΄Ξ·ΞΌΞΉΞΏΟ…ΟΞ³Ξ―Ξ±Ο‚ ΞµΞ―Ξ½Ξ±ΞΉ ΞΊΟΟ…Ο†Ξ®
               </h2>
               <p className="mt-2 max-w-sm text-sm text-slate-600">
-                Μπορείς να την εμφανίσεις ξανά από το κουμπί «Νέος χρήστης».
+                ΞΟ€ΞΏΟΞµΞ―Ο‚ Ξ½Ξ± Ο„Ξ·Ξ½ ΞµΞΌΟ†Ξ±Ξ½Ξ―ΟƒΞµΞΉΟ‚ ΞΎΞ±Ξ½Ξ¬ Ξ±Ο€Ο Ο„ΞΏ ΞΊΞΏΟ…ΞΌΟ€Ξ― Β«ΞΞ­ΞΏΟ‚ Ο‡ΟΞ®ΟƒΟ„Ξ·Ο‚Β».
               </p>
             </div>
           </div>
@@ -1068,22 +1072,22 @@ export default function SuperAdminOrganizationUsersPage({ params }: PageProps) {
             <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <h2 className="text-xl font-bold text-slate-900">
-                  Βασικός διαχειριστής οργανισμού
+                  Ξ’Ξ±ΟƒΞΉΞΊΟΟ‚ Ξ΄ΞΉΞ±Ο‡ΞµΞΉΟΞΉΟƒΟ„Ξ®Ο‚ ΞΏΟΞ³Ξ±Ξ½ΞΉΟƒΞΌΞΏΟ
                 </h2>
                 <p className="mt-1 text-sm text-slate-600">
-                  Ο κύριος υπεύθυνος του οργανισμού. Δεν αλλάζει ρόλο και δεν
-                  απενεργοποιείται από εδώ.
+                  Ξ ΞΊΟΟΞΉΞΏΟ‚ Ο…Ο€ΞµΟΞΈΟ…Ξ½ΞΏΟ‚ Ο„ΞΏΟ… ΞΏΟΞ³Ξ±Ξ½ΞΉΟƒΞΌΞΏΟ. Ξ”ΞµΞ½ Ξ±Ξ»Ξ»Ξ¬Ξ¶ΞµΞΉ ΟΟΞ»ΞΏ ΞΊΞ±ΞΉ Ξ΄ΞµΞ½
+                  Ξ±Ο€ΞµΞ½ΞµΟΞ³ΞΏΟ€ΞΏΞΉΞµΞ―Ο„Ξ±ΞΉ Ξ±Ο€Ο ΞµΞ΄Ο.
                 </p>
               </div>
             </div>
 
             {loading ? (
               <div className="rounded-2xl border border-dashed border-slate-300 px-6 py-10 text-center text-sm text-slate-500">
-                Φόρτωση...
+                Ξ¦ΟΟΟ„Ο‰ΟƒΞ·...
               </div>
             ) : !primaryOrgAdmin ? (
               <div className="rounded-2xl border border-dashed border-slate-300 px-6 py-10 text-center text-sm text-slate-500">
-                Δεν έχει οριστεί ακόμη βασικός διαχειριστής οργανισμού.
+                Ξ”ΞµΞ½ Ξ­Ο‡ΞµΞΉ ΞΏΟΞΉΟƒΟ„ΞµΞ― Ξ±ΞΊΟΞΌΞ· Ξ²Ξ±ΟƒΞΉΞΊΟΟ‚ Ξ΄ΞΉΞ±Ο‡ΞµΞΉΟΞΉΟƒΟ„Ξ®Ο‚ ΞΏΟΞ³Ξ±Ξ½ΞΉΟƒΞΌΞΏΟ.
               </div>
             ) : (
               <UserCard
@@ -1102,25 +1106,25 @@ export default function SuperAdminOrganizationUsersPage({ params }: PageProps) {
             <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <h2 className="text-xl font-bold text-slate-900">
-                  Υπόλοιποι χρήστες οργανισμού
+                  Ξ¥Ο€ΟΞ»ΞΏΞΉΟ€ΞΏΞΉ Ο‡ΟΞ®ΟƒΟ„ΞµΟ‚ ΞΏΟΞ³Ξ±Ξ½ΞΉΟƒΞΌΞΏΟ
                 </h2>
                 <p className="mt-1 text-sm text-slate-600">
-                  Λίστα επιπλέον χρηστών. Η τρέχουσα λογική επιτρέπει μόνο managers.
+                  Ξ›Ξ―ΟƒΟ„Ξ± ΞµΟ€ΞΉΟ€Ξ»Ξ­ΞΏΞ½ Ο‡ΟΞ·ΟƒΟ„ΟΞ½. Ξ— Ο„ΟΞ­Ο‡ΞΏΟ…ΟƒΞ± Ξ»ΞΏΞ³ΞΉΞΊΞ® ΞµΟ€ΞΉΟ„ΟΞ­Ο€ΞµΞΉ ΞΌΟΞ½ΞΏ managers.
                 </p>
               </div>
 
               <div className="rounded-2xl bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700">
-                Εμφανίζονται: {filteredUsers.length}
+                Ξ•ΞΌΟ†Ξ±Ξ½Ξ―Ξ¶ΞΏΞ½Ο„Ξ±ΞΉ: {filteredUsers.length}
               </div>
             </div>
 
             {loading ? (
               <div className="rounded-2xl border border-dashed border-slate-300 px-6 py-12 text-center text-sm text-slate-500">
-                Φόρτωση χρηστών...
+                Ξ¦ΟΟΟ„Ο‰ΟƒΞ· Ο‡ΟΞ·ΟƒΟ„ΟΞ½...
               </div>
             ) : filteredUsers.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-slate-300 px-6 py-12 text-center text-sm text-slate-500">
-                Δεν βρέθηκαν επιπλέον χρήστες με τα τρέχοντα φίλτρα.
+                Ξ”ΞµΞ½ Ξ²ΟΞ­ΞΈΞ·ΞΊΞ±Ξ½ ΞµΟ€ΞΉΟ€Ξ»Ξ­ΞΏΞ½ Ο‡ΟΞ®ΟƒΟ„ΞµΟ‚ ΞΌΞµ Ο„Ξ± Ο„ΟΞ­Ο‡ΞΏΞ½Ο„Ξ± Ο†Ξ―Ξ»Ο„ΟΞ±.
               </div>
             ) : (
               <div className="space-y-4">

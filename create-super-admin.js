@@ -1,19 +1,27 @@
-const { PrismaClient } = require("@prisma/client");
-const bcrypt = require("bcryptjs");
+ï»¿let prisma = null
+let bcrypt = null
 
-const prisma = new PrismaClient();
+const setupReady = Promise.all([
+  import("@prisma/client"),
+  import("bcryptjs"),
+]).then(([prismaModule, bcryptModule]) => {
+  prisma = new prismaModule.PrismaClient()
+  bcrypt = bcryptModule
+})
 
 async function main() {
-  const email = "admin@ops.local";
-  const password = "Admin1234!";
-  const name = "Super Admin";
+  await setupReady
 
-  const passwordHash = await bcrypt.hash(password, 10);
+  const email = "admin@ops.local"
+  const password = "Admin1234!"
+  const name = "Super Admin"
+
+  const passwordHash = await bcrypt.hash(password, 10)
 
   const existing = await prisma.user.findUnique({
     where: { email },
     select: { id: true, email: true },
-  });
+  })
 
   if (existing) {
     await prisma.user.update({
@@ -24,11 +32,11 @@ async function main() {
         systemRole: "SUPER_ADMIN",
         isActive: true,
       },
-    });
+    })
 
-    console.log(" super admin åíçìåñþèçêå:");
-    console.log(JSON.stringify({ email, password }, null, 2));
-    return;
+    console.log(" super admin ÎµÎ½Î·Î¼ÎµÏÏŽÎ¸Î·ÎºÎµ:")
+    console.log(JSON.stringify({ email, password }, null, 2))
+    return
   }
 
   await prisma.user.create({
@@ -39,17 +47,19 @@ async function main() {
       systemRole: "SUPER_ADMIN",
       isActive: true,
     },
-  });
+  })
 
-  console.log(" super admin äçìéïõñãÞèçêå:");
-  console.log(JSON.stringify({ email, password }, null, 2));
+  console.log(" super admin Î´Î·Î¼Î¹Î¿Ï…ÏÎ³Î®Î¸Î·ÎºÎµ:")
+  console.log(JSON.stringify({ email, password }, null, 2))
 }
 
 main()
   .catch((error) => {
-    console.error(error);
-    process.exit(1);
+    console.error(error)
+    process.exit(1)
   })
   .finally(async () => {
-    await prisma.$disconnect();
-  });
+    if (prisma) {
+      await prisma.$disconnect()
+    }
+  })

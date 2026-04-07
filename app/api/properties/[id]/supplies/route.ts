@@ -1,17 +1,30 @@
 import { NextRequest, NextResponse } from "next/server"
+import { PropertySupplyStateMode } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
 import { requireApiAppAccess, canAccessOrganization } from "@/lib/route-access"
 import {
   SUPPLY_PRESETS,
-  getSupplyPresetByCode,
   buildCustomSupplyCode,
 } from "@/lib/supply-presets"
-import { refreshPropertyReadinessSnapshot } from "@/lib/properties/readiness-snapshot"
+import {
+  buildCanonicalSupplySnapshot,
+  buildCanonicalSupplyWriteData,
+} from "@/lib/supplies/compute-supply-state"
+import { refreshPropertyReadiness } from "@/lib/readiness/refresh-property-readiness"
+import { syncPropertySupplyTemplate } from "@/lib/supplies/property-supply-template-sync"
 
 type RouteContext = {
   params: Promise<{
     id: string
   }>
+}
+
+function toPrismaSupplyStateMode(
+  mode: "direct_state" | "numeric_thresholds"
+): PropertySupplyStateMode {
+  return mode === "numeric_thresholds"
+    ? PropertySupplyStateMode.NUMERIC_THRESHOLDS
+    : PropertySupplyStateMode.DIRECT_STATE
 }
 
 function toText(value: unknown) {
@@ -26,6 +39,21 @@ function toNumberOrNull(value: unknown) {
 
 function buildCustomSupplyMarker(propertyId: string) {
   return `CUSTOM_SUPPLY:${propertyId}`
+}
+
+function buildDefaultNumericSupplyConfig(minimumStock: number | null) {
+  const mediumThreshold =
+    typeof minimumStock === "number" && Number.isFinite(minimumStock)
+      ? Math.max(1, minimumStock)
+      : 1
+  const fullThreshold = Math.max(mediumThreshold + 2, 3)
+
+  return buildCanonicalSupplyWriteData({
+    stateMode: "numeric_thresholds",
+    currentStock: fullThreshold,
+    mediumThreshold,
+    fullThreshold,
+  })
 }
 
 async function getPropertyBase(propertyId: string) {
@@ -44,6 +72,90 @@ async function getPropertyBase(propertyId: string) {
       status: true,
     },
   })
+}
+
+function shapeActiveSupplyRow(row: {
+  id: string
+  propertyId: string
+  supplyItemId: string
+  fillLevel: string
+  stateMode: string
+  currentStock: number
+  mediumThreshold: number | null
+  fullThreshold: number | null
+  targetStock: number | null
+  reorderThreshold: number | null
+  targetLevel: number | null
+  minimumThreshold: number | null
+  trackingMode: string
+  isCritical: boolean
+  warningThreshold: number | null
+  lastUpdatedAt: Date
+  updatedAt: Date
+  notes: string | null
+  supplyItem: {
+    id: string
+    code: string
+    name: string
+    nameEl: string | null
+    nameEn: string | null
+    category: string
+    unit: string
+    minimumStock: number | null
+    isActive: boolean
+  }
+}) {
+  const canonical = buildCanonicalSupplySnapshot({
+    isActive: true,
+    stateMode: row.stateMode,
+    fillLevel: row.fillLevel,
+    currentStock: row.currentStock,
+    mediumThreshold: row.mediumThreshold,
+    fullThreshold: row.fullThreshold,
+    minimumThreshold: row.minimumThreshold,
+    reorderThreshold: row.reorderThreshold,
+    warningThreshold: row.warningThreshold,
+    targetLevel: row.targetLevel,
+    targetStock: row.targetStock,
+    trackingMode: row.trackingMode,
+    supplyMinimumStock: row.supplyItem.minimumStock,
+  })
+
+  return {
+    id: row.id,
+    propertyId: row.propertyId,
+    propertySupplyId: row.id,
+    supplyItemId: row.supplyItemId,
+    fillLevel: canonical.derivedState,
+    stateMode: canonical.stateMode,
+    derivedState: canonical.derivedState,
+    currentStock: canonical.currentStock,
+    mediumThreshold: canonical.mediumThreshold,
+    fullThreshold: canonical.fullThreshold,
+    targetStock: row.targetStock,
+    reorderThreshold: row.reorderThreshold,
+    targetLevel: row.targetLevel,
+    minimumThreshold: row.minimumThreshold,
+    trackingMode: row.trackingMode,
+    isCritical: row.isCritical,
+    warningThreshold: row.warningThreshold,
+    lastUpdatedAt: row.lastUpdatedAt,
+    updatedAt: row.updatedAt,
+    notes: row.notes,
+    isActive: true,
+    isShortage: canonical.isShortage,
+    supplyItem: {
+      id: row.supplyItem.id,
+      code: row.supplyItem.code,
+      name: row.supplyItem.name,
+      nameEl: row.supplyItem.nameEl,
+      nameEn: row.supplyItem.nameEn,
+      category: row.supplyItem.category,
+      unit: row.supplyItem.unit,
+      minimumStock: row.supplyItem.minimumStock,
+      isActive: row.supplyItem.isActive,
+    },
+  }
 }
 
 async function buildResponse(propertyId: string) {
@@ -78,7 +190,6 @@ async function buildResponse(propertyId: string) {
   if (!property) return null
 
   const customMarker = buildCustomSupplyMarker(property.id)
-
   const customSupplyItems = await prisma.supplyItem.findMany({
     where: {
       notes: customMarker,
@@ -88,8 +199,12 @@ async function buildResponse(propertyId: string) {
     },
   })
 
+  const activeSupplies = property.propertySupplies
+    .filter((row) => row.isActive !== false)
+    .map(shapeActiveSupplyRow)
+
   const builtInCatalog = SUPPLY_PRESETS.map((preset) => {
-    const activeRow = property.propertySupplies.find(
+    const activeRow = activeSupplies.find(
       (row) => row.supplyItem.code === preset.code
     )
 
@@ -109,9 +224,7 @@ async function buildResponse(propertyId: string) {
   })
 
   const customCatalog = customSupplyItems.map((item) => {
-    const activeRow = property.propertySupplies.find(
-      (row) => row.supplyItemId === item.id
-    )
+    const activeRow = activeSupplies.find((row) => row.supplyItemId === item.id)
 
     return {
       id: item.id,
@@ -126,42 +239,6 @@ async function buildResponse(propertyId: string) {
       propertySupplyId: activeRow?.id || null,
     }
   })
-
-  const activeSupplies = property.propertySupplies.map((row) => ({
-    id: row.id,
-    propertySupplyId: row.id,
-    currentStock: row.currentStock,
-    targetStock: row.targetStock,
-    targetLevel: row.targetLevel ?? null,
-    reorderThreshold: row.reorderThreshold,
-    minimumThreshold: row.minimumThreshold ?? null,
-    trackingMode: row.trackingMode,
-    isCritical: row.isCritical,
-    warningThreshold: row.warningThreshold ?? null,
-    lastUpdatedAt: row.lastUpdatedAt,
-    notes: row.notes,
-    fillLevel: row.fillLevel ?? "full",
-    isActive: true,
-    supplyItemId: row.supplyItemId,
-    name: row.supplyItem.name,
-    nameEl: row.supplyItem.nameEl ?? null,
-    nameEn: row.supplyItem.nameEn ?? null,
-    code: row.supplyItem.code,
-    category: row.supplyItem.category,
-    unit: row.supplyItem.unit,
-    minimumStock: row.supplyItem.minimumStock,
-    supplyItem: {
-      id: row.supplyItem.id,
-      code: row.supplyItem.code,
-      name: row.supplyItem.name,
-      nameEl: row.supplyItem.nameEl ?? null,
-      nameEn: row.supplyItem.nameEn ?? null,
-      category: row.supplyItem.category,
-      unit: row.supplyItem.unit,
-      minimumStock: row.supplyItem.minimumStock,
-      isActive: row.supplyItem.isActive,
-    },
-  }))
 
   return {
     property: {
@@ -186,35 +263,29 @@ async function buildResponse(propertyId: string) {
 export async function GET(_request: NextRequest, context: RouteContext) {
   try {
     const access = await requireApiAppAccess()
-
     if (!access.ok) return access.response
 
     const auth = access.auth
     const { id } = await context.params
-
     const property = await getPropertyBase(id)
 
     if (!property) {
-      return NextResponse.json(
-        { error: "Το ακίνητο δεν βρέθηκε." },
-        { status: 404 }
-      )
+      return NextResponse.json({ error: "Property was not found." }, { status: 404 })
     }
 
     if (!canAccessOrganization(auth, property.organizationId)) {
       return NextResponse.json(
-        { error: "Δεν έχετε πρόσβαση σε αυτό το ακίνητο." },
+        { error: "You do not have access to this property." },
         { status: 403 }
       )
     }
 
     const payload = await buildResponse(property.id)
-
     return NextResponse.json(payload)
   } catch (error) {
     console.error("GET /api/properties/[id]/supplies error:", error)
     return NextResponse.json(
-      { error: "Αποτυχία φόρτωσης σελίδας αναλωσίμων." },
+      { error: "Failed to load property supplies." },
       { status: 500 }
     )
   }
@@ -223,48 +294,50 @@ export async function GET(_request: NextRequest, context: RouteContext) {
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
     const access = await requireApiAppAccess()
-
     if (!access.ok) return access.response
 
     const auth = access.auth
     const { id } = await context.params
     const body = await request.json()
-
     const property = await getPropertyBase(id)
 
     if (!property) {
-      return NextResponse.json(
-        { error: "Το ακίνητο δεν βρέθηκε." },
-        { status: 404 }
-      )
+      return NextResponse.json({ error: "Property was not found." }, { status: 404 })
     }
 
     if (!canAccessOrganization(auth, property.organizationId)) {
       return NextResponse.json(
-        { error: "Δεν έχετε πρόσβαση σε αυτό το ακίνητο." },
+        { error: "You do not have access to this property." },
         { status: 403 }
       )
     }
 
     const action = toText(body?.action)
 
+    if (action === "sync_template") {
+      await syncPropertySupplyTemplate({
+        propertyId: property.id,
+        organizationId: property.organizationId,
+      })
+
+      const payload = await buildResponse(property.id)
+      return NextResponse.json(payload)
+    }
+
     if (action === "toggle_builtin") {
       const code = toText(body?.code)
       const enabled = Boolean(body?.enabled)
-
       const preset = SUPPLY_PRESETS.find((row) => row.code === code)
 
       if (!preset) {
         return NextResponse.json(
-          { error: "Μη έγκυρο built-in αναλώσιμο." },
+          { error: "Invalid built-in supply preset." },
           { status: 400 }
         )
       }
 
       let supplyItem = await prisma.supplyItem.findUnique({
-        where: {
-          code: preset.code,
-        },
+        where: { code: preset.code },
       })
 
       if (!supplyItem) {
@@ -291,24 +364,28 @@ export async function POST(request: NextRequest, context: RouteContext) {
         },
       })
 
-      let didAffectReadiness = false
-
       if (enabled && !existing) {
+        const defaults = buildDefaultNumericSupplyConfig(preset.minimumStock)
+
         await prisma.propertySupply.create({
           data: {
             propertyId: property.id,
             supplyItemId: supplyItem.id,
-            currentStock: Math.max(preset.minimumStock + 2, 3),
-            targetStock: Math.max(preset.minimumStock + 2, 3),
-            targetLevel: Math.max(preset.minimumStock + 2, 3),
-            reorderThreshold: preset.minimumStock,
-            minimumThreshold: preset.minimumStock,
-            notes: "Ενεργοποιήθηκε από τη διαχείριση λίστας αναλωσίμων.",
+            fillLevel: defaults.fillLevel,
+            stateMode: toPrismaSupplyStateMode(defaults.stateMode),
+            currentStock: defaults.currentStock,
+            mediumThreshold: defaults.mediumThreshold,
+            fullThreshold: defaults.fullThreshold,
+            targetStock: defaults.targetStock,
+            reorderThreshold: defaults.reorderThreshold,
+            targetLevel: defaults.targetLevel,
+            minimumThreshold: defaults.minimumThreshold,
+            trackingMode: defaults.trackingMode,
+            warningThreshold: defaults.warningThreshold,
+            notes: "Activated from property supply management.",
             lastUpdatedAt: new Date(),
           },
         })
-
-        didAffectReadiness = true
       }
 
       if (!enabled && existing) {
@@ -317,23 +394,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
             id: existing.id,
           },
         })
-
-        didAffectReadiness = true
       }
 
-      if (didAffectReadiness) {
-        try {
-          await refreshPropertyReadinessSnapshot({
-            propertyId: property.id,
-            organizationId: property.organizationId,
-          })
-        } catch (readinessError) {
-          console.error(
-            "POST toggle_builtin readiness snapshot refresh error:",
-            readinessError
-          )
-        }
-      }
+      await syncPropertySupplyTemplate({
+        propertyId: property.id,
+        organizationId: property.organizationId,
+      })
+      await refreshPropertyReadiness(property.id)
 
       const payload = await buildResponse(property.id)
       return NextResponse.json(payload)
@@ -345,13 +412,12 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
       if (!supplyItemId) {
         return NextResponse.json(
-          { error: "Το supplyItemId είναι υποχρεωτικό." },
+          { error: "supplyItemId is required." },
           { status: 400 }
         )
       }
 
       const customMarker = buildCustomSupplyMarker(property.id)
-
       const supplyItem = await prisma.supplyItem.findFirst({
         where: {
           id: supplyItemId,
@@ -361,7 +427,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
       if (!supplyItem) {
         return NextResponse.json(
-          { error: "Το custom αναλώσιμο δεν βρέθηκε." },
+          { error: "Custom supply item was not found." },
           { status: 404 }
         )
       }
@@ -375,30 +441,33 @@ export async function POST(request: NextRequest, context: RouteContext) {
         },
       })
 
-      const minimumStock =
+      const defaults = buildDefaultNumericSupplyConfig(
         typeof supplyItem.minimumStock === "number" &&
-        Number.isFinite(supplyItem.minimumStock)
+          Number.isFinite(supplyItem.minimumStock)
           ? supplyItem.minimumStock
           : 1
-
-      let didAffectReadiness = false
+      )
 
       if (enabled && !existing) {
         await prisma.propertySupply.create({
           data: {
             propertyId: property.id,
             supplyItemId: supplyItem.id,
-            currentStock: Math.max(minimumStock + 2, 3),
-            targetStock: Math.max(minimumStock + 2, 3),
-            targetLevel: Math.max(minimumStock + 2, 3),
-            reorderThreshold: minimumStock,
-            minimumThreshold: minimumStock,
-            notes: "Ενεργοποιήθηκε custom αναλώσιμο από τη διαχείριση λίστας.",
+            fillLevel: defaults.fillLevel,
+            stateMode: toPrismaSupplyStateMode(defaults.stateMode),
+            currentStock: defaults.currentStock,
+            mediumThreshold: defaults.mediumThreshold,
+            fullThreshold: defaults.fullThreshold,
+            targetStock: defaults.targetStock,
+            reorderThreshold: defaults.reorderThreshold,
+            targetLevel: defaults.targetLevel,
+            minimumThreshold: defaults.minimumThreshold,
+            trackingMode: defaults.trackingMode,
+            warningThreshold: defaults.warningThreshold,
+            notes: "Activated from property supply management.",
             lastUpdatedAt: new Date(),
           },
         })
-
-        didAffectReadiness = true
       }
 
       if (!enabled && existing) {
@@ -407,23 +476,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
             id: existing.id,
           },
         })
-
-        didAffectReadiness = true
       }
 
-      if (didAffectReadiness) {
-        try {
-          await refreshPropertyReadinessSnapshot({
-            propertyId: property.id,
-            organizationId: property.organizationId,
-          })
-        } catch (readinessError) {
-          console.error(
-            "POST toggle_custom readiness snapshot refresh error:",
-            readinessError
-          )
-        }
-      }
+      await syncPropertySupplyTemplate({
+        propertyId: property.id,
+        organizationId: property.organizationId,
+      })
+      await refreshPropertyReadiness(property.id)
 
       const payload = await buildResponse(property.id)
       return NextResponse.json(payload)
@@ -432,18 +491,17 @@ export async function POST(request: NextRequest, context: RouteContext) {
     if (action === "add_custom") {
       const name = toText(body?.name)
       const category = toText(body?.category) || "custom"
-      const unit = toText(body?.unit) || "τεμάχια"
+      const unit = toText(body?.unit) || "τεμαχια"
       const minimumStock = toNumberOrNull(body?.minimumStock) ?? 1
 
       if (!name) {
         return NextResponse.json(
-          { error: "Το custom αναλώσιμο απαιτεί όνομα." },
+          { error: "Custom supply requires a name." },
           { status: 400 }
         )
       }
 
       const customMarker = buildCustomSupplyMarker(property.id)
-
       const existingByName = await prisma.supplyItem.findFirst({
         where: {
           notes: customMarker,
@@ -456,12 +514,12 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
       if (existingByName) {
         return NextResponse.json(
-          { error: "Υπάρχει ήδη custom αναλώσιμο με αυτό το όνομα." },
+          { error: "A custom supply with this name already exists." },
           { status: 400 }
         )
       }
 
-      let baseCode = buildCustomSupplyCode(name)
+      const baseCode = buildCustomSupplyCode(name)
       let code = baseCode
       let counter = 2
 
@@ -493,14 +551,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
       return NextResponse.json(payload)
     }
 
-    return NextResponse.json(
-      { error: "Μη έγκυρη ενέργεια." },
-      { status: 400 }
-    )
+    return NextResponse.json({ error: "Invalid action." }, { status: 400 })
   } catch (error) {
     console.error("POST /api/properties/[id]/supplies error:", error)
     return NextResponse.json(
-      { error: "Αποτυχία ενημέρωσης διαχείρισης αναλωσίμων." },
+      { error: "Failed to update property supplies." },
       { status: 500 }
     )
   }

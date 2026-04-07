@@ -2,13 +2,36 @@ import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { requireApiAppAccess, buildTenantWhere } from "@/lib/route-access"
 
+type IncidentIssueLike = {
+  id: string
+  propertyId: string
+  taskId: string | null
+  issueType: string
+  title: string
+  description: string | null
+  severity: string
+  status: string
+  createdAt: Date
+  updatedAt: Date
+  property: {
+    id: string
+    code: string
+    name: string
+  } | null
+  task: {
+    id: string
+    title: string
+    status: string
+  } | null
+}
+
 function toNullableString(value: unknown) {
   if (value === undefined || value === null) return null
   const text = String(value).trim()
   return text === "" ? null : text
 }
 
-function mapIssueToIncidentLike(issue: any) {
+function mapIssueToIncidentLike(issue: IncidentIssueLike) {
   return {
     id: issue.id,
     code: `ISS-${String(issue.id).slice(-8).toUpperCase()}`,

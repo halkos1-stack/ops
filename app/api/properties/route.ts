@@ -2,10 +2,15 @@ import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { requireApiAppAccess } from "@/lib/route-access"
 import { refreshPropertyReadinessSnapshot } from "@/lib/properties/readiness-snapshot"
+import { buildCanonicalSupplySnapshot } from "@/lib/supplies/compute-supply-state"
 import {
   filterCanonicalOperationalTasks,
   getOperationalTaskValidity,
 } from "@/lib/tasks/ops-task-contract"
+
+function safeArray<T>(value: T[] | null | undefined): T[] {
+  return Array.isArray(value) ? value : []
+}
 
 function toNullableString(value: unknown) {
   if (value === undefined || value === null) return null
@@ -199,7 +204,10 @@ async function getFullPropertyList(where: Record<string, unknown>) {
           id: true,
           isActive: true,
           fillLevel: true,
+          stateMode: true,
           currentStock: true,
+          mediumThreshold: true,
+          fullThreshold: true,
           targetStock: true,
           reorderThreshold: true,
           targetLevel: true,
@@ -232,16 +240,47 @@ async function getFullPropertyList(where: Record<string, unknown>) {
   })
 }
 
-function shapePropertyForOperationalViews(property: any) {
+type FullPropertyRow = Awaited<ReturnType<typeof getFullPropertyList>>[number]
+
+function shapePropertyForOperationalViews(property: FullPropertyRow) {
   const allTasks = Array.isArray(property?.tasks) ? property.tasks : []
   const tasks = filterCanonicalOperationalTasks(allTasks)
   const invalidOperationalTaskCount = allTasks.filter(
-    (task: any) => getOperationalTaskValidity(task).isCanonicalOperational !== true
+    (task) => getOperationalTaskValidity(task).isCanonicalOperational !== true
   ).length
+  const propertySupplies = safeArray(property?.propertySupplies).map((supply) => {
+    const canonical = buildCanonicalSupplySnapshot({
+      isActive: supply.isActive,
+      stateMode: supply.stateMode,
+      fillLevel: supply.fillLevel,
+      currentStock: supply.currentStock,
+      mediumThreshold: supply.mediumThreshold,
+      fullThreshold: supply.fullThreshold,
+      minimumThreshold: supply.minimumThreshold,
+      reorderThreshold: supply.reorderThreshold,
+      warningThreshold: supply.warningThreshold,
+      targetLevel: supply.targetLevel,
+      targetStock: supply.targetStock,
+      trackingMode: supply.trackingMode,
+      supplyMinimumStock: supply.supplyItem?.minimumStock,
+    })
+
+    return {
+      ...supply,
+      fillLevel: canonical.derivedState,
+      stateMode: canonical.stateMode,
+      currentStock: canonical.currentStock,
+      mediumThreshold: canonical.mediumThreshold,
+      fullThreshold: canonical.fullThreshold,
+      derivedState: canonical.derivedState,
+      isShortage: canonical.isShortage,
+    }
+  })
 
   return {
     ...property,
     tasks,
+    propertySupplies,
     auditSummary: {
       invalidOperationalTaskCount,
     },
@@ -562,7 +601,10 @@ export async function POST(req: NextRequest) {
             id: true,
             isActive: true,
             fillLevel: true,
+            stateMode: true,
             currentStock: true,
+            mediumThreshold: true,
+            fullThreshold: true,
             targetStock: true,
             reorderThreshold: true,
             targetLevel: true,

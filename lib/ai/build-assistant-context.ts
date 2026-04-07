@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
 
 type ContextScope = {
@@ -596,7 +597,7 @@ export async function buildAssistantContext(params: {
     }),
 
     prisma.propertySupply.findMany({
-      where: propertySupplyWhere as any,
+      where: propertySupplyWhere as Prisma.PropertySupplyWhereInput,
       orderBy: [{ updatedAt: "desc" }],
       take: 150,
       include: {
@@ -660,8 +661,8 @@ export async function buildAssistantContext(params: {
 
     prisma.taskChecklistRun.findMany({
       where: {
-        task: tenantWhere,
-      } as any,
+        task: tenantWhere as Prisma.TaskWhereInput,
+      },
       orderBy: [{ updatedAt: "desc" }],
       take: 80,
       select: {
@@ -734,8 +735,8 @@ export async function buildAssistantContext(params: {
 
     prisma.taskSupplyRun.findMany({
       where: {
-        task: tenantWhere,
-      } as any,
+        task: tenantWhere as Prisma.TaskWhereInput,
+      },
       orderBy: [{ updatedAt: "desc" }],
       take: 80,
       select: {
@@ -793,19 +794,19 @@ export async function buildAssistantContext(params: {
     }),
   ])
 
-  const mappedProperties = properties.map((item: any) => ({
+  const mappedProperties = properties.map((item) => ({
     ...item,
     createdAt: formatDate(item.createdAt),
     updatedAt: formatDate(item.updatedAt),
     propertyLink: propertyLink(item.id),
   }))
 
-  const mappedPartners = partners.map((item: any) => ({
+  const mappedPartners = partners.map((item) => ({
     ...item,
     updatedAt: formatDate(item.updatedAt),
   }))
 
-  const mappedBookings = bookings.map((item: any) => ({
+  const mappedBookings = bookings.map((item) => ({
     ...item,
     checkInDate: formatDate(item.checkInDate),
     checkOutDate: formatDate(item.checkOutDate),
@@ -815,14 +816,14 @@ export async function buildAssistantContext(params: {
     updatedAt: formatDate(item.updatedAt),
     bookingLink: bookingLink(item.id),
     propertyLink: propertyLink(item.propertyId),
-    taskLinks: item.tasks.map((task: any) => ({
+    taskLinks: item.tasks.map((task) => ({
       taskId: task.id,
       title: task.title,
       taskLink: taskLink(task.id),
     })),
   }))
 
-  const mappedTasks = tasks.map((item: any) => ({
+  const mappedTasks = tasks.map((item) => ({
     ...item,
     scheduledDate: formatDate(item.scheduledDate),
     dueDate: formatDate(item.dueDate),
@@ -836,7 +837,7 @@ export async function buildAssistantContext(params: {
     latestAssignment: item.assignments?.[0] ?? null,
   }))
 
-  const mappedIssues = issues.map((item: any) => ({
+  const mappedIssues = issues.map((item) => ({
     ...item,
     resolvedAt: formatDate(item.resolvedAt),
     createdAt: formatDate(item.createdAt),
@@ -847,7 +848,7 @@ export async function buildAssistantContext(params: {
     bookingLink: bookingLink(item.bookingId),
   }))
 
-  const mappedPropertySupplies = propertySupplies.map((item: any) => ({
+  const mappedPropertySupplies = propertySupplies.map((item) => ({
     ...item,
     targetLevel: getEffectiveTargetLevel(item),
     minimumThreshold: getEffectiveMinimumThreshold(item),
@@ -861,14 +862,14 @@ export async function buildAssistantContext(params: {
     propertyLink: propertyLink(item.propertyId),
   }))
 
-  const mappedChecklistTemplates = checklistTemplates.map((item: any) => ({
+  const mappedChecklistTemplates = checklistTemplates.map((item) => ({
     ...item,
     createdAt: formatDate(item.createdAt),
     updatedAt: formatDate(item.updatedAt),
     propertyLink: propertyLink(item.propertyId),
   }))
 
-  const mappedChecklistRuns = checklistRuns.map((item: any) => ({
+  const mappedChecklistRuns = checklistRuns.map((item) => ({
     ...item,
     startedAt: formatDate(item.startedAt),
     completedAt: formatDate(item.completedAt),
@@ -879,7 +880,7 @@ export async function buildAssistantContext(params: {
     bookingLink: bookingLink(item.task?.booking?.id),
   }))
 
-  const mappedSupplyRuns = supplyRuns.map((item: any) => ({
+  const mappedSupplyRuns = supplyRuns.map((item) => ({
     ...item,
     startedAt: formatDate(item.startedAt),
     completedAt: formatDate(item.completedAt),
@@ -891,13 +892,13 @@ export async function buildAssistantContext(params: {
   }))
 
   const openTasks = mappedTasks
-    .filter((item: any) => isOpenTaskStatus(item.status))
+    .filter((item) => isOpenTaskStatus(item.status))
     .slice(0, 40)
 
   const activeAlerts = mappedTasks
-    .filter((item: any) => item.alertEnabled)
-    .filter((item: any) => isOpenTaskStatus(item.status))
-    .sort((a: any, b: any) => {
+    .filter((item) => item.alertEnabled)
+    .filter((item) => isOpenTaskStatus(item.status))
+    .sort((a, b) => {
       const da = a.alertAt ? new Date(a.alertAt).getTime() : Number.MAX_SAFE_INTEGER
       const db = b.alertAt ? new Date(b.alertAt).getTime() : Number.MAX_SAFE_INTEGER
       return da - db
@@ -905,52 +906,52 @@ export async function buildAssistantContext(params: {
     .slice(0, 30)
 
   const upcomingBookings = mappedBookings
-    .filter((item: any) => {
+    .filter((item) => {
       const checkIn = item.checkInDate ? new Date(item.checkInDate) : null
       return checkIn && checkIn >= todayStart && checkIn <= next7Days
     })
     .slice(0, 40)
 
   const todayCheckOuts = mappedBookings
-    .filter((item: any) => {
+    .filter((item) => {
       const checkOut = item.checkOutDate ? new Date(item.checkOutDate) : null
       return checkOut && checkOut >= todayStart && checkOut <= todayEnd
     })
     .slice(0, 40)
 
   const bookingsWithoutTask = mappedBookings
-    .filter((item: any) => item.tasks.length === 0)
+    .filter((item) => item.tasks.length === 0)
     .slice(0, 40)
 
   const openIssues = mappedIssues
-    .filter((item: any) => isOpenIssueStatus(item.status))
+    .filter((item) => isOpenIssueStatus(item.status))
     .slice(0, 40)
 
   const lowSupplies = mappedPropertySupplies
-    .filter((item: any) => item.isActive)
-    .filter((item: any) => isLowFillLevel(item.fillLevel))
+    .filter((item) => item.isActive)
+    .filter((item) => isLowFillLevel(item.fillLevel))
     .slice(0, 50)
 
   const submittedChecklistRuns = mappedChecklistRuns
-    .filter((item: any) => isSubmittedStatus(item.status))
+    .filter((item) => isSubmittedStatus(item.status))
     .slice(0, 40)
 
   const pendingChecklistRuns = mappedChecklistRuns
-    .filter((item: any) => isPendingStatus(item.status))
+    .filter((item) => isPendingStatus(item.status))
     .slice(0, 40)
 
   const submittedSupplyRuns = mappedSupplyRuns
-    .filter((item: any) => isSubmittedStatus(item.status))
+    .filter((item) => isSubmittedStatus(item.status))
     .slice(0, 40)
 
   const pendingSupplyRuns = mappedSupplyRuns
-    .filter((item: any) => isPendingStatus(item.status))
+    .filter((item) => isPendingStatus(item.status))
     .slice(0, 40)
 
   const checklistFindings = mappedChecklistRuns
-    .flatMap((run: any) => {
+    .flatMap((run) => {
       return (run.answers || [])
-        .filter((answer: any) => {
+        .filter((answer) => {
           const hasIssue = Boolean(answer.issueCreated)
           const hasNotes = Boolean(answer.notes?.trim())
           const hasSelect = Boolean(answer.valueSelect && lower(answer.valueSelect) !== "ok")
@@ -958,7 +959,7 @@ export async function buildAssistantContext(params: {
           const hasText = Boolean(answer.valueText?.trim())
           return hasIssue || hasNotes || hasSelect || hasBooleanFail || hasText
         })
-        .map((answer: any) => ({
+        .map((answer) => ({
           checklistRunId: run.id,
           checklistRunStatus: run.status,
           taskId: run.task?.id ?? null,
@@ -987,12 +988,12 @@ export async function buildAssistantContext(params: {
     .slice(0, 80)
 
   const supplyFindings = mappedSupplyRuns
-    .flatMap((run: any) => {
+    .flatMap((run) => {
       return (run.answers || [])
-        .filter((answer: any) => {
+        .filter((answer) => {
           return isLowFillLevel(answer.fillLevel) || Boolean(answer.notes?.trim())
         })
-        .map((answer: any) => ({
+        .map((answer) => ({
           supplyRunId: run.id,
           taskId: run.task?.id ?? null,
           taskTitle: run.task?.title ?? null,
@@ -1004,8 +1005,8 @@ export async function buildAssistantContext(params: {
           bookingExternalId: run.task?.booking?.externalBookingId ?? null,
           supplyName: getPreferredSupplyName(answer.propertySupply?.supplyItem),
           supplyNameLegacy: answer.propertySupply?.supplyItem?.name ?? null,
-          supplyNameEl: (answer.propertySupply?.supplyItem as any)?.nameEl ?? null,
-          supplyNameEn: (answer.propertySupply?.supplyItem as any)?.nameEn ?? null,
+          supplyNameEl: answer.propertySupply?.supplyItem?.nameEl ?? null,
+          supplyNameEn: answer.propertySupply?.supplyItem?.nameEn ?? null,
           supplyCode: answer.propertySupply?.supplyItem?.code ?? null,
           fillLevel: answer.fillLevel,
           notes: answer.notes,
@@ -1027,19 +1028,19 @@ export async function buildAssistantContext(params: {
     .slice(0, 80)
 
   const scopedProperty = scope?.propertyId
-    ? mappedProperties.find((item: any) => item.id === scope.propertyId) ?? null
+    ? mappedProperties.find((item) => item.id === scope.propertyId) ?? null
     : null
 
   const scopedTask = scope?.taskId
-    ? mappedTasks.find((item: any) => item.id === scope.taskId) ?? null
+    ? mappedTasks.find((item) => item.id === scope.taskId) ?? null
     : null
 
   const scopedBooking = scope?.bookingId
-    ? mappedBookings.find((item: any) => item.id === scope.bookingId) ?? null
+    ? mappedBookings.find((item) => item.id === scope.bookingId) ?? null
     : null
 
   const taskRiskSignals = openTasks
-    .map((task: any) => {
+    .map((task) => {
       const reasons: string[] = []
 
       if (task.alertEnabled && task.alertAt) {
@@ -1091,7 +1092,7 @@ export async function buildAssistantContext(params: {
     .slice(0, 40)
 
   const bookingRiskSignals = upcomingBookings
-    .map((booking: any) => {
+    .map((booking) => {
       const reasons: string[] = []
 
       if (!booking.propertyId) {
@@ -1127,7 +1128,7 @@ export async function buildAssistantContext(params: {
     .slice(0, 40)
 
   const issueRiskSignals = openIssues
-    .map((issue: any) => ({
+    .map((issue) => ({
       issueId: issue.id,
       issueTitle: issue.title,
       issueType: issue.issueType,

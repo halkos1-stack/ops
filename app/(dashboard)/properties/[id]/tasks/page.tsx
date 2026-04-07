@@ -25,6 +25,7 @@ import {
 } from "@/lib/i18n/normalizers"
 import { getPropertyDetailTexts } from "@/lib/i18n/translations"
 import { getSupplyDisplayName } from "@/lib/supply-presets"
+import { buildCanonicalSupplySnapshot } from "@/lib/supplies/compute-supply-state"
 
 type PartnerOption = {
   id: string
@@ -193,9 +194,14 @@ type PropertyDetail = {
 
   propertySupplies?: Array<{
     id: string
+    fillLevel?: string | null
+    stateMode?: string | null
     currentStock: number
+    mediumThreshold?: number | null
+    fullThreshold?: number | null
     targetStock?: number | null
     reorderThreshold?: number | null
+    minimumThreshold?: number | null
     notes?: string | null
     updatedAt?: string | null
     lastUpdatedAt?: string | null
@@ -369,33 +375,21 @@ function priorityBadgeClasses(priority?: string | null) {
   return "rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700"
 }
 
-function getSupplyStateThree(
-  current: number,
-  target?: number | null,
-  threshold?: number | null
+function getDerivedSupplyState(
+  supply: NonNullable<PropertyDetail["propertySupplies"]>[number]
 ): "missing" | "medium" | "full" {
-  if (current <= 0) return "missing"
-
-  const safeTarget =
-    typeof target === "number" && Number.isFinite(target) ? target : null
-  const safeThreshold =
-    typeof threshold === "number" && Number.isFinite(threshold)
-      ? threshold
-      : null
-
-  if (safeTarget !== null && safeTarget > 0 && current >= safeTarget) {
-    return "full"
-  }
-
-  if (safeThreshold !== null && current <= safeThreshold) {
-    return "medium"
-  }
-
-  if (safeTarget !== null && safeTarget > 0 && current < safeTarget) {
-    return "medium"
-  }
-
-  return "full"
+  return buildCanonicalSupplySnapshot({
+    isActive: true,
+    stateMode: supply.stateMode,
+    fillLevel: supply.fillLevel,
+    currentStock: supply.currentStock,
+    mediumThreshold: supply.mediumThreshold,
+    fullThreshold: supply.fullThreshold,
+    minimumThreshold: supply.minimumThreshold,
+    reorderThreshold: supply.reorderThreshold,
+    targetStock: supply.targetStock,
+    supplyMinimumStock: supply.supplyItem?.minimumStock,
+  }).derivedState
 }
 
 function supplyStateBadgeClass(state: "missing" | "medium" | "full") {
@@ -583,11 +577,7 @@ function getReadinessState(
   const hasPrimaryCleaningChecklist = Boolean(getPrimaryCleaningChecklist(property))
 
   const notFullSupplies = safeArray(property.propertySupplies).filter((supply) => {
-    const current = Number(supply.currentStock || 0)
-    const target = supply.targetStock ?? null
-    const threshold =
-      supply.reorderThreshold ?? supply.supplyItem?.minimumStock ?? null
-    return getSupplyStateThree(current, target, threshold) !== "full"
+    return getDerivedSupplyState(supply) !== "full"
   })
 
   if (criticalIssues.length > 0) {
@@ -690,19 +680,11 @@ function buildPropertyStateBlock(
   })
 
   const missingSupplies = supplies.filter((supply) => {
-    const current = Number(supply.currentStock || 0)
-    const target = supply.targetStock ?? null
-    const threshold =
-      supply.reorderThreshold ?? supply.supplyItem?.minimumStock ?? null
-    return getSupplyStateThree(current, target, threshold) === "missing"
+    return getDerivedSupplyState(supply) === "missing"
   })
 
   const mediumSupplies = supplies.filter((supply) => {
-    const current = Number(supply.currentStock || 0)
-    const target = supply.targetStock ?? null
-    const threshold =
-      supply.reorderThreshold ?? supply.supplyItem?.minimumStock ?? null
-    return getSupplyStateThree(current, target, threshold) === "medium"
+    return getDerivedSupplyState(supply) === "medium"
   })
 
   if (normalizePropertyStatus(property.status) === "INACTIVE") {
@@ -1130,11 +1112,7 @@ export default function PropertyTasksPage() {
 
   const supplyRows = useMemo(() => {
     return safeArray(property?.propertySupplies).map((supply) => {
-      const current = Number(supply.currentStock || 0)
-      const target = supply.targetStock ?? null
-      const threshold =
-        supply.reorderThreshold ?? supply.supplyItem?.minimumStock ?? null
-      const derivedState = getSupplyStateThree(current, target, threshold)
+      const derivedState = getDerivedSupplyState(supply)
 
       return {
         ...supply,

@@ -5,6 +5,10 @@ import { useEffect, useMemo, useState } from "react"
 import { useParams } from "next/navigation"
 import { useAppLanguage } from "@/components/i18n/LanguageProvider"
 import { resolveSupplyDisplayName } from "@/lib/supply-display"
+import {
+  buildCanonicalSupplySnapshot,
+  buildCanonicalSupplyWriteData,
+} from "@/lib/supplies/compute-supply-state"
 
 type Language = "el" | "en"
 type SupplyFilter = "all" | "missing" | "medium" | "full"
@@ -26,7 +30,11 @@ type PropertySupply = {
   id: string
   propertyId: string
   supplyItemId: string
+  fillLevel?: string | null
+  stateMode?: string | null
   currentStock: number
+  mediumThreshold?: number | null
+  fullThreshold?: number | null
   targetStock?: number | null
   reorderThreshold?: number | null
   targetLevel?: number | null
@@ -203,33 +211,19 @@ function getSupplyDisplayName(
 }
 
 function getSupplyState(row: PropertySupply): SupplyState {
-  const current = Number(row.currentStock || 0)
-  const rawTarget = row.targetLevel ?? row.targetStock
-  const target =
-    typeof rawTarget === "number" && Number.isFinite(rawTarget)
-      ? rawTarget
-      : null
-  const rawThreshold = row.minimumThreshold ?? row.reorderThreshold
-  const threshold =
-    typeof rawThreshold === "number" && Number.isFinite(rawThreshold)
-      ? rawThreshold
-      : row.supplyItem?.minimumStock ?? null
-
-  if (current <= 0) return "missing"
-
-  if (target !== null && target > 0 && current >= target) {
-    return "full"
-  }
-
-  if (threshold !== null && current <= threshold) {
-    return "medium"
-  }
-
-  if (target !== null && target > 0 && current < target) {
-    return "medium"
-  }
-
-  return "full"
+  return buildCanonicalSupplySnapshot({
+    isActive: true,
+    stateMode: row.stateMode,
+    fillLevel: row.fillLevel,
+    currentStock: row.currentStock,
+    mediumThreshold: row.mediumThreshold,
+    fullThreshold: row.fullThreshold,
+    minimumThreshold: row.minimumThreshold,
+    reorderThreshold: row.reorderThreshold,
+    targetLevel: row.targetLevel,
+    targetStock: row.targetStock,
+    supplyMinimumStock: row.supplyItem?.minimumStock,
+  }).derivedState
 }
 
 function getSupplyStateLabel(language: Language, state: SupplyState) {
@@ -257,42 +251,29 @@ function supplyStateBadgeClass(state: SupplyState) {
 }
 
 function computeStockForState(row: PropertySupply, state: SupplyState) {
-  const current =
-    typeof row.currentStock === "number" && Number.isFinite(row.currentStock)
-      ? row.currentStock
-      : 0
-
-  const rawTarget = row.targetLevel ?? row.targetStock
-  const target =
-    typeof rawTarget === "number" && Number.isFinite(rawTarget)
-      ? rawTarget
-      : null
-
-  const rawThreshold = row.minimumThreshold ?? row.reorderThreshold
-  const threshold =
-    typeof rawThreshold === "number" && Number.isFinite(rawThreshold)
-      ? rawThreshold
-      : row.supplyItem?.minimumStock ?? null
-
-  const minimum =
-    typeof row.supplyItem?.minimumStock === "number" &&
-    Number.isFinite(row.supplyItem.minimumStock)
-      ? row.supplyItem.minimumStock
-      : 0
-
-  if (state === "missing") return 0
-
-  if (state === "medium") {
-    if (threshold !== null && threshold > 0) return threshold
-    if (target !== null && target > 1) return Math.max(1, Math.ceil(target / 2))
-    if (minimum > 0) return minimum
-    return Math.max(1, current || 1)
-  }
-
-  if (target !== null && target > 0) return target
-  if (threshold !== null && threshold > 0) return Math.max(threshold + 1, 2)
-  if (minimum > 0) return Math.max(minimum + 1, 2)
-  return Math.max(current, 3)
+  return buildCanonicalSupplyWriteData(
+    row.stateMode === "numeric_thresholds"
+      ? {
+          stateMode: "numeric_thresholds",
+          currentStock:
+            state === "missing"
+              ? 0
+              : state === "medium"
+                ? row.mediumThreshold ?? 1
+                : row.fullThreshold ??
+                  Math.max((row.mediumThreshold ?? 1) + 1, 2),
+          mediumThreshold: row.mediumThreshold ?? row.minimumThreshold ?? 1,
+          fullThreshold:
+            row.fullThreshold ??
+            row.targetLevel ??
+            row.targetStock ??
+            Math.max((row.mediumThreshold ?? row.minimumThreshold ?? 1) + 1, 2),
+        }
+      : {
+          stateMode: "direct_state",
+          fillLevel: state,
+        }
+  ).currentStock
 }
 
 function CounterButton({
@@ -596,7 +577,21 @@ export default function PropertySuppliesPage() {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            currentStock: nextStock,
+            stateMode: editingRow.stateMode || "direct_state",
+            ...(editingRow.stateMode === "numeric_thresholds"
+              ? {
+                  currentStock: nextStock,
+                  mediumThreshold:
+                    editingRow.mediumThreshold ?? editingRow.minimumThreshold ?? 1,
+                  fullThreshold:
+                    editingRow.fullThreshold ??
+                    editingRow.targetLevel ??
+                    editingRow.targetStock ??
+                    2,
+                }
+              : {
+                  fillLevel: selectedState,
+                }),
           }),
         }
       )

@@ -73,10 +73,13 @@ function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ")
 }
 
-function parseOptions(optionsText?: string | null) {
-  if (!optionsText) return [""]
+function parseOptions(optionsText?: unknown) {
+  const normalized =
+    optionsText === null || optionsText === undefined ? "" : String(optionsText)
 
-  const parsed = optionsText
+  if (!normalized) return [""]
+
+  const parsed = normalized
     .split(/\r?\n|,/)
     .map((value) => String(value).trim())
     .filter(Boolean)
@@ -91,7 +94,22 @@ function joinOptions(options: string[]) {
     .join("\n")
 }
 
-function normalizeItem(raw: any, index: number): ItemDraft {
+function getTemplateApiError(data: TemplateResponse | { error?: string }) {
+  if ("error" in data && typeof data.error === "string") {
+    return data.error
+  }
+
+  return null
+}
+
+function isTemplateResponse(data: TemplateResponse | { error?: string }): data is TemplateResponse {
+  return "items" in data
+}
+
+function normalizeItem(
+  raw: Record<string, unknown> | null | undefined,
+  index: number
+): ItemDraft {
   return {
     id: raw?.id ? String(raw.id) : undefined,
     label: String(raw?.label ?? ""),
@@ -351,29 +369,31 @@ export default function PropertyChecklistTemplateDetailPage({
         }
       )
 
-      const data: TemplateResponse | any = await response.json()
+      const data = (await response.json()) as TemplateResponse | { error?: string }
 
       if (!response.ok) {
-        throw new Error(
-          typeof data?.error === "string" ? data.error : t.loadError
-        )
+        throw new Error(getTemplateApiError(data) ?? t.loadError)
       }
 
-      const normalizedItems = Array.isArray(data?.items)
-        ? data.items.map((item: any, index: number) => normalizeItem(item, index))
+      const payload = isTemplateResponse(data) ? data : null
+
+      const normalizedItems = Array.isArray(payload?.items)
+        ? payload.items.map((item, index: number) =>
+            normalizeItem((item as Record<string, unknown> | null | undefined) ?? null, index)
+          )
         : []
 
-      setProperty(data?.property ?? null)
-      setTemplateTitle(String(data?.title ?? ""))
+      setProperty(payload?.property ?? null)
+      setTemplateTitle(String(payload?.title ?? ""))
       setTemplateDescription(
-        data?.description === null || data?.description === undefined
+        payload?.description === null || payload?.description === undefined
           ? ""
-          : String(data.description)
+          : String(payload.description)
       )
-      setIsPrimary(Boolean(data?.isPrimary ?? false))
-      setIsActive(Boolean(data?.isActive ?? true))
+      setIsPrimary(Boolean(payload?.isPrimary ?? false))
+      setIsActive(Boolean(payload?.isActive ?? true))
       setItems(normalizedItems)
-      setActiveSupplies(Array.isArray(data?.activeSupplies) ? data.activeSupplies : [])
+      setActiveSupplies(Array.isArray(payload?.activeSupplies) ? payload.activeSupplies : [])
     } catch (err) {
       setError(err instanceof Error ? err.message : t.loadError)
     } finally {

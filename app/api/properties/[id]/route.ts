@@ -10,6 +10,7 @@ import {
   getReadinessStatusLabel,
   type ReadinessConditionInput,
 } from "@/lib/readiness/compute-property-readiness";
+import { buildCanonicalSupplySnapshot } from "@/lib/supplies/compute-supply-state";
 import {
   buildPropertyConditionSnapshot,
   type RawPropertyConditionRecord,
@@ -35,6 +36,123 @@ type ExtendedRawPropertyConditionRecord = RawPropertyConditionRecord & {
   sourceAnswerId?: string | null;
   firstDetectedAt?: Date | string | null;
   lastDetectedAt?: Date | string | null;
+};
+
+type LooseRecord = Record<string, unknown>;
+
+type SortableRunItem = {
+  id?: string | null;
+  sortOrder?: number | null;
+  label?: string | null;
+  labelEn?: string | null;
+};
+
+type ChecklistRunAnswerRecord = {
+  runItem?: SortableRunItem | null;
+  templateItem?: SortableRunItem | null;
+};
+
+type SupplyRunAnswerRecord = {
+  runItem?: SortableRunItem | null;
+  propertySupply?: {
+    supplyItem?: {
+      name?: string | null;
+      nameEl?: string | null;
+      nameEn?: string | null;
+    } | null;
+  } | null;
+};
+
+type IssueRunAnswerRecord = {
+  runItem?: SortableRunItem | null;
+  templateItem?: SortableRunItem | null;
+  createdAt?: Date | string | null;
+};
+
+type ChecklistRunRecord = LooseRecord & {
+  status?: string | null;
+  answers?: ChecklistRunAnswerRecord[] | null;
+  items?: SortableRunItem[] | null;
+};
+
+type SupplyRunRecord = LooseRecord & {
+  status?: string | null;
+  answers?: SupplyRunAnswerRecord[] | null;
+  items?: SortableRunItem[] | null;
+};
+
+type IssueRunRecord = LooseRecord & {
+  status?: string | null;
+  answers?: IssueRunAnswerRecord[] | null;
+  items?: SortableRunItem[] | null;
+  template?: {
+    items?: SortableRunItem[] | null;
+  } | null;
+};
+
+type PropertyTaskRecord = LooseRecord & {
+  id?: string | null;
+  source?: string | null;
+  bookingId?: string | null;
+  booking?: {
+    id?: string | null;
+  } | null;
+  status?: string | null;
+  sendCleaningChecklist?: boolean | null;
+  sendSuppliesChecklist?: boolean | null;
+  sendIssuesChecklist?: boolean | null;
+  checklistRun?: ChecklistRunRecord | null;
+  supplyRun?: SupplyRunRecord | null;
+  issueRun?: IssueRunRecord | null;
+};
+
+type PropertyIssueRecord = LooseRecord & {
+  status?: string | null;
+  severity?: string | null;
+  affectsHosting?: boolean | null;
+  requiresImmediateAction?: boolean | null;
+};
+
+type PropertyBookingRecord = LooseRecord & {
+  status?: string | null;
+  checkInDate?: Date | string | null;
+  checkOutDate?: Date | string | null;
+  tasks?: Array<{ id: string }> | null;
+};
+
+type PropertyConditionDbRecord = {
+  id: string;
+  propertyId: string;
+  taskId?: string | null;
+  bookingId?: string | null;
+  propertySupplyId?: string | null;
+  mergeKey?: string | null;
+  title: string;
+  description?: string | null;
+  sourceType?: string | null;
+  sourceLabel?: string | null;
+  sourceItemId?: string | null;
+  sourceItemLabel?: string | null;
+  sourceRunId?: string | null;
+  sourceAnswerId?: string | null;
+  conditionType: unknown;
+  status: unknown;
+  blockingStatus: unknown;
+  severity: unknown;
+  managerDecision?: unknown;
+  managerNotes?: string | null;
+  firstDetectedAt?: Date | string | null;
+  lastDetectedAt?: Date | string | null;
+  createdAt?: Date | string | null;
+  updatedAt?: Date | string | null;
+  resolvedAt?: Date | string | null;
+  dismissedAt?: Date | string | null;
+};
+
+type PropertyReadinessSource = {
+  bookings?: PropertyBookingRecord[] | null;
+  conditions?: PropertyConditionDbRecord[] | null;
+  nextCheckInAt?: Date | string | null;
 };
 
 function safeArray<T>(value: T[] | null | undefined): T[] {
@@ -102,8 +220,12 @@ function isActiveBookingStatus(status: unknown): boolean {
   return text !== "cancelled";
 }
 
-function isBookingPendingTaskCreation(booking: any, now = new Date()): boolean {
+function isBookingPendingTaskCreation(
+  booking: PropertyBookingRecord,
+  now = new Date()
+): boolean {
   if (!booking || !isActiveBookingStatus(booking.status)) return false;
+  if (!booking.checkOutDate) return false;
 
   const checkOutDate = new Date(booking.checkOutDate);
   if (Number.isNaN(checkOutDate.getTime())) return false;
@@ -120,42 +242,12 @@ function isChecklistSubmitted(status: unknown): boolean {
   return ["submitted", "completed"].includes(text);
 }
 
-function getSupplyStateThree(
-  current: number,
-  target?: number | null,
-  threshold?: number | null
-): "missing" | "medium" | "full" {
-  if (current <= 0) return "missing";
-
-  const safeTarget =
-    typeof target === "number" && Number.isFinite(target) ? target : null;
-
-  const safeThreshold =
-    typeof threshold === "number" && Number.isFinite(threshold)
-      ? threshold
-      : null;
-
-  if (safeTarget !== null && safeTarget > 0 && current >= safeTarget) {
-    return "full";
-  }
-
-  if (safeThreshold !== null && current <= safeThreshold) {
-    return "medium";
-  }
-
-  if (safeTarget !== null && safeTarget > 0 && current < safeTarget) {
-    return "medium";
-  }
-
-  return "full";
-}
-
-function normalizeChecklistRun(run: any) {
+function normalizeChecklistRun(run: ChecklistRunRecord | null | undefined) {
   if (!run) return null;
 
   return {
     ...run,
-    answers: safeArray(run.answers).sort((a: any, b: any) => {
+    answers: safeArray(run.answers).sort((a, b) => {
       const aOrder = Number(
         a?.runItem?.sortOrder ?? a?.templateItem?.sortOrder ?? 0
       );
@@ -164,7 +256,7 @@ function normalizeChecklistRun(run: any) {
       );
       return aOrder - bOrder;
     }),
-    items: safeArray(run.items).sort((a: any, b: any) => {
+    items: safeArray(run.items).sort((a, b) => {
       const aOrder = Number(a?.sortOrder ?? 0);
       const bOrder = Number(b?.sortOrder ?? 0);
       return aOrder - bOrder;
@@ -172,12 +264,12 @@ function normalizeChecklistRun(run: any) {
   };
 }
 
-function normalizeSupplyRun(run: any) {
+function normalizeSupplyRun(run: SupplyRunRecord | null | undefined) {
   if (!run) return null;
 
   return {
     ...run,
-    answers: safeArray(run.answers).sort((a: any, b: any) => {
+    answers: safeArray(run.answers).sort((a, b) => {
       const aName = String(
         a?.runItem?.labelEn ||
           a?.runItem?.label ||
@@ -198,7 +290,7 @@ function normalizeSupplyRun(run: any) {
 
       return aName.localeCompare(bName);
     }),
-    items: safeArray(run.items).sort((a: any, b: any) => {
+    items: safeArray(run.items).sort((a, b) => {
       const aOrder = Number(a?.sortOrder ?? 0);
       const bOrder = Number(b?.sortOrder ?? 0);
       return aOrder - bOrder;
@@ -206,7 +298,7 @@ function normalizeSupplyRun(run: any) {
   };
 }
 
-function normalizeIssueRun(run: any) {
+function normalizeIssueRun(run: IssueRunRecord | null | undefined) {
   if (!run) return null;
 
   return {
@@ -214,19 +306,19 @@ function normalizeIssueRun(run: any) {
     template: run.template
       ? {
           ...run.template,
-          items: safeArray(run.template.items).sort((a: any, b: any) => {
+          items: safeArray(run.template.items).sort((a, b) => {
             const aOrder = Number(a?.sortOrder ?? 0);
             const bOrder = Number(b?.sortOrder ?? 0);
             return aOrder - bOrder;
           }),
         }
       : null,
-    items: safeArray(run.items).sort((a: any, b: any) => {
+    items: safeArray(run.items).sort((a, b) => {
       const aOrder = Number(a?.sortOrder ?? 0);
       const bOrder = Number(b?.sortOrder ?? 0);
       return aOrder - bOrder;
     }),
-    answers: safeArray(run.answers).sort((a: any, b: any) => {
+    answers: safeArray(run.answers).sort((a, b) => {
       const aOrder = Number(
         a?.runItem?.sortOrder ?? a?.templateItem?.sortOrder ?? 0
       );
@@ -244,7 +336,7 @@ function normalizeIssueRun(run: any) {
   };
 }
 
-function mapTaskForPropertyPage(task: any) {
+function mapTaskForPropertyPage(task: PropertyTaskRecord) {
   const checklistRun = normalizeChecklistRun(task.checklistRun);
   const supplyRun = normalizeSupplyRun(task.supplyRun);
   const issueRun = normalizeIssueRun(task.issueRun);
@@ -260,7 +352,7 @@ function mapTaskForPropertyPage(task: any) {
   };
 }
 
-function mapIssueForPropertyPage(issue: any) {
+function mapIssueForPropertyPage(issue: PropertyIssueRecord) {
   return {
     ...issue,
     affectsHosting: Boolean(issue?.affectsHosting ?? false),
@@ -363,12 +455,12 @@ function mapDbConditionToRawRecord(condition: {
   severity: string;
   managerDecision: string | null;
   managerNotes: string | null;
-  firstDetectedAt: Date;
-  lastDetectedAt: Date;
-  createdAt: Date;
-  updatedAt: Date;
-  resolvedAt: Date | null;
-  dismissedAt: Date | null;
+  firstDetectedAt: Date | string | null;
+  lastDetectedAt: Date | string | null;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+  resolvedAt: Date | string | null;
+  dismissedAt: Date | string | null;
 }): ExtendedRawPropertyConditionRecord {
   return {
     id: condition.id,
@@ -445,24 +537,25 @@ function mapRawConditionToReadinessInput(
   };
 }
 
-function buildPropertyReadinessFromConditions(property: any) {
+function buildPropertyReadinessFromConditions(property: PropertyReadinessSource) {
   const now = new Date();
 
-  const bookings: any[] = safeArray(property.bookings);
+  const bookings = safeArray(property.bookings);
   const nextBooking =
     bookings
-      .filter((booking: any) => {
+      .filter((booking) => {
+        if (!booking.checkInDate) return false
         const checkInDate = new Date(booking.checkInDate);
         return !Number.isNaN(checkInDate.getTime()) && checkInDate >= now;
       })
       .sort(
-        (a: any, b: any) =>
-          new Date(a.checkInDate).getTime() - new Date(b.checkInDate).getTime()
+        (a, b) =>
+          new Date(a.checkInDate ?? 0).getTime() - new Date(b.checkInDate ?? 0).getTime()
       )[0] || null;
 
   const rawConditions: ExtendedRawPropertyConditionRecord[] = safeArray(
     property.conditions
-  ).map((condition: any) =>
+  ).map((condition) =>
     mapDbConditionToRawRecord({
       id: condition.id,
       propertyId: condition.propertyId,
@@ -471,13 +564,13 @@ function buildPropertyReadinessFromConditions(property: any) {
       propertySupplyId: condition.propertySupplyId ?? null,
       mergeKey: condition.mergeKey ?? null,
       title: condition.title,
-      description: condition.description,
-      sourceType: condition.sourceType,
-      sourceLabel: condition.sourceLabel,
-      sourceItemId: condition.sourceItemId,
-      sourceItemLabel: condition.sourceItemLabel,
-      sourceRunId: condition.sourceRunId,
-      sourceAnswerId: condition.sourceAnswerId,
+      description: condition.description ?? null,
+      sourceType: condition.sourceType ?? "",
+      sourceLabel: condition.sourceLabel ?? null,
+      sourceItemId: condition.sourceItemId ?? null,
+      sourceItemLabel: condition.sourceItemLabel ?? null,
+      sourceRunId: condition.sourceRunId ?? null,
+      sourceAnswerId: condition.sourceAnswerId ?? null,
       conditionType: String(condition.conditionType).toLowerCase(),
       status: String(condition.status).toLowerCase(),
       blockingStatus: String(condition.blockingStatus).toLowerCase(),
@@ -485,13 +578,13 @@ function buildPropertyReadinessFromConditions(property: any) {
       managerDecision: condition.managerDecision
         ? String(condition.managerDecision).toLowerCase()
         : null,
-      managerNotes: condition.managerNotes,
-      firstDetectedAt: condition.firstDetectedAt,
-      lastDetectedAt: condition.lastDetectedAt,
-      createdAt: condition.createdAt,
-      updatedAt: condition.updatedAt,
-      resolvedAt: condition.resolvedAt,
-      dismissedAt: condition.dismissedAt,
+      managerNotes: condition.managerNotes ?? null,
+      firstDetectedAt: condition.firstDetectedAt ?? null,
+      lastDetectedAt: condition.lastDetectedAt ?? null,
+      createdAt: condition.createdAt ?? new Date(0),
+      updatedAt: condition.updatedAt ?? new Date(0),
+      resolvedAt: condition.resolvedAt ?? null,
+      dismissedAt: condition.dismissedAt ?? null,
     })
   );
 
@@ -546,7 +639,7 @@ async function getPropertyBase(id: string) {
 }
 
 async function getFullProperty(id: string) {
-  const property = await (prisma.property.findUnique as any)({
+  const property = await prisma.property.findUnique({
     where: { id },
     select: {
       id: true,
@@ -1074,6 +1167,9 @@ async function getFullProperty(id: string) {
         select: {
           id: true,
           currentStock: true,
+          stateMode: true,
+          mediumThreshold: true,
+          fullThreshold: true,
           targetStock: true,
           reorderThreshold: true,
           minimumThreshold: true,
@@ -1106,74 +1202,74 @@ async function getFullProperty(id: string) {
 
   if (!property) return null;
 
-  const allNormalizedTasks = safeArray((property as any).tasks).map((task: any) =>
+  const allNormalizedTasks = safeArray(property.tasks).map((task) =>
     mapTaskForPropertyPage(task)
   );
   const normalizedTasks = filterCanonicalOperationalTasks(allNormalizedTasks);
   const invalidOperationalTasks = allNormalizedTasks.filter(
-    (task: any) => getOperationalTaskValidity(task).isCanonicalOperational !== true
+    (task) => getOperationalTaskValidity(task).isCanonicalOperational !== true
   );
 
-  const normalizedIssues = safeArray((property as any).issues).map((issue: any) =>
+  const normalizedIssues = safeArray(property.issues).map((issue) =>
     mapIssueForPropertyPage(issue)
   );
 
-  const normalizedSupplies = safeArray((property as any).propertySupplies)
-    .filter((supply: any) => Boolean(supply?.isActive))
-    .map((supply: any) => {
-      const currentStock = Number(supply.currentStock || 0);
-      const targetStock =
-        typeof supply.targetStock === "number" ? supply.targetStock : null;
-
-      const threshold =
-        typeof supply.minimumThreshold === "number"
-          ? supply.minimumThreshold
-          : typeof supply.reorderThreshold === "number"
-            ? supply.reorderThreshold
-            : typeof supply.supplyItem?.minimumStock === "number"
-              ? supply.supplyItem.minimumStock
-              : null;
-
-      const rawFillLevel = String(supply.fillLevel || "").trim().toLowerCase();
-
-      const derivedState =
-        rawFillLevel === "missing" ||
-        rawFillLevel === "medium" ||
-        rawFillLevel === "full" ||
-        rawFillLevel === "low" ||
-        rawFillLevel === "empty"
-          ? rawFillLevel
-          : getSupplyStateThree(currentStock, targetStock, threshold);
+  const normalizedSupplies = safeArray(property.propertySupplies)
+    .filter((supply) => Boolean(supply?.isActive))
+    .map((supply) => {
+      const canonical = buildCanonicalSupplySnapshot({
+        isActive: supply.isActive,
+        stateMode: supply.stateMode,
+        fillLevel: supply.fillLevel,
+        currentStock: supply.currentStock,
+        mediumThreshold: supply.mediumThreshold,
+        fullThreshold: supply.fullThreshold,
+        minimumThreshold: supply.minimumThreshold,
+        reorderThreshold: supply.reorderThreshold,
+        warningThreshold: supply.warningThreshold,
+        targetLevel: supply.targetLevel,
+        targetStock: supply.targetStock,
+        trackingMode: supply.trackingMode,
+        supplyMinimumStock: supply.supplyItem?.minimumStock,
+      });
 
       return {
         ...supply,
-        currentStock,
-        threshold,
-        derivedState,
+        currentStock: canonical.currentStock ?? Number(supply.currentStock || 0),
+        stateMode: canonical.stateMode,
+        mediumThreshold: canonical.mediumThreshold,
+        fullThreshold: canonical.fullThreshold,
+        threshold:
+          canonical.mediumThreshold ??
+          supply.minimumThreshold ??
+          supply.reorderThreshold ??
+          supply.supplyItem?.minimumStock ??
+          null,
+        derivedState: canonical.derivedState,
       };
     });
 
-  const openTasks = normalizedTasks.filter((task: any) =>
+  const openTasks = normalizedTasks.filter((task) =>
     isOpenTaskStatus(task.status)
   );
 
-  const openIssues = normalizedIssues.filter((issue: any) =>
+  const openIssues = normalizedIssues.filter((issue) =>
     isIssueOpen(issue.status)
   );
 
   const pendingCleaningTasks = openTasks.filter(
-    (task: any) => task.sendCleaningChecklist === true
+    (task) => task.sendCleaningChecklist === true
   );
 
   const pendingSuppliesTasks = openTasks.filter(
-    (task: any) => task.sendSuppliesChecklist === true
+    (task) => task.sendSuppliesChecklist === true
   );
 
   const pendingIssuesTasks = openTasks.filter(
-    (task: any) => task.sendIssuesChecklist === true
+    (task) => task.sendIssuesChecklist === true
   );
 
-  const pendingProofTasks = openTasks.filter((task: any) => {
+  const pendingProofTasks = openTasks.filter((task) => {
     const cleaningPending =
       task.sendCleaningChecklist === true &&
       !isChecklistSubmitted(task.cleaningChecklistRun?.status);
@@ -1189,29 +1285,25 @@ async function getFullProperty(id: string) {
     return cleaningPending || suppliesPending || issuesPending;
   });
 
-  const missingCriticalSupplies = normalizedSupplies.filter((supply: any) => {
+  const missingCriticalSupplies = normalizedSupplies.filter((supply) => {
     if (!supply.isCritical) return false;
     return ["missing", "empty", "low"].includes(String(supply.derivedState));
   });
 
-  const mediumSupplies = normalizedSupplies.filter((supply: any) => {
+  const mediumSupplies = normalizedSupplies.filter((supply) => {
     return ["medium", "low"].includes(String(supply.derivedState));
   });
 
   const readinessComputed = buildPropertyReadinessFromConditions({
-    ...property,
-    tasks: normalizedTasks,
-    issues: normalizedIssues,
-    propertySupplies: normalizedSupplies,
+    bookings: property.bookings,
+    conditions: property.conditions,
+    nextCheckInAt: property.nextCheckInAt,
   });
 
-  const normalizedChecklistTemplates = safeArray(
-    (property as any).checklistTemplates
-  );
+  const normalizedChecklistTemplates = safeArray(property.checklistTemplates);
 
-  const normalizedIssueTemplates = safeArray((property as any).issueTemplates);
-  const normalizedBookings = safeArray((property as any).bookings).map(
-    (booking: any) => {
+  const normalizedIssueTemplates = safeArray(property.issueTemplates);
+  const normalizedBookings = safeArray(property.bookings).map((booking) => {
       const linkedTasks = safeArray(booking.tasks);
 
       return {
@@ -1220,14 +1312,13 @@ async function getFullProperty(id: string) {
         taskCount: linkedTasks.length,
         hasTask: linkedTasks.length > 0,
       };
-    }
-  );
-  const bookingsWithoutTask = normalizedBookings.filter((booking: any) =>
+    });
+  const bookingsWithoutTask = normalizedBookings.filter((booking) =>
     isBookingPendingTaskCreation(booking)
-  ).filter((booking: any) => booking.hasTask !== true);
+  ).filter((booking) => booking.hasTask !== true);
 
   const cleaningTemplate =
-    normalizedChecklistTemplates.find((template: any) => {
+    normalizedChecklistTemplates.find((template) => {
       const templateType = String(template?.templateType || "")
         .trim()
         .toLowerCase();
@@ -1236,12 +1327,12 @@ async function getFullProperty(id: string) {
     }) || null;
 
   const issuesTemplate =
-    normalizedIssueTemplates.find((template: any) => {
+    normalizedIssueTemplates.find((template) => {
       return template?.isPrimary === true;
     }) || null;
 
   return {
-    ...(property as any),
+    ...property,
     bookings: normalizedBookings,
     bookingsWithoutTask,
     bookingsWithoutTaskCount: bookingsWithoutTask.length,
@@ -1282,7 +1373,7 @@ async function getFullProperty(id: string) {
         pendingProofTasks: pendingProofTasks.length,
         bookingsWithoutTask: bookingsWithoutTask.length,
         openIssues: openIssues.length,
-        criticalIssues: openIssues.filter((issue: any) =>
+        criticalIssues: openIssues.filter((issue) =>
           ["high", "urgent", "critical"].includes(
             String(issue.severity || "").trim().toLowerCase()
           )
@@ -1300,15 +1391,15 @@ async function getFullProperty(id: string) {
       },
     },
     storedReadinessSummary: {
-      readinessStatus: (property as any).readinessStatus
-        ? String((property as any).readinessStatus).toLowerCase()
+      readinessStatus: property.readinessStatus
+        ? String(property.readinessStatus).toLowerCase()
         : null,
-      readinessUpdatedAt: (property as any).readinessUpdatedAt,
-      readinessReasonsText: (property as any).readinessReasonsText,
-      openConditionCount: (property as any).openConditionCount,
-      openBlockingConditionCount: (property as any).openBlockingConditionCount,
-      openWarningConditionCount: (property as any).openWarningConditionCount,
-      nextCheckInAt: (property as any).nextCheckInAt,
+      readinessUpdatedAt: property.readinessUpdatedAt,
+      readinessReasonsText: property.readinessReasonsText,
+      openConditionCount: property.openConditionCount,
+      openBlockingConditionCount: property.openBlockingConditionCount,
+      openWarningConditionCount: property.openWarningConditionCount,
+      nextCheckInAt: property.nextCheckInAt,
     },
   };
 }

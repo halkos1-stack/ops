@@ -71,6 +71,11 @@ enum PropertyConditionManagerDecision {
   DISMISSED            @map("dismissed")
 }
 
+enum PropertySupplyStateMode {
+  DIRECT_STATE       @map("direct_state")
+  NUMERIC_THRESHOLDS @map("numeric_thresholds")
+}
+
 model User {
   id            String     @id @default(cuid())
   name          String?
@@ -549,7 +554,10 @@ model PropertySupply {
   supplyItemId     String
   isActive         Boolean  @default(true)
   fillLevel        String   @default("full")
+  stateMode        PropertySupplyStateMode @default(DIRECT_STATE)
   currentStock     Float    @default(0)
+  mediumThreshold  Float?
+  fullThreshold    Float?
   targetStock      Float?
   reorderThreshold Float?
   targetLevel      Float?
@@ -574,6 +582,7 @@ model PropertySupply {
   @@index([supplyItemId])
   @@index([isActive])
   @@index([fillLevel])
+  @@index([stateMode])
   @@index([trackingMode])
   @@index([isCritical])
 }
@@ -919,7 +928,10 @@ model TaskSupplyRunItem {
   category         String?
   unit             String?
   fillLevel        String?
+  stateMode        PropertySupplyStateMode @default(DIRECT_STATE)
   currentStock     Float?
+  mediumThreshold  Float?
+  fullThreshold    Float?
   targetStock      Float?
   reorderThreshold Float?
   targetLevel      Float?

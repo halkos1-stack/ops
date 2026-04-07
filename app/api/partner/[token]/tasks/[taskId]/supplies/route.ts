@@ -1,8 +1,16 @@
 import { NextRequest, NextResponse } from "next/server"
+import { Prisma, PropertySupplyStateMode } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
-import { Prisma } from "@prisma/client"
-import { mergePropertyCondition } from "@/lib/checklists/merge-property-conditions"
+import {
+  mergePropertyCondition,
+  resolveMergedPropertyConditionsNotSeenInRun,
+} from "@/lib/checklists/merge-property-conditions"
 import { refreshPropertyReadiness } from "@/lib/readiness/refresh-property-readiness"
+import {
+  buildCanonicalSupplyWriteData,
+  computeSupplyState,
+} from "@/lib/supplies/compute-supply-state"
+import { normalizeSupplyState } from "@/lib/supplies/supply-mode-rules"
 
 type RouteContext = {
   params: Promise<{
@@ -11,12 +19,19 @@ type RouteContext = {
   }>
 }
 
-type SupplyFillLevel = "low" | "medium" | "full"
-
 type IncomingSupplyAnswer = {
   propertySupplyId: string
-  fillLevel?: SupplyFillLevel | null
+  fillLevel?: "missing" | "medium" | "full" | null
+  quantityValue?: number | null
   notes?: string | null
+}
+
+function toPrismaSupplyStateMode(
+  mode: "direct_state" | "numeric_thresholds"
+): PropertySupplyStateMode {
+  return mode === "numeric_thresholds"
+    ? PropertySupplyStateMode.NUMERIC_THRESHOLDS
+    : PropertySupplyStateMode.DIRECT_STATE
 }
 
 function buildSupplyConditionMergeKey(input: {
@@ -34,19 +49,26 @@ function buildSupplyConditionTitle(name: string) {
 
 function buildSupplyConditionDescription(input: {
   supplyName: string
-  fillLevel: SupplyFillLevel
+  fillLevel: "missing" | "medium" | "full"
+  quantityValue?: number | null
   notes?: string | null
 }) {
   const parts = [
-    `Supply run reported "${input.supplyName}" with fill level "${input.fillLevel}".`,
+    `Supply run reported "${input.supplyName}" in state "${input.fillLevel}".`,
   ]
+
+  if (typeof input.quantityValue === "number" && Number.isFinite(input.quantityValue)) {
+    parts.push(`Reported stock: ${input.quantityValue}.`)
+  }
 
   if (toNullableTrimmedString(input.notes)) {
     parts.push(`Partner notes: ${toNullableTrimmedString(input.notes)}.`)
   }
 
   parts.push(
-    "This keeps the property not ready until the shortage is explicitly resolved or dismissed."
+    input.fillLevel === "missing"
+      ? "This is a blocking shortage and keeps the property not ready until explicit closure."
+      : "This is an active supply warning and keeps the property borderline until explicit closure."
   )
 
   return parts.join(" ")
@@ -66,89 +88,6 @@ function toNullableTrimmedString(value: unknown) {
 
   const text = String(value).trim()
   return text === "" ? null : text
-}
-
-function normalizeFillLevel(value: unknown): SupplyFillLevel | null {
-  const text = String(value || "")
-    .trim()
-    .toLowerCase()
-
-  if (["low", "empty", "missing", "έλλειψη", "ελλειψη"].includes(text)) {
-    return "low"
-  }
-
-  if (["medium", "partial", "μέτρια", "μετρια"].includes(text)) {
-    return "medium"
-  }
-
-  if (["full", "ok", "πλήρης", "πληρης"].includes(text)) {
-    return "full"
-  }
-
-  return null
-}
-
-function computeStockFromFillLevel(params: {
-  fillLevel: SupplyFillLevel
-  currentStock?: number | null
-  targetStock?: number | null
-  reorderThreshold?: number | null
-  minimumStock?: number | null
-}) {
-  const currentStock =
-    typeof params.currentStock === "number" && Number.isFinite(params.currentStock)
-      ? params.currentStock
-      : 0
-
-  const targetStock =
-    typeof params.targetStock === "number" && Number.isFinite(params.targetStock)
-      ? params.targetStock
-      : null
-
-  const reorderThreshold =
-    typeof params.reorderThreshold === "number" &&
-    Number.isFinite(params.reorderThreshold)
-      ? params.reorderThreshold
-      : null
-
-  const minimumStock =
-    typeof params.minimumStock === "number" && Number.isFinite(params.minimumStock)
-      ? params.minimumStock
-      : 0
-
-  if (params.fillLevel === "low") {
-    return 0
-  }
-
-  if (params.fillLevel === "medium") {
-    if (reorderThreshold !== null && reorderThreshold > 0) {
-      return reorderThreshold
-    }
-
-    if (targetStock !== null && targetStock > 1) {
-      return Math.max(1, Math.ceil(targetStock / 2))
-    }
-
-    if (minimumStock > 0) {
-      return minimumStock
-    }
-
-    return Math.max(1, currentStock || 1)
-  }
-
-  if (targetStock !== null && targetStock > 0) {
-    return targetStock
-  }
-
-  if (reorderThreshold !== null && reorderThreshold > 0) {
-    return Math.max(reorderThreshold + 1, 2)
-  }
-
-  if (minimumStock > 0) {
-    return Math.max(minimumStock + 1, 2)
-  }
-
-  return Math.max(currentStock, 3)
 }
 
 const taskAssignmentWithSupplyArgs =
@@ -220,34 +159,39 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
     if (!cleanToken) {
       return NextResponse.json(
-        { error: "Το portal token είναι υποχρεωτικό." },
+        { error: "The portal token is required." },
         { status: 400 }
       )
     }
 
     if (!cleanTaskId) {
       return NextResponse.json(
-        { error: "Το αναγνωριστικό εργασίας είναι υποχρεωτικό." },
+        { error: "The task id is required." },
         { status: 400 }
       )
     }
 
     const body = await req.json().catch(() => null)
-
     const mode =
       String(body?.mode || "save").trim().toLowerCase() === "submit"
         ? "submit"
         : "save"
 
     const rawAnswers = Array.isArray(body?.answers) ? body.answers : []
-
     const incomingAnswers: IncomingSupplyAnswer[] = rawAnswers.map(
       (entry: unknown) => {
         const raw = (entry ?? {}) as Record<string, unknown>
+        const numericValue =
+          raw.quantityValue === undefined ||
+          raw.quantityValue === null ||
+          raw.quantityValue === ""
+            ? null
+            : Number(raw.quantityValue)
 
         return {
           propertySupplyId: String(raw.propertySupplyId || "").trim(),
-          fillLevel: normalizeFillLevel(raw.fillLevel),
+          fillLevel: normalizeSupplyState(raw.fillLevel),
+          quantityValue: Number.isFinite(numericValue) ? numericValue : null,
           notes: toNullableTrimmedString(raw.notes),
         }
       }
@@ -267,14 +211,14 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
     if (!portalAccess) {
       return NextResponse.json(
-        { error: "Το portal link δεν βρέθηκε." },
+        { error: "The portal link was not found." },
         { status: 404 }
       )
     }
 
     if (isExpired(portalAccess.expiresAt)) {
       return NextResponse.json(
-        { error: "Το portal link έχει λήξει." },
+        { error: "The portal link has expired." },
         { status: 410 }
       )
     }
@@ -305,7 +249,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
     if (!assignments.length) {
       return NextResponse.json(
-        { error: "Η εργασία δεν βρέθηκε για αυτόν τον συνεργάτη." },
+        { error: "The task was not found for this partner." },
         { status: 404 }
       )
     }
@@ -320,7 +264,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
       return NextResponse.json(
         {
           error:
-            "Τα αναλώσιμα μπορούν να συμπληρωθούν μόνο όταν η εργασία είναι αποδεκτή ή σε εξέλιξη.",
+            "Supplies can only be submitted when the task is accepted or already in progress.",
         },
         { status: 400 }
       )
@@ -330,7 +274,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
     if (!supplyRun) {
       return NextResponse.json(
-        { error: "Δεν υπάρχει συνδεδεμένη ενότητα αναλωσίμων για αυτή την εργασία." },
+        { error: "This task does not have an active supplies run." },
         { status: 400 }
       )
     }
@@ -341,7 +285,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
     if (!activeSupplies.length) {
       return NextResponse.json(
-        { error: "Το ακίνητο δεν έχει ενεργά αναλώσιμα." },
+        { error: "The property does not have active supplies." },
         { status: 400 }
       )
     }
@@ -351,18 +295,6 @@ export async function POST(req: NextRequest, context: RouteContext) {
         .filter((runItem) => Boolean(runItem.propertySupplyId))
         .map((runItem) => [String(runItem.propertySupplyId), runItem])
     )
-
-    for (const propertySupply of activeSupplies) {
-      if (runItemsByPropertySupplyId.has(propertySupply.id)) continue
-
-      return NextResponse.json(
-        {
-          error: `Missing supply run item for property supply "${propertySupply.supplyItem?.name || propertySupply.id}".`,
-        },
-        { status: 400 }
-      )
-    }
-
     const answerMap = new Map<string, IncomingSupplyAnswer>()
 
     for (const answer of incomingAnswers) {
@@ -373,11 +305,39 @@ export async function POST(req: NextRequest, context: RouteContext) {
     if (mode === "submit") {
       for (const propertySupply of activeSupplies) {
         const answer = answerMap.get(propertySupply.id)
+        const runItem = runItemsByPropertySupplyId.get(propertySupply.id)
 
-        if (!answer?.fillLevel) {
+        if (!runItem) {
           return NextResponse.json(
             {
-              error: `Το αναλώσιμο "${propertySupply.supplyItem?.name || "—"}" δεν έχει συμπληρωθεί.`,
+              error: `Missing supply run item for "${propertySupply.supplyItem?.name || propertySupply.id}".`,
+            },
+            { status: 400 }
+          )
+        }
+
+        const usesNumericMode =
+          String(runItem.stateMode || "").trim().toUpperCase() ===
+          "NUMERIC_THRESHOLDS"
+
+        if (
+          usesNumericMode &&
+          (answer?.quantityValue === null ||
+            answer?.quantityValue === undefined ||
+            !Number.isFinite(answer.quantityValue))
+        ) {
+          return NextResponse.json(
+            {
+              error: `The supply "${propertySupply.supplyItem?.name || propertySupply.id}" requires a numeric stock value.`,
+            },
+            { status: 400 }
+          )
+        }
+
+        if (!usesNumericMode && !answer?.fillLevel) {
+          return NextResponse.json(
+            {
+              error: `The supply "${propertySupply.supplyItem?.name || propertySupply.id}" requires a supply state.`,
             },
             { status: 400 }
           )
@@ -387,6 +347,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
     await prisma.$transaction(async (tx) => {
       const now = new Date()
+      const mergeKeysToKeepOpen: string[] = []
 
       if (latestAssignment.status === "accepted") {
         await tx.taskAssignment.update({
@@ -424,9 +385,27 @@ export async function POST(req: NextRequest, context: RouteContext) {
         const incoming = answerMap.get(propertySupply.id)
         const runItem = runItemsByPropertySupplyId.get(propertySupply.id)
 
-        if (!incoming?.fillLevel) {
+        if (!incoming || !runItem) {
           continue
         }
+
+        const usesNumericMode =
+          String(runItem.stateMode || "").trim().toUpperCase() ===
+          "NUMERIC_THRESHOLDS"
+
+        const canonical = buildCanonicalSupplyWriteData(
+          usesNumericMode
+            ? {
+                stateMode: "numeric_thresholds",
+                currentStock: incoming.quantityValue,
+                mediumThreshold: runItem.mediumThreshold,
+                fullThreshold: runItem.fullThreshold,
+              }
+            : {
+                stateMode: "direct_state",
+                fillLevel: incoming.fillLevel,
+              }
+        )
 
         const existingAnswer = supplyRun.answers.find(
           (answer) => answer.propertySupplyId === propertySupply.id
@@ -438,7 +417,11 @@ export async function POST(req: NextRequest, context: RouteContext) {
               id: existingAnswer.id,
             },
             data: {
-              fillLevel: incoming.fillLevel,
+              fillLevel: canonical.fillLevel,
+              quantityValue:
+                canonical.stateMode === "numeric_thresholds"
+                  ? canonical.currentStock
+                  : null,
               notes: incoming.notes || null,
             },
           })
@@ -446,34 +429,56 @@ export async function POST(req: NextRequest, context: RouteContext) {
           await tx.taskSupplyAnswer.create({
             data: {
               taskSupplyRunId: supplyRun.id,
-              runItemId: runItem!.id,
+              runItemId: runItem.id,
               propertySupplyId: propertySupply.id,
-              fillLevel: incoming.fillLevel,
+              fillLevel: canonical.fillLevel,
+              quantityValue:
+                canonical.stateMode === "numeric_thresholds"
+                  ? canonical.currentStock
+                  : null,
               notes: incoming.notes || null,
             },
           })
         }
-
-        const nextStock = computeStockFromFillLevel({
-          fillLevel: incoming.fillLevel,
-          currentStock: propertySupply.currentStock,
-          targetStock: propertySupply.targetStock,
-          reorderThreshold: propertySupply.reorderThreshold,
-          minimumStock: propertySupply.supplyItem?.minimumStock ?? null,
-        })
 
         await tx.propertySupply.update({
           where: {
             id: propertySupply.id,
           },
           data: {
-            currentStock: nextStock,
+            fillLevel: canonical.fillLevel,
+            stateMode: toPrismaSupplyStateMode(canonical.stateMode),
+            currentStock: canonical.currentStock,
+            mediumThreshold: canonical.mediumThreshold,
+            fullThreshold: canonical.fullThreshold,
+            targetStock: canonical.targetStock,
+            reorderThreshold: canonical.reorderThreshold,
+            targetLevel: canonical.targetLevel,
+            minimumThreshold: canonical.minimumThreshold,
+            trackingMode: canonical.trackingMode,
+            warningThreshold: canonical.warningThreshold,
             lastUpdatedAt: now,
             notes: incoming.notes || propertySupply.notes || null,
           },
         })
 
-        if (mode === "submit" && incoming.fillLevel === "low") {
+        const computedState = computeSupplyState({
+          stateMode: canonical.stateMode,
+          fillLevel: canonical.fillLevel,
+          currentStock: canonical.currentStock,
+          mediumThreshold: canonical.mediumThreshold,
+          fullThreshold: canonical.fullThreshold,
+        })
+
+        const mergeKey = buildSupplyConditionMergeKey({
+          propertyId: latestAssignment.task.property.id,
+          propertySupplyId: propertySupply.id,
+          supplyItemId: propertySupply.supplyItem?.id ?? null,
+        })
+
+        if (mode === "submit" && computedState.state !== "full") {
+          mergeKeysToKeepOpen.push(mergeKey)
+
           await mergePropertyCondition(
             {
               organizationId: latestAssignment.task.property.organizationId,
@@ -481,11 +486,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
               taskId: latestAssignment.task.id,
               bookingId: latestAssignment.task.bookingId ?? null,
               propertySupplyId: propertySupply.id,
-              mergeKey: buildSupplyConditionMergeKey({
-                propertyId: latestAssignment.task.property.id,
-                propertySupplyId: propertySupply.id,
-                supplyItemId: propertySupply.supplyItem?.id ?? null,
-              }),
+              mergeKey,
               sourceType: "task_supply_proof",
               sourceLabel: "Supplies run",
               sourceItemId: propertySupply.supplyItem?.id ?? propertySupply.id,
@@ -500,22 +501,51 @@ export async function POST(req: NextRequest, context: RouteContext) {
               description: buildSupplyConditionDescription({
                 supplyName:
                   propertySupply.supplyItem?.name ?? propertySupply.id,
-                fillLevel: incoming.fillLevel,
+                fillLevel: computedState.state,
+                quantityValue:
+                  canonical.stateMode === "numeric_thresholds"
+                    ? canonical.currentStock
+                    : null,
                 notes: incoming.notes,
               }),
-              blockingStatus: "BLOCKING",
-              severity: propertySupply.isCritical ? "HIGH" : "MEDIUM",
+              blockingStatus:
+                computedState.state === "missing" ? "BLOCKING" : "WARNING",
+              severity:
+                computedState.state === "missing"
+                  ? propertySupply.isCritical
+                    ? "HIGH"
+                    : "MEDIUM"
+                  : propertySupply.isCritical
+                    ? "MEDIUM"
+                    : "LOW",
               evidence: {
-                fillLevel: incoming.fillLevel,
+                fillLevel: computedState.state,
+                quantityValue:
+                  canonical.stateMode === "numeric_thresholds"
+                    ? canonical.currentStock
+                    : null,
                 notes: incoming.notes ?? null,
                 propertySupplyId: propertySupply.id,
-                runItemId: runItem?.id ?? null,
+                runItemId: runItem.id,
               },
               detectedAt: now,
             },
             tx as never
           )
         }
+      }
+
+      if (mode === "submit") {
+        await resolveMergedPropertyConditionsNotSeenInRun(
+          {
+            organizationId: latestAssignment.task.property.organizationId,
+            propertyId: latestAssignment.task.property.id,
+            mergeKeysToKeepOpen,
+            sourceRunId: supplyRun.id,
+            resolvedAt: now,
+          },
+          tx as never
+        )
       }
 
       const refreshedTask = await tx.task.findUnique({
@@ -572,8 +602,8 @@ export async function POST(req: NextRequest, context: RouteContext) {
               : "PARTNER_SUPPLIES_SAVED",
           message:
             mode === "submit"
-              ? `Ο συνεργάτης ${latestAssignment.partner.name} υπέβαλε τα αναλώσιμα από το portal.`
-              : `Ο συνεργάτης ${latestAssignment.partner.name} αποθήκευσε πρόοδο αναλωσίμων από το portal.`,
+              ? `Ο συνεργατης ${latestAssignment.partner.name} υπεβαλε τα αναλωσιμα απο το portal.`
+              : `Ο συνεργατης ${latestAssignment.partner.name} αποθηκευσε προοδο αναλωσιμων απο το portal.`,
           actorType: "PARTNER_PORTAL",
           actorName: latestAssignment.partner.name,
           metadata: {
@@ -605,7 +635,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
     console.error("POST /api/partner/[token]/tasks/[taskId]/supplies error:", error)
 
     return NextResponse.json(
-      { error: "Αποτυχία υποβολής αναλωσίμων συνεργάτη." },
+      { error: "Failed to submit partner supplies." },
       { status: 500 }
     )
   }

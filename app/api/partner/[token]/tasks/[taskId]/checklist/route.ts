@@ -5,6 +5,7 @@ import {
   createPropertyConditionsFromRun,
   type RunConditionAnswerInput,
 } from "@/lib/checklists/create-property-conditions-from-run"
+import { resolveMergedPropertyConditionsNotSeenInRun } from "@/lib/checklists/merge-property-conditions"
 import { refreshPropertyReadiness } from "@/lib/readiness/refresh-property-readiness"
 
 type RouteContext = {
@@ -1211,7 +1212,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
       }
 
       if (mode === "submit" && runConditionAnswers.length > 0) {
-        await createPropertyConditionsFromRun(
+        const conditionResults = await createPropertyConditionsFromRun(
           {
             organizationId: latestAssignment.task.property.organizationId,
             propertyId: latestAssignment.task.property.id,
@@ -1222,6 +1223,17 @@ export async function POST(req: NextRequest, context: RouteContext) {
             templateTitle: checklistRun.template?.title ?? "Checklist",
             answers: runConditionAnswers,
             detectedAt: now,
+          },
+          tx as never
+        )
+
+        await resolveMergedPropertyConditionsNotSeenInRun(
+          {
+            organizationId: latestAssignment.task.property.organizationId,
+            propertyId: latestAssignment.task.property.id,
+            mergeKeysToKeepOpen: conditionResults.map((item) => item.mergeKey),
+            sourceRunId: checklistRun.id,
+            resolvedAt: now,
           },
           tx as never
         )
