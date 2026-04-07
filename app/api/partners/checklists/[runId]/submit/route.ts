@@ -14,6 +14,7 @@ import {
   buildPropertyConditionSnapshot,
   type RawPropertyConditionRecord,
 } from "@/lib/readiness/property-condition-mappers";
+import { refreshPropertyReadiness } from "@/lib/readiness/refresh-property-readiness";
 
 type RouteContext = {
   params: Promise<{
@@ -751,7 +752,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
       }
     );
 
-    const rawConditions: RawPropertyConditionRecord[] = safeArray(
+    const taskRawConditions: RawPropertyConditionRecord[] = safeArray(
       result.run?.task?.propertyConditions
     ).map((condition) =>
       mapDbConditionToRawRecord({
@@ -784,18 +785,30 @@ export async function POST(req: NextRequest, context: RouteContext) {
       })
     );
 
-    const conditionSnapshot = buildPropertyConditionSnapshot(rawConditions);
+    const taskConditionSnapshot = buildPropertyConditionSnapshot(taskRawConditions);
+    const propertyTruth = await refreshPropertyReadiness(existingRun.task.propertyId);
 
     return NextResponse.json({
       run: result.run,
+      propertyReadiness: {
+        status: propertyTruth.readiness.status,
+        explain: propertyTruth.readiness.explain,
+        reasons: propertyTruth.readiness.reasons,
+        nextActions: propertyTruth.readiness.nextActions,
+        counts: propertyTruth.readiness.counts,
+        updatedAt:
+          propertyTruth.updatedProperty.readinessUpdatedAt?.toISOString() ?? null,
+        nextCheckInAt: propertyTruth.nextBooking?.checkInDate?.toISOString() ?? null,
+      },
       propertyConditions: {
-        summary: conditionSnapshot.summary,
-        reasons: conditionSnapshot.reasons,
-        active: conditionSnapshot.buckets.active,
-        blocking: conditionSnapshot.buckets.blocking,
-        warning: conditionSnapshot.buckets.warning,
-        monitoring: conditionSnapshot.buckets.monitoring,
-        all: conditionSnapshot.conditions,
+        summary: propertyTruth.snapshot.summary,
+        reasons: propertyTruth.snapshot.reasons,
+        active: propertyTruth.snapshot.buckets.active,
+        blocking: propertyTruth.snapshot.buckets.blocking,
+        warning: propertyTruth.snapshot.buckets.warning,
+        monitoring: propertyTruth.snapshot.buckets.monitoring,
+        all: propertyTruth.snapshot.conditions,
+        createdOrUpdatedForTask: taskConditionSnapshot.conditions,
       },
       createdOrUpdatedConditionIds: result.createdOrUpdatedConditionIds,
     });

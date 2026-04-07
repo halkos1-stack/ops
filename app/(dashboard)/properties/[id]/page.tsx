@@ -133,6 +133,9 @@ type PropertyDetail = {
   readinessUpdatedAt?: string | null
   readinessReasonsText?: string | null
   nextCheckInAt?: string | null
+  openConditionCount?: number | null
+  openBlockingConditionCount?: number | null
+  openWarningConditionCount?: number | null
   readinessSummary?: {
     status?: string | null
     explain?: string | null
@@ -293,7 +296,6 @@ type PropertyEditForm = {
 }
 
 type CanonicalReadinessStatus = "READY" | "BORDERLINE" | "NOT_READY" | "UNKNOWN"
-type TodayReadinessStatus = "READY" | "NOT_READY" | "UNKNOWN"
 type CalendarTone = "ready" | "warning" | "blocking" | "neutral"
 type PropertyOperationalCounts = {
   todayOpenTasks: number
@@ -663,6 +665,7 @@ function getOperationalCountsForToday(
   }
 }
 
+/* legacy task-centric readiness helpers removed in favor of canonical property readiness
 function getTodayReadinessStatus(property: PropertyDetail | null, now: Date): TodayReadinessStatus {
   if (!property) return "UNKNOWN"
 
@@ -759,6 +762,7 @@ function getTodayReadinessExplanation(
 
   return pieces.join(" • ")
 }
+*/
 
 function supplyStateBadgeClass(state: "missing" | "medium" | "full") {
   if (state === "missing") return "bg-red-50 text-red-700 ring-1 ring-red-200"
@@ -1009,19 +1013,30 @@ function buildReadinessReasons(property: PropertyDetail, language: "el" | "en") 
     .filter(Boolean)
   if (conditionReasonRows.length > 0) return conditionReasonRows
 
-  const counters = property.readinessSummary?.counters
   const reasons: string[] = []
 
-  if ((counters?.criticalIssues || 0) > 0) {
-    reasons.push(language === "en" ? `There are ${counters?.criticalIssues} critical issues.` : `Υπάρχουν ${counters?.criticalIssues} κρίσιμα θέματα.`)
+  if ((property.openBlockingConditionCount || 0) > 0) {
+    reasons.push(
+      language === "en"
+        ? `There are ${property.openBlockingConditionCount} blocking property conditions still active.`
+        : `Υπάρχουν ${property.openBlockingConditionCount} μπλοκαριστικές συνθήκες ακινήτου που παραμένουν ενεργές.`
+    )
   }
 
-  if ((counters?.missingCriticalSupplies || 0) > 0) {
-    reasons.push(language === "en" ? `There are ${counters?.missingCriticalSupplies} critical supplies missing.` : `Υπάρχουν ${counters?.missingCriticalSupplies} κρίσιμα αναλώσιμα σε έλλειψη.`)
+  if ((property.openWarningConditionCount || 0) > 0) {
+    reasons.push(
+      language === "en"
+        ? `There are ${property.openWarningConditionCount} warning conditions that still require monitoring.`
+        : `Υπάρχουν ${property.openWarningConditionCount} προειδοποιητικές συνθήκες που εξακολουθούν να χρειάζονται παρακολούθηση.`
+    )
   }
 
-  if ((counters?.openTasks || 0) > 0) {
-    reasons.push(language === "en" ? `There are ${counters?.openTasks} open tasks.` : `Υπάρχουν ${counters?.openTasks} ανοιχτές εργασίες.`)
+  if ((property.openConditionCount || 0) > 0) {
+    reasons.push(
+      language === "en"
+        ? `${property.openConditionCount} active property conditions still shape today's readiness.`
+        : `${property.openConditionCount} ενεργές συνθήκες ακινήτου εξακολουθούν να καθορίζουν τη σημερινή ετοιμότητα.`
+    )
   }
 
   if (reasons.length === 0 && property.nextCheckInAt) {
@@ -1893,9 +1908,6 @@ export default function PropertyDetailPage() {
     return getReadinessState(property, language, language === "en" ? "Unknown" : "Άγνωστο", language === "en" ? "No data available." : "Δεν υπάρχουν διαθέσιμα δεδομένα.")
   }, [property, language])
 
-  const todayReadinessStatus = useMemo(() => getTodayReadinessStatus(property, todayReference), [property, todayReference])
-  const todayReadinessLabel = useMemo(() => getTodayReadinessLabel(language, todayReadinessStatus), [language, todayReadinessStatus])
-  const todayReadinessExplanation = useMemo(() => getTodayReadinessExplanation(property, language, todayReference), [property, language, todayReference])
   const todayOperationalCounts = useMemo(() => {
     if (!property) {
       return { todayOpenTasks: 0, activeAlerts: 0, bookingsWithoutTask: 0, openIssues: 0, openDamages: 0, supplyShortages: 0 }
@@ -1903,7 +1915,7 @@ export default function PropertyDetailPage() {
 
     return getOperationalCountsForToday(property, todayReference)
   }, [property, todayReference])
-  const todayReadinessReasons = useMemo(() => {
+  /* legacy local readiness reasons removed in favor of canonical backend readiness
     if (todayReadinessStatus === "READY") {
       return [
         language === "en"
@@ -1955,7 +1967,11 @@ export default function PropertyDetailPage() {
     }
 
     return rows
-  }, [language, todayOperationalCounts, todayReadinessStatus])
+  */
+  const todayReadinessLabel = readiness.label
+  const todayReadinessExplanation = readiness.details
+  const todayReadinessReasons = readiness.reasons
+  const todayReadinessTone = readiness.tone
 
   const proofSummary = useMemo(() => {
     const buildSummary = (
@@ -2145,7 +2161,7 @@ export default function PropertyDetailPage() {
                 <h1 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">{property.name}</h1>
                 <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${badgeClasses(property.status)}`}>{propertyStatusLabel(language, property.status)}</span>
                 <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200">{getPropertyTypeLabel(language, property.type)}</span>
-                <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${getReadinessTone(todayReadinessStatus)}`}>{t.readiness}: {todayReadinessLabel}</span>
+                <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${todayReadinessTone}`}>{t.readiness}: {todayReadinessLabel}</span>
               </div>
 
               <p className="mt-3 max-w-4xl text-sm leading-6 text-slate-600">{property.address}, {property.city}, {property.region}, {property.postalCode}, {property.country}</p>
@@ -2231,7 +2247,7 @@ export default function PropertyDetailPage() {
               <div className="grid gap-2 md:grid-cols-4">
                 <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{t.readiness}</div>
-                  <div className="mt-1.5"><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${getReadinessTone(todayReadinessStatus)}`}>{todayReadinessLabel}</span></div>
+                  <div className="mt-1.5"><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${todayReadinessTone}`}>{todayReadinessLabel}</span></div>
                 </div>
                 <InfoChip label={t.nextCheckIn} value={formatDateTime(property.nextCheckInAt, locale)} hint="Η επόμενη γνωστή άφιξη από τα διαθέσιμα δεδομένα." />
                 <InfoChip label={t.timeLeft} value={formatCountdownToNextCheckIn(property.nextCheckInAt, language)} hint="Υπολογίζεται από τη σημερινή στιγμή μέχρι το επόμενο check-in." />
@@ -2239,12 +2255,12 @@ export default function PropertyDetailPage() {
               </div>
 
               <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-6">
-                <InfoChip label={language === "en" ? "Tasks today" : "Εργασιες σημερα"} value={String(todayOperationalCounts.todayOpenTasks)} hint={language === "en" ? "Open tasks scheduled for today. Readiness requires this to be 0." : "Ανοιχτες εργασιες με σημερινη ημερομηνια. Για readiness πρεπει να ειναι 0."} valueClassName={todayOperationalCounts.todayOpenTasks > 0 ? "text-red-700" : "text-slate-900"} />
+                <InfoChip label={language === "en" ? "Tasks today" : "Εργασιες σημερα"} value={String(todayOperationalCounts.todayOpenTasks)} hint={language === "en" ? "Open tasks scheduled for today. Execution detail only; canonical readiness stays tied to active property conditions." : "Ανοιχτες εργασιες με σημερινη ημερομηνια. Δειχνουν execution detail και οχι την canonical αποφαση readiness."} valueClassName={todayOperationalCounts.todayOpenTasks > 0 ? "text-red-700" : "text-slate-900"} />
                 <InfoChip label={language === "en" ? "Active alerts" : "Ενεργα alert"} value={String(todayOperationalCounts.activeAlerts)} hint={language === "en" ? "Active alerts on open tasks. This comes directly from the alert defined when the task was created." : "Ενεργα alert σε ανοιχτες εργασιες. Προερχεται απο το alert που οριστηκε στη δημιουργια της εργασιας."} valueClassName={todayOperationalCounts.activeAlerts > 0 ? "text-red-700" : "text-slate-900"} />
                 <InfoChip label={t.bookingsWithoutTask} value={String(bookingsWithoutTaskCount)} hint={t.bookingsWithoutTaskHelper} valueClassName={bookingsWithoutTaskCount > 0 ? "text-amber-700" : "text-slate-900"} href={bookingsWithoutTaskHref} />
-                <InfoChip label={language === "en" ? "Open issues" : "Ανοιχτες βλαβες"} value={String(todayOperationalCounts.openIssues)} hint={language === "en" ? "Open non-damage issues. Readiness requires this to be 0." : "Ανοιχτες βλαβες που δεν ειναι ζημιες. Για readiness πρεπει να ειναι 0."} valueClassName={todayOperationalCounts.openIssues > 0 ? "text-red-700" : "text-slate-900"} />
-                <InfoChip label={language === "en" ? "Open damages" : "Ανοιχτες ζημιες"} value={String(todayOperationalCounts.openDamages)} hint={language === "en" ? "Open damage records. Readiness requires this to be 0." : "Ανοιχτες ζημιες. Για readiness πρεπει να ειναι 0."} valueClassName={todayOperationalCounts.openDamages > 0 ? "text-red-700" : "text-slate-900"} />
-                <InfoChip label={language === "en" ? "Supply shortages" : "Ελλειψεις αναλωσιμων"} value={String(todayOperationalCounts.supplyShortages)} hint={language === "en" ? "Active supply shortages. Readiness requires this to be 0." : "Ενεργες ελλειψεις αναλωσιμων. Για readiness πρεπει να ειναι 0."} valueClassName={todayOperationalCounts.supplyShortages > 0 ? "text-red-700" : "text-slate-900"} />
+                <InfoChip label={language === "en" ? "Open issues" : "Ανοιχτες βλαβες"} value={String(todayOperationalCounts.openIssues)} hint={language === "en" ? "Open non-damage issues in the operational picture. Canonical readiness comes from the active linked property conditions." : "Ανοιχτες βλαβες στην επιχειρησιακη εικονα. Το canonical readiness προκυπτει απο τα ενεργα συνδεδεμενα property conditions."} valueClassName={todayOperationalCounts.openIssues > 0 ? "text-red-700" : "text-slate-900"} />
+                <InfoChip label={language === "en" ? "Open damages" : "Ανοιχτες ζημιες"} value={String(todayOperationalCounts.openDamages)} hint={language === "en" ? "Open damages in the operational picture. Canonical readiness stays tied to active property conditions." : "Ανοιχτες ζημιες στην επιχειρησιακη εικονα. Το canonical readiness μενει δεμενο με τα ενεργα property conditions."} valueClassName={todayOperationalCounts.openDamages > 0 ? "text-red-700" : "text-slate-900"} />
+                <InfoChip label={language === "en" ? "Supply shortages" : "Ελλειψεις αναλωσιμων"} value={String(todayOperationalCounts.supplyShortages)} hint={language === "en" ? "Visible supply shortages in operations. Canonical readiness remains tied to active supply conditions." : "Ορατες ελλειψεις αναλωσιμων στην επιχειρησιακη εικονα. Το canonical readiness μενει δεμενο με τα ενεργα supply conditions."} valueClassName={todayOperationalCounts.supplyShortages > 0 ? "text-red-700" : "text-slate-900"} />
               </div>
 
               <div className="mt-3">
@@ -2657,7 +2673,7 @@ export default function PropertyDetailPage() {
       <Modal open={activeModal === "readiness"} title={t.readinessTitle} description={t.readinessSubtitle} onClose={() => setActiveModal(null)} closeLabel={t.close}>
         <div className="space-y-6">
           <div className="grid gap-4 lg:grid-cols-4">
-            <InfoChip label={t.readiness} value={todayReadinessLabel} hint={language === "en" ? "Same readiness rule as the properties list: no open tasks today, no open issues or damages, and no supply shortages." : "Ιδια λογικη με τη λιστα ακινητων: οχι ανοιχτες σημερινες εργασιες, βλαβες, ζημιες ή ελλειψεις αναλωσιμων."} />
+            <InfoChip label={t.readiness} value={todayReadinessLabel} hint={language === "en" ? "Canonical property readiness from active property conditions. Execution counters explain the picture but do not decide readiness." : "Κανονικη ετοιμοτητα ακινητου απο τις ενεργες συνθηκες ακινητου. Οι επιχειρησιακοι μετρητες εξηγουν την εικονα αλλα δεν αποφασιζουν το readiness."} />
             <InfoChip label={t.nextCheckIn} value={formatDateTime(property.nextCheckInAt, locale)} />
             <InfoChip label={t.timeLeft} value={formatCountdownToNextCheckIn(property.nextCheckInAt, language)} />
             <InfoChip label={t.lastUpdate} value={formatDateTime(property.readinessUpdatedAt || property.updatedAt, locale)} />

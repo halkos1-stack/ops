@@ -1,64 +1,81 @@
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { NextRequest, NextResponse } from "next/server"
+import { prisma } from "@/lib/prisma"
 import {
   computePropertyReadiness,
   getReadinessStatusLabel,
+  summarizeReadinessReasons,
   type ReadinessConditionInput,
-} from "@/lib/readiness/compute-property-readiness";
+} from "@/lib/readiness/compute-property-readiness"
 import {
   buildPropertyConditionSnapshot,
   getLatestPropertyConditionUpdateAt,
   type RawPropertyConditionRecord,
-} from "@/lib/readiness/property-condition-mappers";
+} from "@/lib/readiness/property-condition-mappers"
 
 type RouteContext = {
   params: Promise<{
-    id: string;
-  }>;
-};
+    id: string
+  }>
+}
 
 function isValidId(value: string): boolean {
-  return typeof value === "string" && value.trim().length > 0;
+  return typeof value === "string" && value.trim().length > 0
 }
 
 function toNullableString(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
+  if (typeof value !== "string") return null
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
 }
 
 function toLowerStringOrNull(value: unknown): string | null {
-  const safe = toNullableString(typeof value === "string" ? value : null);
-  return safe ? safe.toLowerCase() : null;
+  const safe = toNullableString(value)
+  return safe ? safe.toLowerCase() : null
+}
+
+function toPropertyReadinessEnum(
+  status: ReadinessConditionInput["status"] | "ready" | "borderline" | "not_ready" | "unknown"
+): "READY" | "BORDERLINE" | "NOT_READY" | "UNKNOWN" {
+  switch (status) {
+    case "ready":
+      return "READY"
+    case "borderline":
+      return "BORDERLINE"
+    case "not_ready":
+      return "NOT_READY"
+    case "unknown":
+    default:
+      return "UNKNOWN"
+  }
 }
 
 function mapDbConditionToRawRecord(condition: {
-  id: string;
-  propertyId: string;
-  taskId: string | null;
-  bookingId: string | null;
-  propertySupplyId: string | null;
-  mergeKey: string | null;
-  title: string;
-  description: string | null;
-  sourceType: string;
-  sourceLabel: string | null;
-  sourceItemId: string | null;
-  sourceItemLabel: string | null;
-  sourceRunId: string | null;
-  sourceAnswerId: string | null;
-  conditionType: string;
-  status: string;
-  blockingStatus: string;
-  severity: string;
-  managerDecision: string | null;
-  managerNotes: string | null;
-  firstDetectedAt: Date;
-  lastDetectedAt: Date;
-  createdAt: Date;
-  updatedAt: Date;
-  resolvedAt: Date | null;
-  dismissedAt: Date | null;
+  id: string
+  propertyId: string
+  taskId: string | null
+  bookingId: string | null
+  propertySupplyId: string | null
+  mergeKey: string | null
+  title: string
+  description: string | null
+  sourceType: string
+  sourceLabel: string | null
+  sourceItemId: string | null
+  sourceItemLabel: string | null
+  sourceRunId: string | null
+  sourceAnswerId: string | null
+  conditionType: string
+  status: string
+  blockingStatus: string
+  severity: string
+  managerDecision: string | null
+  managerNotes: string | null
+  firstDetectedAt: Date
+  lastDetectedAt: Date
+  createdAt: Date
+  updatedAt: Date
+  resolvedAt: Date | null
+  dismissedAt: Date | null
 }): RawPropertyConditionRecord {
   return {
     id: condition.id,
@@ -83,22 +100,22 @@ function mapDbConditionToRawRecord(condition: {
     updatedAt: condition.updatedAt,
     resolvedAt: condition.resolvedAt,
     dismissedAt: condition.dismissedAt,
-  };
+  }
 }
 
 function mapRawConditionToReadinessInput(
   condition: RawPropertyConditionRecord & {
-    taskId?: string | null;
-    bookingId?: string | null;
-    propertySupplyId?: string | null;
-    mergeKey?: string | null;
-    sourceLabel?: string | null;
-    sourceItemId?: string | null;
-    sourceItemLabel?: string | null;
-    sourceRunId?: string | null;
-    sourceAnswerId?: string | null;
-    firstDetectedAt?: Date | string | null;
-    lastDetectedAt?: Date | string | null;
+    taskId?: string | null
+    bookingId?: string | null
+    propertySupplyId?: string | null
+    mergeKey?: string | null
+    sourceLabel?: string | null
+    sourceItemId?: string | null
+    sourceItemLabel?: string | null
+    sourceRunId?: string | null
+    sourceAnswerId?: string | null
+    firstDetectedAt?: Date | string | null
+    lastDetectedAt?: Date | string | null
   }
 ): ReadinessConditionInput {
   return {
@@ -156,21 +173,21 @@ function mapRawConditionToReadinessInput(
     bookingId: condition.bookingId ?? null,
     propertySupplyId: condition.propertySupplyId ?? null,
     mergeKey: condition.mergeKey ?? null,
-  };
+  }
 }
 
 export async function GET(_request: NextRequest, context: RouteContext) {
   try {
-    const { id: propertyId } = await context.params;
+    const { id: propertyId } = await context.params
 
     if (!isValidId(propertyId)) {
       return NextResponse.json(
-        { error: "Μη έγκυρο αναγνωριστικό ακινήτου." },
+        { error: "Invalid property id." },
         { status: 400 }
-      );
+      )
     }
 
-    const now = new Date();
+    const now = new Date()
 
     const property = await prisma.property.findUnique({
       where: { id: propertyId },
@@ -187,18 +204,21 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         openWarningConditionCount: true,
         nextCheckInAt: true,
       },
-    });
+    })
 
     if (!property) {
       return NextResponse.json(
-        { error: "Το ακίνητο δεν βρέθηκε." },
+        { error: "Property not found." },
         { status: 404 }
-      );
+      )
     }
 
     const nextBooking = await prisma.booking.findFirst({
       where: {
         propertyId,
+        status: {
+          notIn: ["cancelled", "canceled"],
+        },
         checkInDate: {
           gte: now,
         },
@@ -214,7 +234,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         status: true,
         sourcePlatform: true,
       },
-    });
+    })
 
     const dbConditions = await prisma.propertyCondition.findMany({
       where: {
@@ -249,7 +269,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         resolvedAt: true,
         dismissedAt: true,
       },
-    });
+    })
 
     const rawConditions = dbConditions.map((condition) => {
       const mapped = mapDbConditionToRawRecord({
@@ -261,7 +281,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         managerDecision: condition.managerDecision
           ? String(condition.managerDecision).toLowerCase()
           : null,
-      });
+      })
 
       return {
         ...mapped,
@@ -276,26 +296,41 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         sourceAnswerId: toNullableString(condition.sourceAnswerId),
         firstDetectedAt: condition.firstDetectedAt,
         lastDetectedAt: condition.lastDetectedAt,
-      };
-    });
+      }
+    })
 
-    const snapshot = buildPropertyConditionSnapshot(rawConditions);
-
+    const snapshot = buildPropertyConditionSnapshot(rawConditions)
     const readinessConditions = rawConditions.map((condition) =>
       mapRawConditionToReadinessInput(condition)
-    );
+    )
 
     const computedNextCheckInAt =
-      nextBooking?.checkInDate ?? property.nextCheckInAt ?? null;
+      nextBooking?.checkInDate ?? property.nextCheckInAt ?? null
 
     const readiness = computePropertyReadiness({
       now,
       nextCheckInAt: computedNextCheckInAt,
       conditions: readinessConditions,
-    });
+    })
 
+    const readinessReasonsText = summarizeReadinessReasons(readiness.reasons)
     const latestConditionUpdateAt =
-      getLatestPropertyConditionUpdateAt(snapshot.conditions);
+      getLatestPropertyConditionUpdateAt(snapshot.conditions)
+
+    await prisma.property.update({
+      where: {
+        id: property.id,
+      },
+      data: {
+        readinessStatus: toPropertyReadinessEnum(readiness.status),
+        readinessUpdatedAt: readiness.computedAt,
+        readinessReasonsText,
+        openConditionCount: snapshot.summary.active,
+        openBlockingConditionCount: snapshot.summary.blocking,
+        openWarningConditionCount: snapshot.summary.warning,
+        nextCheckInAt: computedNextCheckInAt,
+      },
+    })
 
     return NextResponse.json(
       {
@@ -305,7 +340,6 @@ export async function GET(_request: NextRequest, context: RouteContext) {
           code: property.code,
           name: property.name,
         },
-
         nextCheckIn: nextBooking
           ? {
               bookingId: nextBooking.id,
@@ -315,17 +349,16 @@ export async function GET(_request: NextRequest, context: RouteContext) {
               bookingStatus: nextBooking.status,
               sourcePlatform: nextBooking.sourcePlatform,
             }
-          : property.nextCheckInAt
+          : computedNextCheckInAt
             ? {
                 bookingId: null,
-                checkInAt: property.nextCheckInAt,
+                checkInAt: computedNextCheckInAt,
                 checkOutAt: null,
                 guestName: null,
                 bookingStatus: null,
                 sourcePlatform: null,
               }
             : null,
-
         readiness: {
           status: readiness.status,
           label: getReadinessStatusLabel(readiness.status, "el"),
@@ -340,7 +373,6 @@ export async function GET(_request: NextRequest, context: RouteContext) {
           computedAt: readiness.computedAt,
           nextCheckInAt: readiness.nextCheckInAt,
         },
-
         conditions: {
           updatedAt: latestConditionUpdateAt,
           summary: snapshot.summary,
@@ -351,31 +383,27 @@ export async function GET(_request: NextRequest, context: RouteContext) {
           monitoring: snapshot.buckets.monitoring,
           all: snapshot.conditions,
         },
-
         storedSummary: {
-          readinessStatus: property.readinessStatus
-            ? toLowerStringOrNull(String(property.readinessStatus))
-            : null,
-          readinessUpdatedAt: property.readinessUpdatedAt,
-          readinessReasonsText: property.readinessReasonsText,
-          openConditionCount: property.openConditionCount,
-          openBlockingConditionCount: property.openBlockingConditionCount,
-          openWarningConditionCount: property.openWarningConditionCount,
-          nextCheckInAt: property.nextCheckInAt,
+          readinessStatus: toLowerStringOrNull(readiness.status),
+          readinessUpdatedAt: readiness.computedAt,
+          readinessReasonsText,
+          openConditionCount: snapshot.summary.active,
+          openBlockingConditionCount: snapshot.summary.blocking,
+          openWarningConditionCount: snapshot.summary.warning,
+          nextCheckInAt: computedNextCheckInAt,
         },
-
         generatedAt: now,
       },
       { status: 200 }
-    );
+    )
   } catch (error) {
-    console.error("GET /api/properties/[id]/readiness error:", error);
+    console.error("GET /api/properties/[id]/readiness error:", error)
 
     return NextResponse.json(
       {
-        error: "Αποτυχία φόρτωσης readiness ακινήτου.",
+        error: "Failed to load property readiness.",
       },
       { status: 500 }
-    );
+    )
   }
 }

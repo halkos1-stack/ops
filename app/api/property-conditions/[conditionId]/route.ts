@@ -1,63 +1,70 @@
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { NextRequest, NextResponse } from "next/server"
+import { prisma } from "@/lib/prisma"
 import {
+  computePropertyReadiness,
+  getReadinessStatusLabel,
+  summarizeReadinessReasons,
+  type ReadinessConditionInput,
+} from "@/lib/readiness/compute-property-readiness"
+import {
+  buildPropertyConditionSnapshot,
   mapSinglePropertyConditionForApi,
   type RawPropertyConditionRecord,
-} from "@/lib/readiness/property-condition-mappers";
+} from "@/lib/readiness/property-condition-mappers"
 
 type RouteContext = {
   params: Promise<{
-    conditionId: string;
-  }>;
-};
+    conditionId: string
+  }>
+}
 
 type PropertyConditionStatusValue =
   | "OPEN"
   | "MONITORING"
   | "RESOLVED"
-  | "DISMISSED";
+  | "DISMISSED"
 
 type PropertyConditionBlockingStatusValue =
   | "BLOCKING"
   | "NON_BLOCKING"
-  | "WARNING";
+  | "WARNING"
 
 type PropertyConditionSeverityValue =
   | "LOW"
   | "MEDIUM"
   | "HIGH"
-  | "CRITICAL";
+  | "CRITICAL"
 
 type PropertyConditionManagerDecisionValue =
   | "ALLOW_WITH_ISSUE"
   | "BLOCK_UNTIL_RESOLVED"
   | "MONITOR"
   | "RESOLVED"
-  | "DISMISSED";
+  | "DISMISSED"
 
 function isValidId(value: string): boolean {
-  return typeof value === "string" && value.trim().length > 0;
+  return typeof value === "string" && value.trim().length > 0
 }
 
 function toNullableString(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
+  if (typeof value !== "string") return null
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
 }
 
 function toDateOrNull(value: unknown): Date | null {
-  if (!value) return null;
+  if (!value) return null
 
   if (value instanceof Date) {
-    return Number.isNaN(value.getTime()) ? null : value;
+    return Number.isNaN(value.getTime()) ? null : value
   }
 
   if (typeof value === "string") {
-    const parsed = new Date(value);
-    return Number.isNaN(parsed.getTime()) ? null : parsed;
+    const parsed = new Date(value)
+    return Number.isNaN(parsed.getTime()) ? null : parsed
   }
 
-  return null;
+  return null
 }
 
 function normalizeStatus(
@@ -69,10 +76,10 @@ function normalizeStatus(
     value === "resolved" ||
     value === "dismissed"
   ) {
-    return value;
+    return value
   }
 
-  return "open";
+  return "open"
 }
 
 function normalizeBlockingStatus(
@@ -83,10 +90,10 @@ function normalizeBlockingStatus(
     value === "non_blocking" ||
     value === "warning"
   ) {
-    return value;
+    return value
   }
 
-  return "warning";
+  return "warning"
 }
 
 function normalizeSeverity(
@@ -98,10 +105,10 @@ function normalizeSeverity(
     value === "high" ||
     value === "critical"
   ) {
-    return value;
+    return value
   }
 
-  return "medium";
+  return "medium"
 }
 
 function normalizeManagerDecision(
@@ -120,10 +127,10 @@ function normalizeManagerDecision(
     value === "resolved" ||
     value === "dismissed"
   ) {
-    return value;
+    return value
   }
 
-  return null;
+  return null
 }
 
 function toPrismaStatus(
@@ -131,15 +138,15 @@ function toPrismaStatus(
 ): PropertyConditionStatusValue {
   switch (value) {
     case "open":
-      return "OPEN";
+      return "OPEN"
     case "monitoring":
-      return "MONITORING";
+      return "MONITORING"
     case "resolved":
-      return "RESOLVED";
+      return "RESOLVED"
     case "dismissed":
-      return "DISMISSED";
+      return "DISMISSED"
     default:
-      return "OPEN";
+      return "OPEN"
   }
 }
 
@@ -148,13 +155,13 @@ function toPrismaBlockingStatus(
 ): PropertyConditionBlockingStatusValue {
   switch (value) {
     case "blocking":
-      return "BLOCKING";
+      return "BLOCKING"
     case "non_blocking":
-      return "NON_BLOCKING";
+      return "NON_BLOCKING"
     case "warning":
-      return "WARNING";
+      return "WARNING"
     default:
-      return "WARNING";
+      return "WARNING"
   }
 }
 
@@ -163,15 +170,15 @@ function toPrismaSeverity(
 ): PropertyConditionSeverityValue {
   switch (value) {
     case "low":
-      return "LOW";
+      return "LOW"
     case "medium":
-      return "MEDIUM";
+      return "MEDIUM"
     case "high":
-      return "HIGH";
+      return "HIGH"
     case "critical":
-      return "CRITICAL";
+      return "CRITICAL"
     default:
-      return "MEDIUM";
+      return "MEDIUM"
   }
 }
 
@@ -184,70 +191,86 @@ function toPrismaManagerDecision(
     | "dismissed"
     | null
 ): PropertyConditionManagerDecisionValue | null {
-  if (!value) return null;
+  if (!value) return null
 
   switch (value) {
     case "allow_with_issue":
-      return "ALLOW_WITH_ISSUE";
+      return "ALLOW_WITH_ISSUE"
     case "block_until_resolved":
-      return "BLOCK_UNTIL_RESOLVED";
+      return "BLOCK_UNTIL_RESOLVED"
     case "monitor":
-      return "MONITOR";
+      return "MONITOR"
     case "resolved":
-      return "RESOLVED";
+      return "RESOLVED"
     case "dismissed":
-      return "DISMISSED";
+      return "DISMISSED"
     default:
-      return null;
+      return null
+  }
+}
+
+function toPropertyReadinessEnum(
+  status: "ready" | "borderline" | "not_ready" | "unknown"
+): "READY" | "BORDERLINE" | "NOT_READY" | "UNKNOWN" {
+  switch (status) {
+    case "ready":
+      return "READY"
+    case "borderline":
+      return "BORDERLINE"
+    case "not_ready":
+      return "NOT_READY"
+    case "unknown":
+    default:
+      return "UNKNOWN"
   }
 }
 
 function mapDbConditionToRawRecord(condition: {
-  id: string;
-  propertyId: string;
-  taskId: string | null;
-  bookingId: string | null;
-  propertySupplyId: string | null;
-  mergeKey: string | null;
-  title: string;
-  description: string | null;
-  sourceType: string;
-  sourceLabel: string | null;
-  sourceItemId: string | null;
-  sourceItemLabel: string | null;
-  sourceRunId: string | null;
-  sourceAnswerId: string | null;
-  conditionType: string;
-  status: string;
-  blockingStatus: string;
-  severity: string;
-  managerDecision: string | null;
-  managerNotes: string | null;
-  firstDetectedAt: Date;
-  lastDetectedAt: Date;
-  createdAt: Date;
-  updatedAt: Date;
-  resolvedAt: Date | null;
-  dismissedAt: Date | null;
+  id: string
+  propertyId: string
+  taskId: string | null
+  bookingId: string | null
+  propertySupplyId: string | null
+  mergeKey: string | null
+  title: string
+  description: string | null
+  sourceType: string
+  sourceLabel: string | null
+  sourceItemId: string | null
+  sourceItemLabel: string | null
+  sourceRunId: string | null
+  sourceAnswerId: string | null
+  conditionType: string
+  status: string
+  blockingStatus: string
+  severity: string
+  managerDecision: string | null
+  managerNotes: string | null
+  firstDetectedAt: Date
+  lastDetectedAt: Date
+  createdAt: Date
+  updatedAt: Date
+  resolvedAt: Date | null
+  dismissedAt: Date | null
 }): RawPropertyConditionRecord & {
-  taskId: string | null;
-  bookingId: string | null;
-  propertySupplyId: string | null;
-  mergeKey: string | null;
-  sourceLabel: string | null;
-  sourceItemId: string | null;
-  sourceItemLabel: string | null;
-  sourceRunId: string | null;
-  sourceAnswerId: string | null;
-  firstDetectedAt: Date;
-  lastDetectedAt: Date;
+  taskId: string | null
+  bookingId: string | null
+  propertySupplyId: string | null
+  mergeKey: string | null
+  sourceLabel: string | null
+  sourceItemId: string | null
+  sourceItemLabel: string | null
+  sourceRunId: string | null
+  sourceAnswerId: string | null
+  firstDetectedAt: Date
+  lastDetectedAt: Date
 } {
   const normalizedConditionType =
     condition.conditionType === "supply" ||
     condition.conditionType === "issue" ||
     condition.conditionType === "damage"
       ? condition.conditionType
-      : "issue";
+      : "issue"
 
   return {
     id: condition.id,
@@ -272,7 +295,6 @@ function mapDbConditionToRawRecord(condition: {
     updatedAt: condition.updatedAt,
     resolvedAt: condition.resolvedAt,
     dismissedAt: condition.dismissedAt,
-
     taskId: condition.taskId,
     bookingId: condition.bookingId,
     propertySupplyId: condition.propertySupplyId,
@@ -284,18 +306,221 @@ function mapDbConditionToRawRecord(condition: {
     sourceAnswerId: toNullableString(condition.sourceAnswerId),
     firstDetectedAt: condition.firstDetectedAt,
     lastDetectedAt: condition.lastDetectedAt,
-  };
+  }
+}
+
+function mapRawConditionToReadinessInput(
+  condition: RawPropertyConditionRecord & {
+    taskId?: string | null
+    bookingId?: string | null
+    propertySupplyId?: string | null
+    mergeKey?: string | null
+    sourceLabel?: string | null
+    sourceItemId?: string | null
+    sourceItemLabel?: string | null
+    sourceRunId?: string | null
+    sourceAnswerId?: string | null
+    firstDetectedAt?: Date | string | null
+    lastDetectedAt?: Date | string | null
+  }
+): ReadinessConditionInput {
+  return {
+    id: condition.id,
+    propertyId: condition.propertyId,
+    conditionType:
+      condition.conditionType === "supply" ||
+      condition.conditionType === "issue" ||
+      condition.conditionType === "damage"
+        ? condition.conditionType
+        : "issue",
+    status:
+      condition.status === "open" ||
+      condition.status === "monitoring" ||
+      condition.status === "resolved" ||
+      condition.status === "dismissed"
+        ? condition.status
+        : "open",
+    blockingStatus:
+      condition.blockingStatus === "blocking" ||
+      condition.blockingStatus === "non_blocking" ||
+      condition.blockingStatus === "warning"
+        ? condition.blockingStatus
+        : "warning",
+    severity:
+      condition.severity === "low" ||
+      condition.severity === "medium" ||
+      condition.severity === "high" ||
+      condition.severity === "critical"
+        ? condition.severity
+        : "medium",
+    managerDecision:
+      condition.managerDecision === "allow_with_issue" ||
+      condition.managerDecision === "block_until_resolved" ||
+      condition.managerDecision === "monitor" ||
+      condition.managerDecision === "resolved" ||
+      condition.managerDecision === "dismissed"
+        ? condition.managerDecision
+        : null,
+    title: condition.title ?? null,
+    description: condition.notes ?? null,
+    firstDetectedAt: condition.firstDetectedAt ?? null,
+    lastDetectedAt: condition.lastDetectedAt ?? null,
+    createdAt: condition.createdAt ?? null,
+    updatedAt: condition.updatedAt ?? null,
+    resolvedAt: condition.resolvedAt ?? null,
+    dismissedAt: condition.dismissedAt ?? null,
+    sourceType: condition.sourceType ?? null,
+    sourceLabel: condition.sourceLabel ?? null,
+    sourceItemId: condition.sourceItemId ?? null,
+    sourceItemLabel: condition.sourceItemLabel ?? null,
+    sourceRunId: condition.sourceRunId ?? null,
+    sourceAnswerId: condition.sourceAnswerId ?? null,
+    taskId: condition.taskId ?? condition.sourceTaskId ?? null,
+    bookingId: condition.bookingId ?? null,
+    propertySupplyId: condition.propertySupplyId ?? null,
+    mergeKey: condition.mergeKey ?? null,
+  }
+}
+
+async function refreshPropertyTruth(propertyId: string) {
+  const now = new Date()
+
+  const property = await prisma.property.findUnique({
+    where: { id: propertyId },
+    select: {
+      id: true,
+      code: true,
+      name: true,
+      organizationId: true,
+      nextCheckInAt: true,
+    },
+  })
+
+  if (!property) {
+    return null
+  }
+
+  const nextBooking = await prisma.booking.findFirst({
+    where: {
+      propertyId,
+      status: {
+        notIn: ["cancelled", "canceled"],
+      },
+      checkInDate: {
+        gte: now,
+      },
+    },
+    orderBy: {
+      checkInDate: "asc",
+    },
+    select: {
+      id: true,
+      checkInDate: true,
+      checkOutDate: true,
+      guestName: true,
+      status: true,
+      sourcePlatform: true,
+    },
+  })
+
+  const dbConditions = await prisma.propertyCondition.findMany({
+    where: {
+      propertyId,
+    },
+    orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+    select: {
+      id: true,
+      propertyId: true,
+      taskId: true,
+      bookingId: true,
+      propertySupplyId: true,
+      mergeKey: true,
+      title: true,
+      description: true,
+      sourceType: true,
+      sourceLabel: true,
+      sourceItemId: true,
+      sourceItemLabel: true,
+      sourceRunId: true,
+      sourceAnswerId: true,
+      conditionType: true,
+      status: true,
+      blockingStatus: true,
+      severity: true,
+      managerDecision: true,
+      managerNotes: true,
+      firstDetectedAt: true,
+      lastDetectedAt: true,
+      createdAt: true,
+      updatedAt: true,
+      resolvedAt: true,
+      dismissedAt: true,
+    },
+  })
+
+  const rawConditions = dbConditions.map((condition) =>
+    mapDbConditionToRawRecord({
+      ...condition,
+      conditionType: String(condition.conditionType).toLowerCase(),
+      status: String(condition.status).toLowerCase(),
+      blockingStatus: String(condition.blockingStatus).toLowerCase(),
+      severity: String(condition.severity).toLowerCase(),
+      managerDecision: condition.managerDecision
+        ? String(condition.managerDecision).toLowerCase()
+        : null,
+    })
+  )
+
+  const snapshot = buildPropertyConditionSnapshot(rawConditions)
+  const readinessConditions = rawConditions.map((condition) =>
+    mapRawConditionToReadinessInput(condition)
+  )
+
+  const computedNextCheckInAt =
+    nextBooking?.checkInDate ?? property.nextCheckInAt ?? null
+
+  const readiness = computePropertyReadiness({
+    now,
+    nextCheckInAt: computedNextCheckInAt,
+    conditions: readinessConditions,
+  })
+
+  const readinessReasonsText = summarizeReadinessReasons(readiness.reasons)
+
+  await prisma.property.update({
+    where: {
+      id: property.id,
+    },
+    data: {
+      readinessStatus: toPropertyReadinessEnum(readiness.status),
+      readinessUpdatedAt: readiness.computedAt,
+      readinessReasonsText,
+      openConditionCount: snapshot.summary.active,
+      openBlockingConditionCount: snapshot.summary.blocking,
+      openWarningConditionCount: snapshot.summary.warning,
+      nextCheckInAt: computedNextCheckInAt,
+    },
+  })
+
+  return {
+    property,
+    nextBooking,
+    snapshot,
+    readiness,
+    readinessReasonsText,
+    generatedAt: now,
+  }
 }
 
 export async function GET(_request: NextRequest, context: RouteContext) {
   try {
-    const { conditionId } = await context.params;
+    const { conditionId } = await context.params
 
     if (!isValidId(conditionId)) {
       return NextResponse.json(
-        { error: "Μη έγκυρο αναγνωριστικό condition." },
+        { error: "Invalid condition id." },
         { status: 400 }
-      );
+      )
     }
 
     const condition = await prisma.propertyCondition.findUnique({
@@ -333,13 +558,13 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         createdAt: true,
         updatedAt: true,
       },
-    });
+    })
 
     if (!condition) {
       return NextResponse.json(
-        { error: "Το property condition δεν βρέθηκε." },
+        { error: "Property condition not found." },
         { status: 404 }
-      );
+      )
     }
 
     const apiItem = mapSinglePropertyConditionForApi(
@@ -373,7 +598,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         resolvedAt: condition.resolvedAt,
         dismissedAt: condition.dismissedAt,
       })
-    );
+    )
 
     return NextResponse.json(
       {
@@ -392,26 +617,26 @@ export async function GET(_request: NextRequest, context: RouteContext) {
         generatedAt: new Date(),
       },
       { status: 200 }
-    );
+    )
   } catch (error) {
-    console.error("GET /api/property-conditions/[conditionId] error:", error);
+    console.error("GET /api/property-conditions/[conditionId] error:", error)
 
     return NextResponse.json(
-      { error: "Αποτυχία φόρτωσης property condition." },
+      { error: "Failed to load property condition." },
       { status: 500 }
-    );
+    )
   }
 }
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
   try {
-    const { conditionId } = await context.params;
+    const { conditionId } = await context.params
 
     if (!isValidId(conditionId)) {
       return NextResponse.json(
-        { error: "Μη έγκυρο αναγνωριστικό condition." },
+        { error: "Invalid condition id." },
         { status: 400 }
-      );
+      )
     }
 
     const existingCondition = await prisma.propertyCondition.findUnique({
@@ -431,144 +656,128 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         resolvedAt: true,
         dismissedAt: true,
       },
-    });
+    })
 
     if (!existingCondition) {
       return NextResponse.json(
-        { error: "Το property condition δεν βρέθηκε." },
+        { error: "Property condition not found." },
         { status: 404 }
-      );
+      )
     }
 
-    const body = await request.json();
-    const now = new Date();
+    const body = await request.json()
+    const now = new Date()
 
     const nextStatus =
-      body?.status !== undefined ? normalizeStatus(body.status) : undefined;
-
+      body?.status !== undefined ? normalizeStatus(body.status) : undefined
     const nextBlockingStatus =
       body?.blockingStatus !== undefined
         ? normalizeBlockingStatus(body.blockingStatus)
-        : undefined;
-
+        : undefined
     const nextSeverity =
       body?.severity !== undefined
         ? normalizeSeverity(body.severity)
-        : undefined;
-
+        : undefined
     const nextManagerDecision =
       body?.managerDecision !== undefined
         ? normalizeManagerDecision(body.managerDecision)
-        : undefined;
-
+        : undefined
     const nextManagerNotes =
       body?.managerNotes !== undefined
         ? toNullableString(body.managerNotes)
-        : undefined;
-
+        : undefined
     const nextLastDetectedAt =
       body?.lastDetectedAt !== undefined
         ? toDateOrNull(body.lastDetectedAt)
-        : undefined;
-
+        : undefined
     const nextFirstDetectedAt =
       body?.firstDetectedAt !== undefined
         ? toDateOrNull(body.firstDetectedAt)
-        : undefined;
+        : undefined
 
     const patchData: {
-      status?: PropertyConditionStatusValue;
-      blockingStatus?: PropertyConditionBlockingStatusValue;
-      severity?: PropertyConditionSeverityValue;
-      managerDecision?: PropertyConditionManagerDecisionValue | null;
-      managerNotes?: string | null;
-      firstDetectedAt?: Date;
-      lastDetectedAt?: Date;
-      resolvedAt?: Date | null;
-      dismissedAt?: Date | null;
-      updatedAt?: Date;
+      status?: PropertyConditionStatusValue
+      blockingStatus?: PropertyConditionBlockingStatusValue
+      severity?: PropertyConditionSeverityValue
+      managerDecision?: PropertyConditionManagerDecisionValue | null
+      managerNotes?: string | null
+      firstDetectedAt?: Date
+      lastDetectedAt?: Date
+      resolvedAt?: Date | null
+      dismissedAt?: Date | null
+      updatedAt?: Date
     } = {
       updatedAt: now,
-    };
+    }
 
     if (nextStatus) {
-      patchData.status = toPrismaStatus(nextStatus);
+      patchData.status = toPrismaStatus(nextStatus)
 
       if (nextStatus === "resolved") {
-        patchData.resolvedAt = now;
-        patchData.dismissedAt = null;
-      }
-
-      if (nextStatus === "dismissed") {
-        patchData.dismissedAt = now;
-        patchData.resolvedAt = null;
-      }
-
-      if (nextStatus === "open" || nextStatus === "monitoring") {
-        patchData.resolvedAt = null;
-        patchData.dismissedAt = null;
+        patchData.resolvedAt = now
+        patchData.dismissedAt = null
+      } else if (nextStatus === "dismissed") {
+        patchData.dismissedAt = now
+        patchData.resolvedAt = null
+      } else {
+        patchData.resolvedAt = null
+        patchData.dismissedAt = null
       }
     }
 
     if (nextBlockingStatus) {
-      patchData.blockingStatus = toPrismaBlockingStatus(nextBlockingStatus);
+      patchData.blockingStatus = toPrismaBlockingStatus(nextBlockingStatus)
     }
 
     if (nextSeverity) {
-      patchData.severity = toPrismaSeverity(nextSeverity);
+      patchData.severity = toPrismaSeverity(nextSeverity)
     }
 
     if (nextManagerDecision !== undefined) {
-      patchData.managerDecision = toPrismaManagerDecision(nextManagerDecision);
+      patchData.managerDecision = toPrismaManagerDecision(nextManagerDecision)
 
       if (nextManagerDecision === "resolved") {
-        patchData.status = "RESOLVED";
-        patchData.resolvedAt = now;
-        patchData.dismissedAt = null;
-      }
-
-      if (nextManagerDecision === "dismissed") {
-        patchData.status = "DISMISSED";
-        patchData.dismissedAt = now;
-        patchData.resolvedAt = null;
-      }
-
-      if (nextManagerDecision === "monitor") {
-        patchData.status = "MONITORING";
-        patchData.blockingStatus = "WARNING";
-        patchData.resolvedAt = null;
-        patchData.dismissedAt = null;
-      }
-
-      if (nextManagerDecision === "block_until_resolved") {
-        patchData.status = "OPEN";
-        patchData.blockingStatus = "BLOCKING";
-        patchData.resolvedAt = null;
-        patchData.dismissedAt = null;
-      }
-
-      if (nextManagerDecision === "allow_with_issue") {
+        patchData.status = "RESOLVED"
+        patchData.resolvedAt = now
+        patchData.dismissedAt = null
+      } else if (nextManagerDecision === "dismissed") {
+        patchData.status = "DISMISSED"
+        patchData.dismissedAt = now
+        patchData.resolvedAt = null
+      } else if (nextManagerDecision === "monitor") {
         if (!patchData.status) {
-          patchData.status = "OPEN";
+          patchData.status = "MONITORING"
         }
-        if (!patchData.blockingStatus) {
-          patchData.blockingStatus = "WARNING";
+        patchData.resolvedAt = null
+        patchData.dismissedAt = null
+      } else if (
+        nextManagerDecision === "allow_with_issue" ||
+        nextManagerDecision === "block_until_resolved"
+      ) {
+        if (!patchData.status) {
+          patchData.status = "OPEN"
         }
-        patchData.resolvedAt = null;
-        patchData.dismissedAt = null;
+        if (
+          nextManagerDecision === "block_until_resolved" &&
+          !patchData.blockingStatus
+        ) {
+          patchData.blockingStatus = "BLOCKING"
+        }
+        patchData.resolvedAt = null
+        patchData.dismissedAt = null
       }
     }
 
     if (nextManagerNotes !== undefined) {
-      patchData.managerNotes = nextManagerNotes;
+      patchData.managerNotes = nextManagerNotes
     }
 
     if (nextFirstDetectedAt) {
-      patchData.firstDetectedAt = nextFirstDetectedAt;
+      patchData.firstDetectedAt = nextFirstDetectedAt
     }
 
     if (nextLastDetectedAt) {
-      patchData.lastDetectedAt = nextLastDetectedAt;
+      patchData.lastDetectedAt = nextLastDetectedAt
     } else if (
       patchData.status === "OPEN" ||
       patchData.status === "MONITORING" ||
@@ -576,7 +785,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       patchData.managerDecision === "BLOCK_UNTIL_RESOLVED" ||
       patchData.managerDecision === "MONITOR"
     ) {
-      patchData.lastDetectedAt = now;
+      patchData.lastDetectedAt = now
     }
 
     const updatedCondition = await prisma.propertyCondition.update({
@@ -615,7 +824,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         createdAt: true,
         updatedAt: true,
       },
-    });
+    })
 
     const apiItem = mapSinglePropertyConditionForApi(
       mapDbConditionToRawRecord({
@@ -648,11 +857,13 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         resolvedAt: updatedCondition.resolvedAt,
         dismissedAt: updatedCondition.dismissedAt,
       })
-    );
+    )
+
+    const propertyTruth = await refreshPropertyTruth(updatedCondition.propertyId)
 
     return NextResponse.json(
       {
-        message: "Το property condition ενημερώθηκε επιτυχώς.",
+        message: "Property condition updated successfully.",
         item: {
           ...apiItem,
           organizationId: updatedCondition.organizationId,
@@ -665,16 +876,29 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
           firstDetectedAt: updatedCondition.firstDetectedAt,
           lastDetectedAt: updatedCondition.lastDetectedAt,
         },
+        readiness: propertyTruth
+          ? {
+              status: propertyTruth.readiness.status,
+              label: getReadinessStatusLabel(propertyTruth.readiness.status, "el"),
+              score: propertyTruth.readiness.score,
+              explain: propertyTruth.readiness.explain,
+              reasons: propertyTruth.readiness.reasons,
+              nextActions: propertyTruth.readiness.nextActions,
+              counts: propertyTruth.readiness.counts,
+              computedAt: propertyTruth.readiness.computedAt,
+              nextCheckInAt: propertyTruth.readiness.nextCheckInAt,
+            }
+          : null,
         generatedAt: new Date(),
       },
       { status: 200 }
-    );
+    )
   } catch (error) {
-    console.error("PATCH /api/property-conditions/[conditionId] error:", error);
+    console.error("PATCH /api/property-conditions/[conditionId] error:", error)
 
     return NextResponse.json(
-      { error: "Αποτυχία ενημέρωσης property condition." },
+      { error: "Failed to update property condition." },
       { status: 500 }
-    );
+    )
   }
 }

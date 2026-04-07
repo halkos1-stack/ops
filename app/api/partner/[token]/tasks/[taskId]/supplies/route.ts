@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { Prisma } from "@prisma/client"
+import { mergePropertyCondition } from "@/lib/checklists/merge-property-conditions"
+import { refreshPropertyReadiness } from "@/lib/readiness/refresh-property-readiness"
 
 type RouteContext = {
   params: Promise<{
@@ -15,6 +17,39 @@ type IncomingSupplyAnswer = {
   propertySupplyId: string
   fillLevel?: SupplyFillLevel | null
   notes?: string | null
+}
+
+function buildSupplyConditionMergeKey(input: {
+  propertyId: string
+  propertySupplyId: string
+  supplyItemId?: string | null
+}) {
+  const supplyAnchor = input.supplyItemId ?? input.propertySupplyId
+  return `property:${input.propertyId}:supply-item:${supplyAnchor}:condition:supply`
+}
+
+function buildSupplyConditionTitle(name: string) {
+  return `Supply shortage: ${name}`
+}
+
+function buildSupplyConditionDescription(input: {
+  supplyName: string
+  fillLevel: SupplyFillLevel
+  notes?: string | null
+}) {
+  const parts = [
+    `Supply run reported "${input.supplyName}" with fill level "${input.fillLevel}".`,
+  ]
+
+  if (toNullableTrimmedString(input.notes)) {
+    parts.push(`Partner notes: ${toNullableTrimmedString(input.notes)}.`)
+  }
+
+  parts.push(
+    "This keeps the property not ready until the shortage is explicitly resolved or dismissed."
+  )
+
+  return parts.join(" ")
 }
 
 function isExpired(date?: Date | string | null) {
@@ -437,6 +472,50 @@ export async function POST(req: NextRequest, context: RouteContext) {
             notes: incoming.notes || propertySupply.notes || null,
           },
         })
+
+        if (mode === "submit" && incoming.fillLevel === "low") {
+          await mergePropertyCondition(
+            {
+              organizationId: latestAssignment.task.property.organizationId,
+              propertyId: latestAssignment.task.property.id,
+              taskId: latestAssignment.task.id,
+              bookingId: latestAssignment.task.bookingId ?? null,
+              propertySupplyId: propertySupply.id,
+              mergeKey: buildSupplyConditionMergeKey({
+                propertyId: latestAssignment.task.property.id,
+                propertySupplyId: propertySupply.id,
+                supplyItemId: propertySupply.supplyItem?.id ?? null,
+              }),
+              sourceType: "task_supply_proof",
+              sourceLabel: "Supplies run",
+              sourceItemId: propertySupply.supplyItem?.id ?? propertySupply.id,
+              sourceItemLabel:
+                propertySupply.supplyItem?.name ?? propertySupply.id,
+              sourceRunId: supplyRun.id,
+              sourceAnswerId: existingAnswer?.id ?? null,
+              conditionType: "SUPPLY",
+              title: buildSupplyConditionTitle(
+                propertySupply.supplyItem?.name ?? propertySupply.id
+              ),
+              description: buildSupplyConditionDescription({
+                supplyName:
+                  propertySupply.supplyItem?.name ?? propertySupply.id,
+                fillLevel: incoming.fillLevel,
+                notes: incoming.notes,
+              }),
+              blockingStatus: "BLOCKING",
+              severity: propertySupply.isCritical ? "HIGH" : "MEDIUM",
+              evidence: {
+                fillLevel: incoming.fillLevel,
+                notes: incoming.notes ?? null,
+                propertySupplyId: propertySupply.id,
+                runItemId: runItem?.id ?? null,
+              },
+              detectedAt: now,
+            },
+            tx as never
+          )
+        }
       }
 
       const refreshedTask = await tx.task.findUnique({
@@ -507,9 +586,20 @@ export async function POST(req: NextRequest, context: RouteContext) {
       })
     })
 
+    const propertyTruth = await refreshPropertyReadiness(
+      latestAssignment.task.property.id
+    )
+
     return NextResponse.json({
       success: true,
       mode,
+      propertyReadiness: {
+        status: propertyTruth.readiness.status,
+        explain: propertyTruth.readiness.explain,
+        reasons: propertyTruth.readiness.reasons,
+        updatedAt:
+          propertyTruth.updatedProperty.readinessUpdatedAt?.toISOString() ?? null,
+      },
     })
   } catch (error) {
     console.error("POST /api/partner/[token]/tasks/[taskId]/supplies error:", error)

@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { Prisma } from "@prisma/client"
+import {
+  createPropertyConditionsFromRun,
+  type RunConditionAnswerInput,
+} from "@/lib/checklists/create-property-conditions-from-run"
+import { refreshPropertyReadiness } from "@/lib/readiness/refresh-property-readiness"
 
 type RouteContext = {
   params: Promise<{
@@ -692,6 +697,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
     await prisma.$transaction(async (tx) => {
       const now = new Date()
+      const runConditionAnswers: RunConditionAnswerInput[] = []
 
       const supplyRunStatus = String(
         latestAssignment.task.supplyRun?.status || ""
@@ -800,6 +806,29 @@ export async function POST(req: NextRequest, context: RouteContext) {
               templateItemId: item.id,
               ...answerData,
             },
+          })
+        }
+
+        if (mode === "submit") {
+          runConditionAnswers.push({
+            answerId: savedAnswer.id,
+            runItemId: runItem?.id ?? null,
+            templateItemId: item.id,
+            propertyTemplateItemId: runItem?.propertyTemplateItemId ?? item.id,
+            templateItemLabel: item.label,
+            templateItemCategory: item.category,
+            itemType: item.itemType,
+            linkedSupplyItemId: item.linkedSupplyItemId,
+            opensIssueOnFail: item.opensIssueOnFail,
+            issueTypeOnFail: item.issueTypeOnFail,
+            issueSeverityOnFail: item.issueSeverityOnFail,
+            failureValuesText: item.failureValuesText,
+            valueBoolean: answerData.valueBoolean,
+            valueText: answerData.valueText,
+            valueNumber: answerData.valueNumber,
+            valueSelect: answerData.valueSelect,
+            notes: answerData.notes,
+            photoUrls: answerData.photoUrls,
           })
         }
 
@@ -1181,6 +1210,23 @@ export async function POST(req: NextRequest, context: RouteContext) {
         }
       }
 
+      if (mode === "submit" && runConditionAnswers.length > 0) {
+        await createPropertyConditionsFromRun(
+          {
+            organizationId: latestAssignment.task.property.organizationId,
+            propertyId: latestAssignment.task.property.id,
+            taskId: latestAssignment.task.id,
+            bookingId: latestAssignment.task.booking?.id ?? null,
+            runId: checklistRun.id,
+            templateId: checklistRun.template?.id ?? null,
+            templateTitle: checklistRun.template?.title ?? "Checklist",
+            answers: runConditionAnswers,
+            detectedAt: now,
+          },
+          tx as never
+        )
+      }
+
       await tx.activityLog.create({
         data: {
           organizationId: latestAssignment.task.property.organizationId,
@@ -1212,9 +1258,20 @@ export async function POST(req: NextRequest, context: RouteContext) {
       })
     })
 
+    const propertyTruth = await refreshPropertyReadiness(
+      latestAssignment.task.property.id
+    )
+
     return NextResponse.json({
       success: true,
       mode,
+      propertyReadiness: {
+        status: propertyTruth.readiness.status,
+        explain: propertyTruth.readiness.explain,
+        reasons: propertyTruth.readiness.reasons,
+        updatedAt:
+          propertyTruth.updatedProperty.readinessUpdatedAt?.toISOString() ?? null,
+      },
     })
   } catch (error) {
     console.error("POST /api/partner/[token]/tasks/[taskId]/checklist error:", error)

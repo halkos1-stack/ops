@@ -86,6 +86,13 @@ type PropertyListItem = {
   maxGuests: number
   notes?: string | null
   defaultPartnerId?: string | null
+  readinessStatus?: string | null
+  readinessUpdatedAt?: string | null
+  readinessReasonsText?: string | null
+  nextCheckInAt?: string | null
+  openConditionCount?: number | null
+  openBlockingConditionCount?: number | null
+  openWarningConditionCount?: number | null
   createdAt: string
   updatedAt: string
   defaultPartner?: {
@@ -132,7 +139,7 @@ type MetricFilter =
   | "ready"
   | "not_ready"
 
-type TodayReadinessStatus = "READY" | "NOT_READY" | "UNKNOWN"
+type CanonicalReadinessStatus = "READY" | "BORDERLINE" | "NOT_READY" | "UNKNOWN"
 
 type PropertyOperationalCounts = {
   todayOpenTasks: number
@@ -231,9 +238,13 @@ function getMetricCardClasses(active: boolean) {
   return "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
 }
 
-function getReadinessBadgeClasses(status: TodayReadinessStatus) {
+function getReadinessBadgeClasses(status: CanonicalReadinessStatus) {
   if (status === "READY") {
     return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
+  }
+
+  if (status === "BORDERLINE") {
+    return "bg-amber-50 text-amber-700 ring-1 ring-amber-200"
   }
 
   if (status === "NOT_READY") {
@@ -243,9 +254,16 @@ function getReadinessBadgeClasses(status: TodayReadinessStatus) {
   return "bg-slate-100 text-slate-700 ring-1 ring-slate-200"
 }
 
-function getReadinessLabel(language: "el" | "en", status: TodayReadinessStatus) {
+function getReadinessLabel(
+  language: "el" | "en",
+  status: CanonicalReadinessStatus
+) {
   if (status === "READY") {
     return language === "en" ? "Ready" : "Ετοιμο"
+  }
+
+  if (status === "BORDERLINE") {
+    return language === "en" ? "Borderline" : "Οριακο"
   }
 
   if (status === "NOT_READY") {
@@ -338,93 +356,51 @@ function getOperationalCountsForToday(
   }
 }
 
-function getTodayReadinessStatus(
-  property: PropertyListItem,
-  now: Date
-): TodayReadinessStatus {
-  const counts = getOperationalCountsForToday(property, now)
+function getCanonicalReadinessStatus(
+  property: PropertyListItem
+): CanonicalReadinessStatus {
+  const normalized = String(property.readinessStatus || "")
+    .trim()
+    .toLowerCase()
 
-  const hasKnownSources =
-    Array.isArray(property.tasks) ||
-    Array.isArray(property.issues) ||
-    Array.isArray(property.propertySupplies)
-
-  if (!hasKnownSources) {
-    return "UNKNOWN"
-  }
-
-  const isReady =
-    counts.todayOpenTasks === 0 &&
-    counts.openIssues === 0 &&
-    counts.openDamages === 0 &&
-    counts.supplyShortages === 0
-
-  return isReady ? "READY" : "NOT_READY"
+  if (normalized === "ready") return "READY"
+  if (normalized === "borderline") return "BORDERLINE"
+  if (normalized === "not_ready") return "NOT_READY"
+  return "UNKNOWN"
 }
 
-function getTodayReadinessExplanation(
+function getCanonicalReadinessExplanation(
   property: PropertyListItem,
-  language: "el" | "en",
-  now: Date
+  language: "el" | "en"
 ) {
-  const counts = getOperationalCountsForToday(property, now)
-  const status = getTodayReadinessStatus(property, now)
+  const storedReason = String(property.readinessReasonsText || "").trim()
+  if (storedReason) {
+    return storedReason
+  }
+
+  const status = getCanonicalReadinessStatus(property)
 
   if (status === "READY") {
     return language === "en"
-      ? "No open work today, no open issues or damages, and no active supply shortages."
-      : "Δεν υπαρχουν σημερα ανοιχτες εργασιες, βλαβες, ζημιες ή ελλειψεις αναλωσιμων."
+      ? "The property is ready today because there are no active property conditions."
+      : "Το ακινητο ειναι ετοιμο σημερα επειδη δεν υπαρχουν ενεργα property conditions."
   }
 
-  if (status === "UNKNOWN") {
+  if (status === "NOT_READY") {
     return language === "en"
-      ? "Not enough operational data to calculate today's readiness."
-      : "Δεν υπαρχουν αρκετα επιχειρησιακα δεδομενα για σημερινο readiness."
+      ? "The property is not ready today because active property conditions remain open."
+      : "Το ακινητο δεν ειναι ετοιμο σημερα επειδη παραμενουν ενεργα property conditions."
   }
 
-  const pieces: string[] = []
-
-  if (counts.todayOpenTasks > 0) {
-    pieces.push(
-      language === "en"
-        ? `${counts.todayOpenTasks} open tasks today`
-        : `${counts.todayOpenTasks} ανοιχτες εργασιες σημερα`
-    )
+  if (status === "BORDERLINE") {
+    return language === "en"
+      ? "The property remains in a borderline state and should not be treated as fully ready."
+      : "Το ακινητο παραμενει σε οριακη κατασταση και δεν πρεπει να θεωρειται πληρως ετοιμο."
   }
 
-  if (counts.activeAlerts > 0) {
-    pieces.push(
-      language === "en"
-        ? `${counts.activeAlerts} active alerts`
-        : `${counts.activeAlerts} ενεργα alert`
-    )
-  }
-
-  if (counts.openIssues > 0) {
-    pieces.push(
-      language === "en"
-        ? `${counts.openIssues} open issues`
-        : `${counts.openIssues} ανοιχτες βλαβες`
-    )
-  }
-
-  if (counts.openDamages > 0) {
-    pieces.push(
-      language === "en"
-        ? `${counts.openDamages} open damages`
-        : `${counts.openDamages} ανοιχτες ζημιες`
-    )
-  }
-
-  if (counts.supplyShortages > 0) {
-    pieces.push(
-      language === "en"
-        ? `${counts.supplyShortages} supply shortages`
-        : `${counts.supplyShortages} ελλειψεις αναλωσιμων`
-    )
-  }
-
-  return pieces.join(" • ")
+  return language === "en"
+    ? "Canonical readiness has not been confirmed yet."
+    : "Η canonical readiness εικονα δεν εχει επιβεβαιωθει ακομα."
 }
 
 function getNextUpcomingBooking(property: PropertyListItem) {
@@ -471,8 +447,8 @@ function getCounterConfigs(language: "el" | "en"): CounterConfig[] {
       label: language === "en" ? "Tasks" : "Εργ.",
       description:
         language === "en"
-          ? "Open tasks scheduled for today. Readiness requires this to be 0."
-          : "Ανοιχτες εργασιες με σημερινη ημερομηνια. Για readiness πρεπει να ειναι 0.",
+          ? "Open tasks scheduled for today. Execution detail only; canonical readiness still comes from active property conditions."
+          : "Ανοιχτες εργασιες με σημερινη ημερομηνια. Δειχνει execution detail και οχι την canonical αποφαση readiness.",
     },
     {
       key: "activeAlerts",
@@ -487,24 +463,24 @@ function getCounterConfigs(language: "el" | "en"): CounterConfig[] {
       label: language === "en" ? "Issues" : "Βλαβ.",
       description:
         language === "en"
-          ? "Open non-damage issues. Readiness requires this to be 0."
-          : "Ανοιχτες βλαβες που δεν ειναι ζημιες. Για readiness πρεπει να ειναι 0.",
+          ? "Open non-damage issues visible in operations. Canonical readiness comes from the linked active property conditions."
+          : "Ανοιχτες βλαβες που φαινονται επιχειρησιακα. Το canonical readiness προκυπτει απο τα συνδεδεμενα ενεργα property conditions.",
     },
     {
       key: "openDamages",
       label: language === "en" ? "Damages" : "Ζημ.",
       description:
         language === "en"
-          ? "Open damage records. Readiness requires this to be 0."
-          : "Ανοιχτες ζημιες. Για readiness πρεπει να ειναι 0.",
+          ? "Open damage records visible in operations. Canonical readiness comes from the active property conditions."
+          : "Ανοιχτες ζημιες στην επιχειρησιακη εικονα. Το canonical readiness προκυπτει απο τα ενεργα property conditions.",
     },
     {
       key: "supplyShortages",
       label: language === "en" ? "Supply" : "Ελλ.",
       description:
         language === "en"
-          ? "Active supply shortages. Readiness requires this to be 0."
-          : "Ενεργες ελλειψεις αναλωσιμων. Για readiness πρεπει να ειναι 0.",
+          ? "Visible supply shortages in operations. Canonical readiness stays tied to active supply conditions."
+          : "Ορατες ελλειψεις αναλωσιμων στην επιχειρησιακη εικονα. Το canonical readiness μενει δεμενο με τα ενεργα supply conditions.",
     },
   ]
 }
@@ -515,11 +491,10 @@ function formatLocation(property: PropertyListItem) {
 
 function matchesMetricFilter(
   property: PropertyListItem,
-  metricFilter: MetricFilter,
-  now: Date
+  metricFilter: MetricFilter
 ) {
   const propertyStatus = normalizePropertyStatus(property.status)
-  const readinessStatus = getTodayReadinessStatus(property, now)
+  const readinessStatus = getCanonicalReadinessStatus(property)
 
   switch (metricFilter) {
     case "active":
@@ -529,7 +504,7 @@ function matchesMetricFilter(
     case "ready":
       return readinessStatus === "READY"
     case "not_ready":
-      return readinessStatus === "NOT_READY"
+      return readinessStatus === "NOT_READY" || readinessStatus === "BORDERLINE"
     case "all":
     default:
       return true
@@ -658,11 +633,14 @@ export default function PropertiesPage() {
     ).length
 
     const ready = properties.filter(
-      (item) => getTodayReadinessStatus(item, todayReference) === "READY"
+      (item) => getCanonicalReadinessStatus(item) === "READY"
     ).length
 
     const notReady = properties.filter(
-      (item) => getTodayReadinessStatus(item, todayReference) === "NOT_READY"
+      (item) => {
+        const status = getCanonicalReadinessStatus(item)
+        return status === "NOT_READY" || status === "BORDERLINE"
+      }
     ).length
 
     return {
@@ -672,7 +650,7 @@ export default function PropertiesPage() {
       ready,
       notReady,
     }
-  }, [properties, todayReference])
+  }, [properties])
 
   const filteredProperties = useMemo(() => {
     const term = search.trim().toLowerCase()
@@ -695,11 +673,7 @@ export default function PropertiesPage() {
         cityFilter === "all" ||
         String(property.city || "").toLowerCase() === cityFilter.toLowerCase()
 
-      const matchesMetric = matchesMetricFilter(
-        property,
-        metricFilter,
-        todayReference
-      )
+      const matchesMetric = matchesMetricFilter(property, metricFilter)
 
       return matchesSearch && matchesType && matchesCity && matchesMetric
     })
@@ -731,7 +705,6 @@ export default function PropertiesPage() {
     sortBy,
     metricFilter,
     texts.locale,
-    todayReference,
   ])
 
   function openCreateDrawer() {
@@ -1040,15 +1013,10 @@ export default function PropertiesPage() {
 
                   <tbody className="divide-y divide-slate-100">
                     {filteredProperties.map((property) => {
-                      const readinessStatus = getTodayReadinessStatus(
-                        property,
-                        todayReference
-                      )
-                      const readinessExplanation = getTodayReadinessExplanation(
-                        property,
-                        language,
-                        todayReference
-                      )
+                      const readinessStatus =
+                        getCanonicalReadinessStatus(property)
+                      const readinessExplanation =
+                        getCanonicalReadinessExplanation(property, language)
                       const counts = getOperationalCountsForToday(
                         property,
                         todayReference
@@ -1156,15 +1124,9 @@ export default function PropertiesPage() {
 
               <div className="grid gap-4 p-4 sm:p-6 xl:hidden">
                 {filteredProperties.map((property) => {
-                  const readinessStatus = getTodayReadinessStatus(
-                    property,
-                    todayReference
-                  )
-                  const readinessExplanation = getTodayReadinessExplanation(
-                    property,
-                    language,
-                    todayReference
-                  )
+                  const readinessStatus = getCanonicalReadinessStatus(property)
+                  const readinessExplanation =
+                    getCanonicalReadinessExplanation(property, language)
                   const counts = getOperationalCountsForToday(
                     property,
                     todayReference

@@ -69,6 +69,11 @@ function safeArray<T>(value: T[] | null | undefined): T[] {
   return Array.isArray(value) ? value : []
 }
 
+function toLowerStringOrNull(value: unknown) {
+  const text = toNullableString(value)
+  return text ? text.toLowerCase() : null
+}
+
 function normalizeConditionType(value: unknown): "supply" | "issue" | "damage" {
   if (value === "supply" || value === "issue" || value === "damage") {
     return value
@@ -1386,6 +1391,16 @@ function shapeTaskForResponse(task: Prisma.TaskGetPayload<{ include: typeof task
     cleaningChecklistRun: task.checklistRun,
     suppliesChecklistRun: task.supplyRun,
     issuesChecklistRun: task.issueRun,
+    propertyReadiness: {
+      status: toLowerStringOrNull(task.property?.readinessStatus) ?? "unknown",
+      updatedAt: task.property?.readinessUpdatedAt?.toISOString() ?? null,
+      reasonsText: task.property?.readinessReasonsText ?? null,
+      nextCheckInAt: task.property?.nextCheckInAt?.toISOString() ?? null,
+      openConditionCount: task.property?.openConditionCount ?? 0,
+      openBlockingConditionCount: task.property?.openBlockingConditionCount ?? 0,
+      openWarningConditionCount: task.property?.openWarningConditionCount ?? 0,
+    },
+    taskConditionProofSummary: buildTaskOpenConditionsSummary(rawConditions),
     propertyConditionsSummary: buildTaskOpenConditionsSummary(rawConditions),
   }
 }
