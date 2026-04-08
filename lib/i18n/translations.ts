@@ -1880,7 +1880,7 @@ export function getTaskDetailsPageTexts(language: AppLanguage) {
     },
 
     readiness: {
-      sectionTitle: "Snapshot ετοιμότητας ακινήτου",
+      sectionTitle: "Στιγμιότυπο ετοιμότητας ακινήτου",
       sectionHelp: "Το ακίνητο είναι το κέντρο ετοιμότητας. Η εργασία εμφανίζει στιγμιότυπο και όχι την κύρια κατάσταση.",
       statusLabel: "Κατάσταση ετοιμότητας",
       statusHelp: "Κύριες καταστάσεις: ready / borderline / not_ready / unknown.",

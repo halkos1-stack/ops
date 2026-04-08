@@ -1684,7 +1684,7 @@ function FieldCard({
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-4">
       <div className="mb-2 flex items-center gap-2">
-        <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
+        <p className="text-xs font-semibold tracking-wide text-slate-500">{label}</p>
         {help ? <HelpDot text={help} /> : null}
       </div>
       <p className="break-words text-sm font-semibold text-slate-950">{value || "—"}</p>
@@ -1910,7 +1910,7 @@ function SubmittedAnswersView({
 
                 {cleanedNote && !shouldHideSystemSupplyNote ? (
                   <div className="mt-3 rounded-2xl bg-slate-50 p-3">
-                    <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                    <p className="text-xs font-semibold tracking-wide text-slate-500">
                       {texts.answers.note}
                     </p>
                     <p className="mt-1 text-sm text-slate-700">
@@ -1922,7 +1922,7 @@ function SubmittedAnswersView({
                 {photos.length > 0 ? (
                   <div className="mt-4">
                     <div className="mb-2 flex items-center gap-2">
-                      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                      <p className="text-xs font-semibold tracking-wide text-slate-500">
                         {texts.answers.photos}
                       </p>
                       <HelpDot text={texts.answers.openPhotoTitle} />
@@ -2854,7 +2854,7 @@ export default function TaskDetailsPage() {
 
             <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                <p className="text-xs font-semibold tracking-wide text-slate-500">
                   {texts.header.propertyLabel}
                 </p>
                 <p className="mt-1 text-sm font-semibold text-slate-950">
@@ -2863,7 +2863,7 @@ export default function TaskDetailsPage() {
               </div>
 
               <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                <p className="text-xs font-semibold tracking-wide text-slate-500">
                   {texts.header.dateLabel}
                 </p>
                 <p className="mt-1 text-sm font-semibold text-slate-950">
@@ -2872,7 +2872,7 @@ export default function TaskDetailsPage() {
               </div>
 
               <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                <p className="text-xs font-semibold tracking-wide text-slate-500">
                   {texts.header.durationLabel}
                 </p>
                 <p className="mt-1 text-sm font-semibold text-slate-950">
@@ -3011,7 +3011,7 @@ export default function TaskDetailsPage() {
 
                   {activeAssignment.portalUrl ? (
                     <div className="mt-4 rounded-2xl bg-slate-50 p-4">
-                      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                      <p className="text-xs font-semibold tracking-wide text-slate-500">
                         {texts.assignment.partnerPortalLink}
                       </p>
                       <a
@@ -3027,7 +3027,7 @@ export default function TaskDetailsPage() {
 
                   {activeAssignment.notes ? (
                     <div className="mt-4 rounded-2xl bg-slate-50 p-4">
-                      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                      <p className="text-xs font-semibold tracking-wide text-slate-500">
                         {texts.assignment.assignmentNotes}
                       </p>
                       <p className="mt-2 text-sm text-slate-700">{activeAssignment.notes}</p>
@@ -3111,7 +3111,7 @@ export default function TaskDetailsPage() {
 
             {Array.isArray(readiness?.reasonSummary) && readiness.reasonSummary.length > 0 ? (
               <div className="mt-4 rounded-2xl bg-slate-50 p-4">
-                <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                <p className="text-xs font-semibold tracking-wide text-slate-500">
                   {texts.readiness.snapshotReasoning}
                 </p>
                 <ul className="mt-2 space-y-2 text-sm text-slate-700">
@@ -3618,7 +3618,7 @@ export default function TaskDetailsPage() {
 
               {task.property?.defaultPartner ? (
                 <div className="rounded-2xl border border-slate-200 p-4">
-                  <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                  <p className="text-xs font-semibold tracking-wide text-slate-500">
                     {texts.property.defaultPartner}
                   </p>
                   <p className="mt-2 font-medium text-slate-950">{task.property.defaultPartner.name}</p>
