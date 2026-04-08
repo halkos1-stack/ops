@@ -13,6 +13,7 @@ import { resolveMergedPropertyConditionsNotSeenInRun } from "@/lib/checklists/me
 import { validateChecklistSubmitAnswers } from "@/lib/checklists/checklist-proof-rules";
 import {
   buildPropertyConditionSnapshot,
+  mapDbConditionToRawRecord,
   type RawPropertyConditionRecord,
 } from "@/lib/readiness/property-condition-mappers";
 import { refreshPropertyReadiness } from "@/lib/readiness/refresh-property-readiness";
@@ -229,114 +230,6 @@ function mapToRunConditionAnswerInput(
     valueSelect: submitted.valueSelect,
     notes: submitted.notes,
     photoUrls: submitted.photoUrls,
-  };
-}
-
-function normalizeConditionTypeValue(
-  value: unknown
-): "supply" | "issue" | "damage" {
-  const text = String(value || "").trim().toLowerCase();
-  if (text === "supply") return "supply";
-  if (text === "damage") return "damage";
-  return "issue";
-}
-
-function normalizeConditionStatusValue(
-  value: unknown
-): "open" | "monitoring" | "resolved" | "dismissed" {
-  const text = String(value || "").trim().toLowerCase();
-  if (text === "monitoring") return "monitoring";
-  if (text === "resolved") return "resolved";
-  if (text === "dismissed") return "dismissed";
-  return "open";
-}
-
-function normalizeBlockingStatusValue(
-  value: unknown
-): "blocking" | "non_blocking" | "warning" {
-  const text = String(value || "").trim().toLowerCase();
-  if (text === "blocking") return "blocking";
-  if (text === "non_blocking" || text === "non-blocking") return "non_blocking";
-  return "warning";
-}
-
-function normalizeSeverityValue(
-  value: unknown
-): "low" | "medium" | "high" | "critical" {
-  const text = String(value || "").trim().toLowerCase();
-  if (text === "low") return "low";
-  if (text === "high") return "high";
-  if (text === "critical") return "critical";
-  return "medium";
-}
-
-function normalizeManagerDecisionValue(
-  value: unknown
-):
-  | "allow_with_issue"
-  | "block_until_resolved"
-  | "monitor"
-  | "resolved"
-  | "dismissed"
-  | null {
-  const text = String(value || "").trim().toLowerCase();
-  if (!text) return null;
-  if (text === "allow_with_issue") return "allow_with_issue";
-  if (text === "block_until_resolved") return "block_until_resolved";
-  if (text === "monitor") return "monitor";
-  if (text === "resolved") return "resolved";
-  if (text === "dismissed") return "dismissed";
-  return null;
-}
-
-function mapDbConditionToRawRecord(input: {
-  id: string;
-  propertyId: string;
-  taskId: string | null;
-  bookingId: string | null;
-  propertySupplyId: string | null;
-  mergeKey: string | null;
-  title: string;
-  description: string | null;
-  sourceType: string | null;
-  sourceLabel: string | null;
-  sourceItemId: string | null;
-  sourceItemLabel: string | null;
-  sourceRunId: string | null;
-  sourceAnswerId: string | null;
-  conditionType: string;
-  status: string;
-  blockingStatus: string;
-  severity: string;
-  managerDecision: string | null;
-  managerNotes: string | null;
-  createdAt: Date | string | null;
-  updatedAt: Date | string | null;
-  resolvedAt: Date | string | null;
-  dismissedAt: Date | string | null;
-}): RawPropertyConditionRecord {
-  return {
-    id: input.id,
-    propertyId: input.propertyId,
-    title: input.title,
-    code: toNullableString(input.sourceLabel),
-    itemKey: toNullableString(input.sourceItemId),
-    itemLabel: toNullableString(input.sourceItemLabel),
-    notes:
-      toNullableString(input.managerNotes) ?? toNullableString(input.description),
-    conditionType: normalizeConditionTypeValue(input.conditionType),
-    status: normalizeConditionStatusValue(input.status),
-    blockingStatus: normalizeBlockingStatusValue(input.blockingStatus),
-    severity: normalizeSeverityValue(input.severity),
-    managerDecision: normalizeManagerDecisionValue(input.managerDecision),
-    sourceType: toNullableString(input.sourceType),
-    sourceTaskId: input.taskId,
-    sourceChecklistRunId: toNullableString(input.sourceRunId),
-    sourceChecklistAnswerId: toNullableString(input.sourceAnswerId),
-    createdAt: input.createdAt,
-    updatedAt: input.updatedAt,
-    resolvedAt: input.resolvedAt,
-    dismissedAt: input.dismissedAt,
   };
 }
 

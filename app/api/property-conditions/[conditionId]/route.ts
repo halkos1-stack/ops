@@ -8,6 +8,7 @@ import {
 } from "@/lib/readiness/compute-property-readiness"
 import {
   buildPropertyConditionSnapshot,
+  mapDbConditionToRawRecord,
   mapSinglePropertyConditionForApi,
   type RawPropertyConditionRecord,
 } from "@/lib/readiness/property-condition-mappers"
@@ -225,7 +226,7 @@ function toPropertyReadinessEnum(
   }
 }
 
-function mapDbConditionToRawRecord(condition: {
+function mapDbConditionToExtended(condition: {
   id: string
   propertyId: string
   taskId: string | null
@@ -265,36 +266,9 @@ function mapDbConditionToRawRecord(condition: {
   firstDetectedAt: Date
   lastDetectedAt: Date
 } {
-  const normalizedConditionType =
-    condition.conditionType === "supply" ||
-    condition.conditionType === "issue" ||
-    condition.conditionType === "damage"
-      ? condition.conditionType
-      : "issue"
-
+  const base = mapDbConditionToRawRecord(condition)
   return {
-    id: condition.id,
-    propertyId: condition.propertyId,
-    title: condition.title,
-    code: toNullableString(condition.sourceLabel),
-    itemKey: toNullableString(condition.sourceItemId),
-    itemLabel: toNullableString(condition.sourceItemLabel),
-    notes:
-      toNullableString(condition.managerNotes) ??
-      toNullableString(condition.description),
-    conditionType: normalizedConditionType,
-    status: normalizeStatus(condition.status),
-    blockingStatus: normalizeBlockingStatus(condition.blockingStatus),
-    severity: normalizeSeverity(condition.severity),
-    managerDecision: normalizeManagerDecision(condition.managerDecision),
-    sourceType: toNullableString(condition.sourceType),
-    sourceTaskId: condition.taskId,
-    sourceChecklistRunId: toNullableString(condition.sourceRunId),
-    sourceChecklistAnswerId: toNullableString(condition.sourceAnswerId),
-    createdAt: condition.createdAt,
-    updatedAt: condition.updatedAt,
-    resolvedAt: condition.resolvedAt,
-    dismissedAt: condition.dismissedAt,
+    ...base,
     taskId: condition.taskId,
     bookingId: condition.bookingId,
     propertySupplyId: condition.propertySupplyId,
@@ -459,7 +433,7 @@ async function refreshPropertyTruth(propertyId: string) {
   })
 
   const rawConditions = dbConditions.map((condition) =>
-    mapDbConditionToRawRecord({
+    mapDbConditionToExtended({
       ...condition,
       conditionType: String(condition.conditionType).toLowerCase(),
       status: String(condition.status).toLowerCase(),

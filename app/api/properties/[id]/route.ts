@@ -13,6 +13,7 @@ import {
 import { buildCanonicalSupplySnapshot } from "@/lib/supplies/compute-supply-state";
 import {
   buildPropertyConditionSnapshot,
+  mapDbConditionToRawRecord,
   type RawPropertyConditionRecord,
 } from "@/lib/readiness/property-condition-mappers";
 
@@ -360,81 +361,7 @@ function mapIssueForPropertyPage(issue: PropertyIssueRecord) {
   };
 }
 
-function normalizeConditionType(value: unknown): "supply" | "issue" | "damage" {
-  if (value === "supply" || value === "issue" || value === "damage") {
-    return value;
-  }
-
-  return "issue";
-}
-
-function normalizeConditionStatus(
-  value: unknown
-): "open" | "monitoring" | "resolved" | "dismissed" {
-  if (
-    value === "open" ||
-    value === "monitoring" ||
-    value === "resolved" ||
-    value === "dismissed"
-  ) {
-    return value;
-  }
-
-  return "open";
-}
-
-function normalizeConditionBlockingStatus(
-  value: unknown
-): "blocking" | "non_blocking" | "warning" {
-  if (
-    value === "blocking" ||
-    value === "non_blocking" ||
-    value === "warning"
-  ) {
-    return value;
-  }
-
-  return "warning";
-}
-
-function normalizeConditionSeverity(
-  value: unknown
-): "low" | "medium" | "high" | "critical" {
-  if (
-    value === "low" ||
-    value === "medium" ||
-    value === "high" ||
-    value === "critical"
-  ) {
-    return value;
-  }
-
-  return "medium";
-}
-
-function normalizeConditionManagerDecision(
-  value: unknown
-):
-  | "allow_with_issue"
-  | "block_until_resolved"
-  | "monitor"
-  | "resolved"
-  | "dismissed"
-  | null {
-  if (
-    value === "allow_with_issue" ||
-    value === "block_until_resolved" ||
-    value === "monitor" ||
-    value === "resolved" ||
-    value === "dismissed"
-  ) {
-    return value;
-  }
-
-  return null;
-}
-
-function mapDbConditionToRawRecord(condition: {
+function mapDbConditionToExtended(condition: {
   id: string;
   propertyId: string;
   taskId: string | null;
@@ -462,44 +389,22 @@ function mapDbConditionToRawRecord(condition: {
   resolvedAt: Date | string | null;
   dismissedAt: Date | string | null;
 }): ExtendedRawPropertyConditionRecord {
+  const base = mapDbConditionToRawRecord(condition);
   return {
-    id: condition.id,
-    propertyId: condition.propertyId,
+    ...base,
     taskId: condition.taskId,
     bookingId: condition.bookingId,
     propertySupplyId: condition.propertySupplyId,
     mergeKey: condition.mergeKey ?? null,
-    title: condition.title,
     description: condition.description,
-    sourceType: toNullableString(condition.sourceType),
+    managerNotes: toNullableString(condition.managerNotes),
     sourceLabel: toNullableString(condition.sourceLabel),
     sourceItemId: toNullableString(condition.sourceItemId),
     sourceItemLabel: toNullableString(condition.sourceItemLabel),
     sourceRunId: toNullableString(condition.sourceRunId),
     sourceAnswerId: toNullableString(condition.sourceAnswerId),
-    conditionType: normalizeConditionType(condition.conditionType),
-    status: normalizeConditionStatus(condition.status),
-    blockingStatus: normalizeConditionBlockingStatus(condition.blockingStatus),
-    severity: normalizeConditionSeverity(condition.severity),
-    managerDecision: normalizeConditionManagerDecision(
-      condition.managerDecision
-    ),
-    managerNotes: toNullableString(condition.managerNotes),
-    notes:
-      toNullableString(condition.managerNotes) ??
-      toNullableString(condition.description),
     firstDetectedAt: condition.firstDetectedAt,
     lastDetectedAt: condition.lastDetectedAt,
-    createdAt: condition.createdAt,
-    updatedAt: condition.updatedAt,
-    resolvedAt: condition.resolvedAt,
-    dismissedAt: condition.dismissedAt,
-    code: toNullableString(condition.sourceLabel),
-    itemKey: toNullableString(condition.sourceItemId),
-    itemLabel: toNullableString(condition.sourceItemLabel),
-    sourceTaskId: condition.taskId,
-    sourceChecklistRunId: toNullableString(condition.sourceRunId),
-    sourceChecklistAnswerId: toNullableString(condition.sourceAnswerId),
   };
 }
 
@@ -509,13 +414,17 @@ function mapRawConditionToReadinessInput(
   return {
     id: condition.id,
     propertyId: condition.propertyId,
-    conditionType: normalizeConditionType(condition.conditionType),
-    status: normalizeConditionStatus(condition.status),
-    blockingStatus: normalizeConditionBlockingStatus(condition.blockingStatus),
-    severity: normalizeConditionSeverity(condition.severity),
-    managerDecision: normalizeConditionManagerDecision(
-      condition.managerDecision
-    ),
+    conditionType: condition.conditionType as "supply" | "issue" | "damage",
+    status: condition.status as "open" | "monitoring" | "resolved" | "dismissed",
+    blockingStatus: condition.blockingStatus as "blocking" | "non_blocking" | "warning",
+    severity: condition.severity as "low" | "medium" | "high" | "critical",
+    managerDecision: (condition.managerDecision ?? null) as
+      | "allow_with_issue"
+      | "block_until_resolved"
+      | "monitor"
+      | "resolved"
+      | "dismissed"
+      | null,
     title: condition.title ?? null,
     description: condition.description ?? condition.managerNotes ?? null,
     firstDetectedAt: condition.firstDetectedAt ?? null,
@@ -556,7 +465,7 @@ function buildPropertyReadinessFromConditions(property: PropertyReadinessSource)
   const rawConditions: ExtendedRawPropertyConditionRecord[] = safeArray(
     property.conditions
   ).map((condition) =>
-    mapDbConditionToRawRecord({
+    mapDbConditionToExtended({
       id: condition.id,
       propertyId: condition.propertyId,
       taskId: condition.taskId ?? null,

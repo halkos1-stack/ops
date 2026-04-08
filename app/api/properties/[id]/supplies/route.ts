@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server"
-import { PropertySupplyStateMode } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
 import { requireApiAppAccess, canAccessOrganization } from "@/lib/route-access"
 import {
@@ -10,6 +9,7 @@ import {
   buildCanonicalSupplySnapshot,
   buildCanonicalSupplyWriteData,
 } from "@/lib/supplies/compute-supply-state"
+import { toPrismaSupplyStateMode } from "@/lib/supplies/supply-mode-rules"
 import { refreshPropertyReadiness } from "@/lib/readiness/refresh-property-readiness"
 import { syncPropertySupplyTemplate } from "@/lib/supplies/property-supply-template-sync"
 
@@ -17,14 +17,6 @@ type RouteContext = {
   params: Promise<{
     id: string
   }>
-}
-
-function toPrismaSupplyStateMode(
-  mode: "direct_state" | "numeric_thresholds"
-): PropertySupplyStateMode {
-  return mode === "numeric_thresholds"
-    ? PropertySupplyStateMode.NUMERIC_THRESHOLDS
-    : PropertySupplyStateMode.DIRECT_STATE
 }
 
 function toText(value: unknown) {

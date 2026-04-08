@@ -503,9 +503,6 @@ function getLocalUiTexts(language: "el" | "en") {
         "Bookings are imported first. The system stores the external listing and external property data from the platform. If a booking has no property mapping, you must first match it to an existing property or create a new property before task creation.",
       listDescription:
         "Review imported bookings, see the real period from check-out to next check-in, inspect the imported property data only when needed, and continue with mapping or task creation.",
-      bookingsHistory: "Bookings history",
-      bookingsHistoryHelp:
-        "Open the booking history view focused on booking work windows and linked task flow.",
       bookingsCalendar: "Bookings calendar",
       bookingsCalendarHelp:
         "Open the calendar view of booking work windows. It focuses on operational windows and not on a dense reservation dump.",
@@ -573,9 +570,6 @@ function getLocalUiTexts(language: "el" | "en") {
       "Οι κρατήσεις εισάγονται πρώτα. Αν μια κράτηση δεν έχει αντιστοιχιστεί με ακίνητο, πρέπει πρώτα να συνδεθεί με υπάρχον ακίνητο ή να δημιουργηθεί νέο πριν από τη δημιουργία εργασίας.",
     listDescription:
       "Δες γρήγορα το ακίνητο, το check-out, το επόμενο check-in και το διαθέσιμο παράθυρο εργασίας.",
-    bookingsHistory: "Ιστορικό κρατήσεων",
-    bookingsHistoryHelp:
-      "Ανοίγει την προβολή ιστορικού κρατήσεων με έμφαση στα παράθυρα εργασίας και στη ροή εργασιών.",
     bookingsCalendar: "Ημερολόγιο κρατήσεων",
     bookingsCalendarHelp:
       "Ανοίγει την ημερολογιακή προβολή των παραθύρων εργασίας των κρατήσεων.",
@@ -1286,19 +1280,6 @@ export default function BookingsPage() {
     })
   }, [properties, propertySearch])
 
-  const historyHref = useMemo(() => {
-    const params = new URLSearchParams()
-
-    if (search.trim()) params.set("search", search.trim())
-    if (propertyFilterId !== "all") params.set("propertyId", propertyFilterId)
-    if (dateFrom) params.set("dateFrom", dateFrom)
-    if (dateTo) params.set("dateTo", dateTo)
-    params.set("view", "day")
-
-    const query = params.toString()
-    return query ? `/bookings/history?${query}` : "/bookings/history"
-  }, [search, propertyFilterId, dateFrom, dateTo])
-
   const calendarHref = useMemo(() => {
     const params = new URLSearchParams()
 
@@ -1309,7 +1290,7 @@ export default function BookingsPage() {
     params.set("view", "month")
 
     const query = params.toString()
-    return query ? `/bookings/history?${query}` : "/bookings/history"
+    return query ? `/bookings/calendar?${query}` : "/bookings/calendar"
   }, [search, propertyFilterId, dateFrom, dateTo])
 
   const hasAnySecondaryFilter =
@@ -1331,14 +1312,6 @@ export default function BookingsPage() {
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <Link
-            href={historyHref}
-            title={ui.bookingsHistoryHelp}
-            className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-slate-950"
-          >
-            {ui.bookingsHistory}
-          </Link>
-
           <Link
             href={calendarHref}
             title={ui.bookingsCalendarHelp}

@@ -6,6 +6,7 @@ import {
 import {
   buildPropertyConditionSnapshot,
   getLatestPropertyConditionUpdateAt,
+  mapDbConditionToRawRecord,
   type RawPropertyConditionRecord,
 } from "./property-condition-mappers"
 
@@ -18,68 +19,6 @@ function toPropertyReadinessEnum(
   if (status === "borderline") return "BORDERLINE"
   if (status === "not_ready") return "NOT_READY"
   return "UNKNOWN"
-}
-
-function toNullableString(value: unknown): string | null {
-  if (value === undefined || value === null) {
-    return null
-  }
-
-  const text = String(value).trim()
-  return text.length > 0 ? text : null
-}
-
-function mapDbConditionToRawRecord(input: {
-  id: string
-  propertyId: string
-  taskId: string | null
-  bookingId: string | null
-  propertySupplyId: string | null
-  mergeKey: string | null
-  title: string
-  description: string | null
-  sourceType: string | null
-  sourceLabel: string | null
-  sourceItemId: string | null
-  sourceItemLabel: string | null
-  sourceRunId: string | null
-  sourceAnswerId: string | null
-  conditionType: string
-  status: string
-  blockingStatus: string
-  severity: string
-  managerDecision: string | null
-  managerNotes: string | null
-  createdAt: Date | string | null
-  updatedAt: Date | string | null
-  resolvedAt: Date | string | null
-  dismissedAt: Date | string | null
-}): RawPropertyConditionRecord {
-  return {
-    id: input.id,
-    propertyId: input.propertyId,
-    title: input.title,
-    code: toNullableString(input.sourceLabel),
-    itemKey: toNullableString(input.sourceItemId),
-    itemLabel: toNullableString(input.sourceItemLabel),
-    notes:
-      toNullableString(input.managerNotes) ?? toNullableString(input.description),
-    conditionType: String(input.conditionType).trim().toLowerCase(),
-    status: String(input.status).trim().toLowerCase(),
-    blockingStatus: String(input.blockingStatus).trim().toLowerCase(),
-    severity: String(input.severity).trim().toLowerCase(),
-    managerDecision: input.managerDecision
-      ? String(input.managerDecision).trim().toLowerCase()
-      : null,
-    sourceType: toNullableString(input.sourceType),
-    sourceTaskId: input.taskId,
-    sourceChecklistRunId: toNullableString(input.sourceRunId),
-    sourceChecklistAnswerId: toNullableString(input.sourceAnswerId),
-    createdAt: input.createdAt,
-    updatedAt: input.updatedAt,
-    resolvedAt: input.resolvedAt,
-    dismissedAt: input.dismissedAt,
-  }
 }
 
 export async function refreshPropertyReadiness(propertyId: string) {

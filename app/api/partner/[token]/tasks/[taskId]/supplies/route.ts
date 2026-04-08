@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { Prisma, PropertySupplyStateMode } from "@prisma/client"
+import { Prisma } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
 import {
   mergePropertyCondition,
@@ -10,7 +10,10 @@ import {
   buildCanonicalSupplyWriteData,
   computeSupplyState,
 } from "@/lib/supplies/compute-supply-state"
-import { normalizeSupplyState } from "@/lib/supplies/supply-mode-rules"
+import {
+  normalizeSupplyState,
+  toPrismaSupplyStateMode,
+} from "@/lib/supplies/supply-mode-rules"
 
 type RouteContext = {
   params: Promise<{
@@ -24,14 +27,6 @@ type IncomingSupplyAnswer = {
   fillLevel?: "missing" | "medium" | "full" | null
   quantityValue?: number | null
   notes?: string | null
-}
-
-function toPrismaSupplyStateMode(
-  mode: "direct_state" | "numeric_thresholds"
-): PropertySupplyStateMode {
-  return mode === "numeric_thresholds"
-    ? PropertySupplyStateMode.NUMERIC_THRESHOLDS
-    : PropertySupplyStateMode.DIRECT_STATE
 }
 
 function buildSupplyConditionMergeKey(input: {

@@ -255,6 +255,63 @@ function coerceManagerDecision(
   return null
 }
 
+export interface DbPropertyConditionInput {
+  id: string
+  propertyId: string
+  taskId?: string | null
+  bookingId?: string | null
+  propertySupplyId?: string | null
+  mergeKey?: string | null
+  title: string
+  description?: string | null
+  sourceType?: string | null
+  sourceLabel?: string | null
+  sourceItemId?: string | null
+  sourceItemLabel?: string | null
+  sourceRunId?: string | null
+  sourceAnswerId?: string | null
+  conditionType: string
+  status: string
+  blockingStatus: string
+  severity: string
+  managerDecision?: string | null
+  managerNotes?: string | null
+  firstDetectedAt?: Date | string | null
+  lastDetectedAt?: Date | string | null
+  createdAt?: Date | string | null
+  updatedAt?: Date | string | null
+  resolvedAt?: Date | string | null
+  dismissedAt?: Date | string | null
+}
+
+export function mapDbConditionToRawRecord(
+  input: DbPropertyConditionInput
+): RawPropertyConditionRecord {
+  const toLower = (v: unknown) => String(v ?? "").trim().toLowerCase()
+  return {
+    id: input.id,
+    propertyId: input.propertyId,
+    title: input.title,
+    code: normalizeText(input.sourceLabel),
+    itemKey: normalizeText(input.sourceItemId),
+    itemLabel: normalizeText(input.sourceItemLabel),
+    notes: normalizeText(input.managerNotes) ?? normalizeText(input.description),
+    conditionType: coerceConditionType(toLower(input.conditionType)),
+    status: coerceStatus(toLower(input.status)),
+    blockingStatus: coerceBlockingStatus(toLower(input.blockingStatus)),
+    severity: coerceSeverity(toLower(input.severity)),
+    managerDecision: coerceManagerDecision(toLower(input.managerDecision) || undefined),
+    sourceType: normalizeText(input.sourceType),
+    sourceTaskId: input.taskId ?? null,
+    sourceChecklistRunId: normalizeText(input.sourceRunId),
+    sourceChecklistAnswerId: normalizeText(input.sourceAnswerId),
+    createdAt: input.createdAt ?? null,
+    updatedAt: input.updatedAt ?? null,
+    resolvedAt: input.resolvedAt ?? null,
+    dismissedAt: input.dismissedAt ?? null,
+  }
+}
+
 export function mapRawPropertyConditionToRuleInput(
   condition: RawPropertyConditionRecord
 ): PropertyConditionRuleInput {

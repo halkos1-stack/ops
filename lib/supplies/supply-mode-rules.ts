@@ -1,4 +1,14 @@
+import { PropertySupplyStateMode } from "@prisma/client"
+
 export type CanonicalSupplyStateMode = "direct_state" | "numeric_thresholds"
+
+export function toPrismaSupplyStateMode(
+  mode: "direct_state" | "numeric_thresholds"
+): PropertySupplyStateMode {
+  return mode === "numeric_thresholds"
+    ? PropertySupplyStateMode.NUMERIC_THRESHOLDS
+    : PropertySupplyStateMode.DIRECT_STATE
+}
 
 export type CanonicalSupplyState = "missing" | "medium" | "full"
 
