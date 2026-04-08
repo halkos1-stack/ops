@@ -3063,38 +3063,24 @@ export default function TaskDetailsPage() {
           <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="flex items-center gap-2">
               <h2 className="text-xl font-semibold text-slate-950">
-                {language === "en" ? "Property readiness snapshot" : "Snapshot readiness ακινήτου"}
+                {texts.readiness.sectionTitle}
               </h2>
-              <HelpDot
-                text={
-                  language === "en"
-                    ? "The property is the readiness hub. The task displays a snapshot and not the canonical truth."
-                    : "Το ακίνητο είναι το readiness hub. Το task προβάλλει snapshot και όχι canonical truth."
-                }
-              />
+              <HelpDot text={texts.readiness.sectionHelp} />
             </div>
 
             <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               <FieldCard
-                label={language === "en" ? "Readiness status" : "Κατάσταση readiness"}
+                label={texts.readiness.statusLabel}
                 value={getReadinessLabel(readiness?.status, language)}
-                help={
-                  language === "en"
-                    ? "Canonical statuses: ready / borderline / not_ready / unknown."
-                    : "Canonical statuses: ready / borderline / not_ready / unknown."
-                }
+                help={texts.readiness.statusHelp}
               />
               <FieldCard
-                label={language === "en" ? "Open conditions" : "Ανοιχτές conditions"}
+                label={texts.readiness.openConditionsLabel}
                 value={String(readiness?.openConditionsCount ?? propertyConditions.length)}
-                help={
-                  language === "en"
-                    ? "Total property conditions in the current snapshot."
-                    : "Σύνολο property conditions στο snapshot."
-                }
+                help={texts.readiness.openConditionsHelp}
               />
               <FieldCard
-                label="Blocking"
+                label={texts.readiness.blockingLabel}
                 value={String(
                   readiness?.blockingCount ??
                     propertyConditions.filter(
@@ -3102,20 +3088,12 @@ export default function TaskDetailsPage() {
                         String(condition.blockingStatus ?? "").trim().toLowerCase() === "blocking"
                     ).length
                 )}
-                help={
-                  language === "en"
-                    ? "Conditions that currently block readiness."
-                    : "Conditions που μπλοκάρουν readiness."
-                }
+                help={texts.readiness.blockingHelp}
               />
               <FieldCard
-                label="Warnings"
+                label={texts.readiness.warningsLabel}
                 value={String(readiness?.warningCount ?? warnings.length)}
-                help={
-                  language === "en"
-                    ? "Warnings returned by the route."
-                    : "Warnings που επιστρέφει το route."
-                }
+                help={texts.readiness.warningsHelp}
               />
             </div>
 
@@ -3126,7 +3104,7 @@ export default function TaskDetailsPage() {
 
               {readiness?.nextCheckInAt ? (
                 <Badge tone="violet">
-                  {language === "en" ? "Next check-in" : "Επόμενο check-in"}: {formatDateTime(readiness.nextCheckInAt, locale, texts.common.dash)}
+                  {texts.readiness.nextCheckIn}: {formatDateTime(readiness.nextCheckInAt, locale, texts.common.dash)}
                 </Badge>
               ) : null}
             </div>
@@ -3134,7 +3112,7 @@ export default function TaskDetailsPage() {
             {Array.isArray(readiness?.reasonSummary) && readiness.reasonSummary.length > 0 ? (
               <div className="mt-4 rounded-2xl bg-slate-50 p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                  {language === "en" ? "Snapshot reasoning" : "Αιτιολόγηση snapshot"}
+                  {texts.readiness.snapshotReasoning}
                 </p>
                 <ul className="mt-2 space-y-2 text-sm text-slate-700">
                   {readiness.reasonSummary.map((reason, index) => (
@@ -3433,24 +3411,14 @@ export default function TaskDetailsPage() {
           <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="flex items-center gap-2">
               <h2 className="text-xl font-semibold text-slate-950">
-                {language === "en"
-                  ? "Conditions created from this task"
-                  : "Conditions που δημιουργήθηκαν από αυτό το task"}
+                {texts.conditionsFromTask.sectionTitle}
               </h2>
-              <HelpDot
-                text={
-                  language === "en"
-                    ? "The task is the execution layer. Conditions are the canonical operational truth of the property."
-                    : "Το task είναι execution layer. Οι conditions είναι canonical operational truth του ακινήτου."
-                }
-              />
+              <HelpDot text={texts.conditionsFromTask.sectionHelp} />
             </div>
 
             {conditionsCreatedByTask.length === 0 ? (
               <div className="mt-5 rounded-2xl border border-dashed border-slate-300 p-5 text-sm text-slate-500">
-                {language === "en"
-                  ? "No property conditions were found with this task as source."
-                  : "Δεν βρέθηκαν property conditions που να έχουν source το συγκεκριμένο task."}
+                {texts.conditionsFromTask.noConditions}
               </div>
             ) : (
               <div className="mt-5 space-y-3">
@@ -3458,9 +3426,9 @@ export default function TaskDetailsPage() {
                   <div key={condition.id} className="rounded-2xl border border-emerald-200 bg-emerald-50/40 p-4">
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="text-sm font-semibold text-slate-950">
-                        {condition.title || (language === "en" ? "Condition" : "Condition")}
+                        {condition.title || texts.conditionsFromTask.conditionFallback}
                       </p>
-                      <Badge tone="green">{language === "en" ? "From this task" : "Από αυτό το task"}</Badge>
+                      <Badge tone="green">{texts.conditionsFromTask.fromThisTask}</Badge>
                       <Badge tone="blue">
                         {normalizeConditionTypeLabel(condition.conditionType, language)}
                       </Badge>
@@ -3500,27 +3468,21 @@ export default function TaskDetailsPage() {
           <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="flex items-center gap-2">
               <h2 className="text-xl font-semibold text-slate-950">
-                {language === "en" ? "Linked issues / warnings" : "Linked issues / warnings"}
+                {texts.linkedIssues.sectionTitle}
               </h2>
-              <HelpDot
-                text={
-                  language === "en"
-                    ? "View the issues and warnings returned by the task route."
-                    : "Προβολή των issues και warnings που επιστρέφει το route του task."
-                }
-              />
+              <HelpDot text={texts.linkedIssues.sectionHelp} />
             </div>
 
             <div className="mt-5 grid gap-6 lg:grid-cols-2">
               <div>
                 <div className="mb-3 flex items-center gap-2">
-                  <h3 className="text-base font-semibold text-slate-950">Issues</h3>
+                  <h3 className="text-base font-semibold text-slate-950">{texts.linkedIssues.issuesTitle}</h3>
                   <Badge tone="amber">{issues.length}</Badge>
                 </div>
 
                 {issues.length === 0 ? (
                   <div className="rounded-2xl border border-dashed border-slate-300 p-4 text-sm text-slate-500">
-                    {language === "en" ? "No issues were returned." : "Δεν επιστράφηκαν issues."}
+                    {texts.linkedIssues.noIssues}
                   </div>
                 ) : (
                   <div className="space-y-3">
@@ -3528,7 +3490,7 @@ export default function TaskDetailsPage() {
                       <div key={issue.id} className="rounded-2xl border border-slate-200 p-4">
                         <div className="flex flex-wrap items-center gap-2">
                           <p className="text-sm font-semibold text-slate-950">
-                            {issue.title || "Issue"}
+                            {issue.title || texts.linkedIssues.issueFallback}
                           </p>
                           <Badge tone={getSeverityTone(issue.severity)}>
                             {normalizeSeverityLabel(issue.severity, language)}
@@ -3567,13 +3529,13 @@ export default function TaskDetailsPage() {
 
               <div>
                 <div className="mb-3 flex items-center gap-2">
-                  <h3 className="text-base font-semibold text-slate-950">Warnings</h3>
+                  <h3 className="text-base font-semibold text-slate-950">{texts.linkedIssues.warningsTitle}</h3>
                   <Badge tone="amber">{warnings.length}</Badge>
                 </div>
 
                 {warnings.length === 0 ? (
                   <div className="rounded-2xl border border-dashed border-slate-300 p-4 text-sm text-slate-500">
-                    {language === "en" ? "No warnings were returned." : "Δεν επιστράφηκαν warnings."}
+                    {texts.linkedIssues.noWarnings}
                   </div>
                 ) : (
                   <div className="space-y-3">
@@ -3591,7 +3553,7 @@ export default function TaskDetailsPage() {
                               {normalizeSeverityLabel(warning.severity, language)}
                             </Badge>
                           ) : (
-                            <Badge tone="amber">Warning</Badge>
+                            <Badge tone="amber">{texts.linkedIssues.warningBadge}</Badge>
                           )}
                         </div>
 
@@ -3726,22 +3688,14 @@ export default function TaskDetailsPage() {
           <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="flex items-center gap-2">
               <h2 className="text-xl font-semibold text-slate-950">
-                {language === "en" ? "Property condition snapshot" : "Property condition snapshot"}
+                {texts.conditionSnapshot.sectionTitle}
               </h2>
-              <HelpDot
-                text={
-                  language === "en"
-                    ? "Canonical operational state of the property in the readiness-first model."
-                    : "Canonical operational κατάσταση του ακινήτου στο readiness-first μοντέλο."
-                }
-              />
+              <HelpDot text={texts.conditionSnapshot.sectionHelp} />
             </div>
 
             {propertyConditions.length === 0 ? (
               <div className="mt-5 rounded-2xl border border-dashed border-slate-300 p-5 text-sm text-slate-500">
-                {language === "en"
-                  ? "No property conditions were returned."
-                  : "Δεν επιστράφηκαν property conditions."}
+                {texts.conditionSnapshot.noConditions}
               </div>
             ) : (
               <div className="mt-5 space-y-3">
@@ -3749,7 +3703,7 @@ export default function TaskDetailsPage() {
                   <div key={condition.id} className="rounded-2xl border border-slate-200 p-4">
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="text-sm font-semibold text-slate-950">
-                        {condition.title || (language === "en" ? "Condition" : "Condition")}
+                        {condition.title || texts.conditionsFromTask.conditionFallback}
                       </p>
                       <Badge tone="blue">
                         {normalizeConditionTypeLabel(condition.conditionType, language)}
@@ -3772,7 +3726,7 @@ export default function TaskDetailsPage() {
                     <div className="mt-3 text-xs text-slate-500">
                       {condition.managerDecision ? (
                         <span>
-                          {language === "en" ? "Decision" : "Απόφαση"}: {normalizeManagerDecisionLabel(condition.managerDecision, language)}
+                          {texts.conditionSnapshot.decisionLabel}: {normalizeManagerDecisionLabel(condition.managerDecision, language)}
                         </span>
                       ) : null}
                       {condition.createdAt ? (

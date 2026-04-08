@@ -1607,6 +1607,47 @@ export function getTaskDetailsPageTexts(language: AppLanguage) {
         full: "Full",
         unknown: "Unknown",
       },
+
+      readiness: {
+        sectionTitle: "Property readiness snapshot",
+        sectionHelp: "The property is the readiness hub. The task displays a snapshot and not the canonical truth.",
+        statusLabel: "Readiness status",
+        statusHelp: "Canonical statuses: ready / borderline / not_ready / unknown.",
+        openConditionsLabel: "Open conditions",
+        openConditionsHelp: "Total property conditions in the current snapshot.",
+        blockingLabel: "Blocking",
+        blockingHelp: "Conditions that currently block readiness.",
+        warningsLabel: "Warnings",
+        warningsHelp: "Warnings returned by the route.",
+        nextCheckIn: "Next check-in",
+        snapshotReasoning: "Snapshot reasoning",
+      },
+
+      conditionsFromTask: {
+        sectionTitle: "Conditions created from this task",
+        sectionHelp: "The task is the execution layer. Conditions are the canonical operational truth of the property.",
+        noConditions: "No property conditions were found with this task as source.",
+        fromThisTask: "From this task",
+        conditionFallback: "Condition",
+      },
+
+      linkedIssues: {
+        sectionTitle: "Linked issues / warnings",
+        sectionHelp: "View the issues and warnings linked to this task.",
+        issuesTitle: "Issues",
+        warningsTitle: "Warnings",
+        noIssues: "No issues were returned.",
+        noWarnings: "No warnings were returned.",
+        issueFallback: "Issue",
+        warningBadge: "Warning",
+      },
+
+      conditionSnapshot: {
+        sectionTitle: "Property condition snapshot",
+        sectionHelp: "Canonical operational state of the property in the readiness-first model.",
+        noConditions: "No property conditions were returned.",
+        decisionLabel: "Decision",
+      },
     }
   }
 
@@ -1836,6 +1877,47 @@ export function getTaskDetailsPageTexts(language: AppLanguage) {
       medium: "Μέτρια",
       full: "Πλήρης",
       unknown: "Άγνωστη",
+    },
+
+    readiness: {
+      sectionTitle: "Snapshot ετοιμότητας ακινήτου",
+      sectionHelp: "Το ακίνητο είναι το κέντρο ετοιμότητας. Η εργασία εμφανίζει στιγμιότυπο και όχι την κύρια κατάσταση.",
+      statusLabel: "Κατάσταση ετοιμότητας",
+      statusHelp: "Κύριες καταστάσεις: ready / borderline / not_ready / unknown.",
+      openConditionsLabel: "Ανοιχτές συνθήκες",
+      openConditionsHelp: "Σύνολο συνθηκών ακινήτου στο τρέχον στιγμιότυπο.",
+      blockingLabel: "Μπλοκαρισμένες",
+      blockingHelp: "Συνθήκες που μπλοκάρουν την ετοιμότητα.",
+      warningsLabel: "Προειδοποιήσεις",
+      warningsHelp: "Προειδοποιήσεις που επιστρέφει η εργασία.",
+      nextCheckIn: "Επόμενο check-in",
+      snapshotReasoning: "Αιτιολόγηση στιγμιοτύπου",
+    },
+
+    conditionsFromTask: {
+      sectionTitle: "Συνθήκες που δημιουργήθηκαν από αυτή την εργασία",
+      sectionHelp: "Η εργασία είναι το επίπεδο εκτέλεσης. Οι συνθήκες είναι η κύρια λειτουργική κατάσταση του ακινήτου.",
+      noConditions: "Δεν βρέθηκαν συνθήκες ακινήτου που να έχουν αυτή την εργασία ως πηγή.",
+      fromThisTask: "Από αυτή την εργασία",
+      conditionFallback: "Συνθήκη",
+    },
+
+    linkedIssues: {
+      sectionTitle: "Συνδεδεμένα θέματα / προειδοποιήσεις",
+      sectionHelp: "Προβολή των θεμάτων και προειδοποιήσεων που συνδέονται με αυτή την εργασία.",
+      issuesTitle: "Θέματα",
+      warningsTitle: "Προειδοποιήσεις",
+      noIssues: "Δεν επιστράφηκαν θέματα.",
+      noWarnings: "Δεν επιστράφηκαν προειδοποιήσεις.",
+      issueFallback: "Θέμα",
+      warningBadge: "Προειδοποίηση",
+    },
+
+    conditionSnapshot: {
+      sectionTitle: "Στιγμιότυπο συνθηκών ακινήτου",
+      sectionHelp: "Κύρια λειτουργική κατάσταση του ακινήτου στο μοντέλο ετοιμότητας.",
+      noConditions: "Δεν επιστράφηκαν συνθήκες ακινήτου.",
+      decisionLabel: "Απόφαση",
     },
   }
 }
