@@ -287,6 +287,22 @@ function shapePropertyForOperationalViews(property: FullPropertyRow) {
   }
 }
 
+function isBasePropertyListRequest(input: {
+  status: string | null
+  city: string | null
+  type: string | null
+  readinessStatus: string | null
+  search: string | null
+}) {
+  return (
+    (!input.status || input.status === "all") &&
+    (!input.city || input.city === "all") &&
+    (!input.type || input.type === "all") &&
+    (!input.readinessStatus || input.readinessStatus === "all") &&
+    !String(input.search || "").trim()
+  )
+}
+
 export async function GET(req: NextRequest) {
   try {
     const access = await requireApiAppAccess()
@@ -340,9 +356,55 @@ export async function GET(req: NextRequest) {
       ]
     }
 
-    const properties = (await getFullPropertyList(where)).map(
-      shapePropertyForOperationalViews
-    )
+    const baseProperties = await getFullPropertyList(where)
+    let mergedProperties = baseProperties
+
+    if (
+      isBasePropertyListRequest({
+        status,
+        city,
+        type,
+        readinessStatus,
+        search,
+      })
+    ) {
+      const mappedBookingRows = await prisma.booking.findMany({
+        where: {
+          organizationId,
+          propertyId: {
+            not: null,
+          },
+        },
+        select: {
+          propertyId: true,
+        },
+      })
+
+      const missingPropertyIds = Array.from(
+        new Set(
+          mappedBookingRows
+            .map((row) => row.propertyId)
+            .filter(
+              (propertyId): propertyId is string =>
+                !!propertyId &&
+                !baseProperties.some((property) => property.id === propertyId)
+            )
+        )
+      )
+
+      if (missingPropertyIds.length > 0) {
+        const missingProperties = await getFullPropertyList({
+          organizationId,
+          id: {
+            in: missingPropertyIds,
+          },
+        })
+
+        mergedProperties = [...baseProperties, ...missingProperties]
+      }
+    }
+
+    const properties = mergedProperties.map(shapePropertyForOperationalViews)
 
     return NextResponse.json(properties)
   } catch (error) {

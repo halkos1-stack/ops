@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import Link from "next/link"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
@@ -346,10 +346,6 @@ function getPropertyFilterLabel(
   booking: BookingRow,
   fallbackText: string
 ) {
-  if (booking.property?.code && booking.property?.name) {
-    return `${booking.property.code} · ${booking.property.name}`
-  }
-
   if (booking.property?.name) return booking.property.name
   if (booking.property?.code) return booking.property.code
   if (booking.externalListingName) return booking.externalListingName
@@ -437,7 +433,7 @@ function getWindowDurationLabel(
   language: "el" | "en"
 ) {
   if (!durationMinutes || durationMinutes <= 0) {
-    return language === "en" ? "Open window" : "Ανοικτό παράθυρο"
+    return language === "en" ? "Open window" : "Ανοιχτό παράθυρο"
   }
 
   const totalHours = durationMinutes / 60
@@ -465,8 +461,8 @@ function getWindowCalendarLabel(
   language: "el" | "en"
 ) {
   const propertyText =
-    windowRow.booking.property?.code ||
     windowRow.booking.property?.name ||
+    windowRow.booking.property?.code ||
     windowRow.booking.externalListingName ||
     windowRow.booking.externalListingId ||
     (language === "en" ? "Property" : "Ακίνητο")
@@ -489,7 +485,20 @@ function getWindowCalendarLabel(
       ? "No next check-in"
       : "Χωρίς επόμενο check-in"
 
-  return `${propertyText} · ${start} → ${end}`
+  return `${propertyText} · ${start} - ${end}`
+}
+
+function getBookingAddressDisplay(
+  booking: BookingRow,
+  fallbackText: string
+) {
+  if (!booking.needsMapping && booking.property) {
+    return [booking.property.address, booking.property.city, booking.property.region]
+      .filter(Boolean)
+      .join(" · ") || fallbackText
+  }
+
+  return booking.externalListingName || booking.externalListingId || fallbackText
 }
 
 function normalizeTaskTitle(
@@ -672,7 +681,7 @@ function getLocalTexts(language: "el" | "en") {
     dayView: "Προβολή ημέρας",
     noSelection: "Επίλεξε ένα παράθυρο από το ημερολόγιο.",
     noResults: "Δεν βρέθηκαν παράθυρα.",
-    propertyCounters: "Μετρητής παραθύρων ανά ακίνητο",
+    propertyCounters: "Παράθυρα ανά ακίνητο",
     propertyCountersHelp:
       "Μετρά τα φιλτραρισμένα παράθυρα εργασίας ανά ακίνητο μετά την αναζήτηση και τα φίλτρα ημερομηνίας.",
     allProperties: "Όλα τα ακίνητα",
@@ -704,10 +713,10 @@ function getLocalTexts(language: "el" | "en") {
     duration: "Διάρκεια",
     durationHelp:
       "Ο συνολικός διαθέσιμος χρόνος ανάμεσα στο check-out και το επόμενο check-in.",
-    systemProperty: "Ακίνητο στο σύστημα",
+    systemProperty: "Ακίνητο",
     systemPropertyHelp:
       "Το ακίνητο που είναι σήμερα συνδεδεμένο με αυτή την κράτηση μέσα στο OPS.",
-    rangeTitle: "Διάστημα παραθύρου",
+    rangeTitle: "Παράθυρο εργασίας",
     rangeTitleHelp:
       "Το ακριβές λειτουργικό διάστημα από την έναρξη του παραθύρου μέχρι το check-in που το κλείνει.",
     from: "Από",
@@ -736,8 +745,8 @@ function getLocalTexts(language: "el" | "en") {
     withoutTaskBadge: "Χωρίς εργασία",
     needsMappingBadge: "Χρειάζεται αντιστοίχιση",
     backToBookings: "Επιστροφή στις κρατήσεις",
-    dateFrom: "Από ημερομηνία",
-    dateTo: "Έως ημερομηνία",
+    dateFrom: "Από",
+    dateTo: "Έως",
     dateRangeHelp:
       "Φιλτράρει τα παράθυρα με βάση την ημερομηνία check-out.",
     propertyFilter: "Ακίνητο",
@@ -757,7 +766,7 @@ function getLocalTexts(language: "el" | "en") {
     noPropertyMessage:
       "Η κράτηση δεν έχει αντιστοιχιστεί ακόμη με ακίνητο.",
     viewSelectedOnly:
-      "Το κάτω πεδίο δείχνει μόνο το παράθυρο που επιλέγεται από το ημερολόγιο.",
+      "Το πεδίο παρακάτω δείχνει μόνο το επιλεγμένο παράθυρο.",
   }
 }
 
@@ -1268,7 +1277,7 @@ export default function BookingsHistoryPage() {
                   )
                 }
               >
-                ←
+                β†
               </button>
 
               <div className="min-w-[190px] text-center text-base font-semibold text-slate-950">
@@ -1505,7 +1514,7 @@ export default function BookingsHistoryPage() {
                             </div>
                             {hasActiveAlert ? (
                               <div className="mt-1 truncate text-[10px] font-semibold">
-                                {language === "en" ? "Active alert" : "Ενεργο alert"}
+                                {language === "en" ? "Active alert" : "Ενεργό alert"}
                               </div>
                             ) : null}
                             <div className="mt-1 truncate">
@@ -1516,7 +1525,7 @@ export default function BookingsHistoryPage() {
                               {windowRow.windowEndDateTime ? (
                                 <>
                                   {" "}
-                                  →{" "}
+                                  -{" "}
                                   {windowRow.windowEndDateTime.toLocaleString(locale, {
                                     day: "2-digit",
                                     month: "2-digit",
@@ -1597,7 +1606,7 @@ export default function BookingsHistoryPage() {
                               locale,
                               "-"
                             )}{" "}
-                            →{" "}
+                            -{" "}
                             {formatDateTime(
                               windowRow.windowEndDateTime,
                               locale,
@@ -1656,15 +1665,30 @@ export default function BookingsHistoryPage() {
                   ? getBadgeClassName("danger")
                   : getBadgeClassName("success")
 
-              const propertyDisplay = booking.property
-                ? `${booking.property.code} · ${booking.property.name}`
-                : ui.noPropertyMessage
+              const propertyAddressDisplay = getBookingAddressDisplay(
+                booking,
+                ui.noPropertyMessage
+              )
+              const checkoutText = formatDateTime(
+                windowRow.windowStartDateTime,
+                locale,
+                texts.common.notAvailable
+              )
+              const nextCheckinText = formatDateTime(
+                windowRow.windowEndDateTime,
+                locale,
+                ui.noNextCheckin
+              )
+              const durationText = getWindowDurationLabel(
+                windowRow.windowDurationMinutes,
+                language
+              )
 
               return (
                 <article key={windowRow.id} className="p-5">
-                  <div className="space-y-5">
+                  <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
                     <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                      <div className="min-w-0 flex-1">
+                      <div className="min-w-0 flex-1 space-y-3">
                         <div className="flex flex-wrap items-center gap-2">
                           <div className="text-lg font-semibold text-slate-950">
                             {booking.property?.name ||
@@ -1699,9 +1723,13 @@ export default function BookingsHistoryPage() {
 
                           {isTaskAlertActive(firstTask) ? (
                             <span className={getBadgeClassName("danger")}>
-                              {language === "en" ? "Active alert" : "Ενεργο alert"}
+                              {language === "en" ? "Active alert" : "Ενεργό alert"}
                             </span>
                           ) : null}
+                        </div>
+
+                        <div className="text-sm text-slate-500">
+                          {propertyAddressDisplay}
                         </div>
                       </div>
 
@@ -1748,98 +1776,24 @@ export default function BookingsHistoryPage() {
                       </div>
                     </div>
 
-                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                      <div className="rounded-2xl bg-slate-50 p-4" title={ui.systemPropertyHelp}>
-                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                          {ui.systemProperty}
-                        </div>
-                        <div className="mt-1 text-sm font-medium text-slate-900">
-                          {propertyDisplay}
-                        </div>
-                      </div>
-
-                      <div
-                        className="rounded-2xl bg-slate-50 p-4"
-                        title={ui.checkoutDateTimeHelp}
-                      >
-                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                          {ui.checkoutDateTime}
-                        </div>
-                        <div className="mt-1 text-sm font-medium text-slate-900">
-                          {formatDateTime(
-                            windowRow.windowStartDateTime,
-                            locale,
-                            texts.common.notAvailable
-                          )}
-                        </div>
-                      </div>
-
-                      <div
-                        className="rounded-2xl bg-slate-50 p-4"
-                        title={ui.nextCheckinDateTimeHelp}
-                      >
-                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                          {ui.nextCheckinDateTime}
-                        </div>
-                        <div className="mt-1 text-sm font-medium text-slate-900">
-                          {formatDateTime(
-                            windowRow.windowEndDateTime,
-                            locale,
-                            ui.noNextCheckin
-                          )}
-                        </div>
-                      </div>
-
-                      <div
-                        className="rounded-2xl bg-slate-50 p-4"
-                        title={ui.durationHelp}
-                      >
-                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                          {ui.duration}
-                        </div>
-                        <div className="mt-1 text-sm font-medium text-slate-900">
-                          {getWindowDurationLabel(
-                            windowRow.windowDurationMinutes,
-                            language
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
                     <div
-                      className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                      className="mt-4 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 xl:flex-row xl:items-center xl:justify-between"
                       title={ui.rangeTitleHelp}
                     >
-                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        {ui.rangeTitle}
+                      <div className="min-w-0 text-sm text-slate-700" title={ui.checkoutDateTimeHelp}>
+                        <span className="font-semibold text-slate-950">{ui.checkoutDateTime}:</span>{" "}
+                        {checkoutText}
                       </div>
 
-                      <div className="mt-3 grid gap-3 md:grid-cols-2">
-                        <div className="rounded-2xl bg-white p-3" title={ui.fromHelp}>
-                          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            {ui.from}
-                          </div>
-                          <div className="mt-1 text-sm font-medium text-slate-900">
-                            {formatDateTime(
-                              windowRow.windowStartDateTime,
-                              locale,
-                              "-"
-                            )}
-                          </div>
-                        </div>
+                      <div className="min-w-0 text-sm text-slate-700" title={ui.nextCheckinDateTimeHelp}>
+                        <span className="font-semibold text-slate-950">{ui.nextCheckinDateTime}:</span>{" "}
+                        {nextCheckinText}
+                      </div>
 
-                        <div className="rounded-2xl bg-white p-3" title={ui.toHelp}>
-                          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            {ui.to}
-                          </div>
-                          <div className="mt-1 text-sm font-medium text-slate-900">
-                            {formatDateTime(
-                              windowRow.windowEndDateTime,
-                              locale,
-                              ui.noNextCheckin
-                            )}
-                          </div>
-                        </div>
+                      <div className="min-w-0 text-sm text-slate-700" title={ui.durationHelp}>
+                        <span className="font-semibold text-slate-950">{ui.rangeTitle}:</span>{" "}
+                        {checkoutText} - {nextCheckinText}
+                        <span className="ml-2 text-xs text-slate-500">({durationText})</span>
                       </div>
                     </div>
 
@@ -1857,7 +1811,7 @@ export default function BookingsHistoryPage() {
                               </div>
                               {isTaskAlertActive(firstTask) ? (
                                 <span className="rounded-full border border-red-200 bg-red-100 px-2.5 py-1 text-xs font-semibold text-red-700">
-                                  {language === "en" ? "Active alert" : "Ενεργο alert"}
+                                  {language === "en" ? "Active alert" : "Ενεργό alert"}
                                 </span>
                               ) : null}
                             </div>
@@ -1866,7 +1820,7 @@ export default function BookingsHistoryPage() {
                               {getTaskStatusDisplay(firstTask.status, language)} ·{" "}
                               {getPriorityDisplay(firstTask.priority, language)}
                               {isTaskAlertActive(firstTask) && firstTask.alertAt
-                                ? ` Β· ${language === "en" ? "Alert" : "Alert"}: ${formatDateTime(firstTask.alertAt, locale, "-")}`
+                                ? ` · Alert: ${formatDateTime(firstTask.alertAt, locale, "-")}`
                                 : ""}
                             </div>
                           </div>
@@ -2209,3 +2163,4 @@ export default function BookingsHistoryPage() {
     </div>
   )
 }
+

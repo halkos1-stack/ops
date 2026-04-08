@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import Link from "next/link"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
@@ -126,16 +126,6 @@ type MappingModalState = {
   booking: BookingRow | null
 }
 
-type BookingStateTone = "neutral" | "success" | "warning" | "danger"
-
-type BookingStateBlock = {
-  tone: BookingStateTone
-  title: string
-  description: string
-  helper?: string
-  nextStep?: string
-}
-
 function isValidDate(value?: string | null) {
   if (!value) return false
   const date = new Date(value)
@@ -253,20 +243,6 @@ function getSyncLabel(
   return syncStatus
 }
 
-function getTaskSummaryLabel(
-  tasks: BookingTask[],
-  language: "el" | "en",
-  texts: ReturnType<typeof getBookingsModuleTexts>
-) {
-  if (tasks.length === 0) return texts.statuses.noTask
-
-  if (language === "en") {
-    return tasks.length === 1 ? "1 task" : `${tasks.length} tasks`
-  }
-
-  return tasks.length === 1 ? "1 εργασία" : `${tasks.length} εργασίες`
-}
-
 function getBadgeClassName(kind: "neutral" | "success" | "warning" | "danger") {
   if (kind === "success") {
     return "rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700"
@@ -283,36 +259,6 @@ function getBadgeClassName(kind: "neutral" | "success" | "warning" | "danger") {
   return "rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700"
 }
 
-function getStatePanelClassName(tone: BookingStateTone) {
-  if (tone === "success") {
-    return "rounded-2xl border border-emerald-200 bg-emerald-50 p-4"
-  }
-
-  if (tone === "warning") {
-    return "rounded-2xl border border-amber-200 bg-amber-50 p-4"
-  }
-
-  if (tone === "danger") {
-    return "rounded-2xl border border-rose-200 bg-rose-50 p-4"
-  }
-
-  return "rounded-2xl border border-slate-200 bg-slate-50 p-4"
-}
-
-function getStateTitleClassName(tone: BookingStateTone) {
-  if (tone === "success") return "text-sm font-semibold text-emerald-900"
-  if (tone === "warning") return "text-sm font-semibold text-amber-900"
-  if (tone === "danger") return "text-sm font-semibold text-rose-900"
-  return "text-sm font-semibold text-slate-900"
-}
-
-function getStateTextClassName(tone: BookingStateTone) {
-  if (tone === "success") return "mt-1 text-sm text-emerald-800"
-  if (tone === "warning") return "mt-1 text-sm text-amber-800"
-  if (tone === "danger") return "mt-1 text-sm text-rose-800"
-  return "mt-1 text-sm text-slate-700"
-}
-
 function normalizeTaskTitle(
   title: string | null | undefined,
   language: "el" | "en"
@@ -324,17 +270,11 @@ function normalizeTaskTitle(
   if (language === "en") {
     text = text
       .replace(/^Καθαρισμός μετά από check-out\s*-\s*/i, "Cleaning after check-out - ")
-      .replace(/^Καθαρισμος μετά από check-out\s*-\s*/i, "Cleaning after check-out - ")
       .replace(/^Επιθεώρηση μετά από check-out\s*-\s*/i, "Inspection after check-out - ")
-      .replace(/^Επιθεωρηση μετά από check-out\s*-\s*/i, "Inspection after check-out - ")
       .replace(/^Συντήρηση μετά από check-out\s*-\s*/i, "Maintenance after check-out - ")
-      .replace(/^Συντηρηση μετά από check-out\s*-\s*/i, "Maintenance after check-out - ")
       .replace(/^Καθαρισμός\s*-\s*/i, "Cleaning - ")
-      .replace(/^Καθαρισμος\s*-\s*/i, "Cleaning - ")
       .replace(/^Επιθεώρηση\s*-\s*/i, "Inspection - ")
-      .replace(/^Επιθεωρηση\s*-\s*/i, "Inspection - ")
       .replace(/^Συντήρηση\s*-\s*/i, "Maintenance - ")
-      .replace(/^Συντηρηση\s*-\s*/i, "Maintenance - ")
     return text
   }
 
@@ -439,7 +379,7 @@ function getWindowRangeLabel(
       )
     : texts.list.noNextBooking
 
-  return `${start} → ${end}`
+  return `${start} - ${end}`
 }
 
 function getExternalPropertyDisplay(booking: BookingRow) {
@@ -458,10 +398,7 @@ function getExternalPropertyCountryFallback(language: "el" | "en") {
   return language === "en" ? "Greece" : "Ελλάδα"
 }
 
-function getBookingStateBlock(
-  booking: BookingRow,
-  language: "el" | "en"
-): BookingStateBlock {
+function getBookingStateBlock(booking: BookingRow, language: "el" | "en") {
   const firstTask = booking.tasks[0] || null
 
   if (isCancelledBooking(booking.status)) {
@@ -474,7 +411,7 @@ function getBookingStateBlock(
       description:
         language === "en"
           ? "This booking is no longer active. Review it only if you need history or verification."
-          : "Η κράτηση αυτή δεν είναι πλέον ενεργή. Την ελέγχεις μόνο για ιστορικό ή επιβεβαίωση.",
+          : "Η κράτηση δεν είναι πλέον ενεργή. Προβάλλεται μόνο για ιστορικό ή επιβεβαίωση.",
       nextStep:
         language === "en" ? "Review details only" : "Μόνο προβολή λεπτομερειών",
     }
@@ -566,6 +503,9 @@ function getLocalUiTexts(language: "el" | "en") {
         "Bookings are imported first. The system stores the external listing and external property data from the platform. If a booking has no property mapping, you must first match it to an existing property or create a new property before task creation.",
       listDescription:
         "Review imported bookings, see the real period from check-out to next check-in, inspect the imported property data only when needed, and continue with mapping or task creation.",
+      bookingsHistory: "Bookings history",
+      bookingsHistoryHelp:
+        "Open the booking history view focused on booking work windows and linked task flow.",
       bookingsCalendar: "Bookings calendar",
       bookingsCalendarHelp:
         "Open the calendar view of booking work windows. It focuses on operational windows and not on a dense reservation dump.",
@@ -618,7 +558,7 @@ function getLocalUiTexts(language: "el" | "en") {
       next3DaysCounterHelp:
         "Bookings with check-out within the next three days inside the current filters.",
       bookingIdentityHelp:
-        "Booking identity shows the system property, the external listing and the imported address data when mapping is still missing.",
+        "Booking identity shows the system property and the relevant address for this booking.",
       workWindowHelp:
         "The available work window is the real time range between check-out and the next check-in.",
       availableWindowHelp:
@@ -630,21 +570,24 @@ function getLocalUiTexts(language: "el" | "en") {
 
   return {
     pageDescription:
-      "Οι κρατήσεις εισάγονται πρώτα. Το σύστημα αποθηκεύει τα εξωτερικά στοιχεία listing και τα εξωτερικά στοιχεία ακινήτου από την πλατφόρμα. Αν μια κράτηση δεν έχει αντιστοίχιση με ακίνητο, πρέπει πρώτα να αντιστοιχιστεί με υπάρχον ακίνητο ή να δημιουργηθεί νέο ακίνητο πριν από τη δημιουργία εργασίας.",
+      "Οι κρατήσεις εισάγονται πρώτα. Αν μια κράτηση δεν έχει αντιστοιχιστεί με ακίνητο, πρέπει πρώτα να συνδεθεί με υπάρχον ακίνητο ή να δημιουργηθεί νέο πριν από τη δημιουργία εργασίας.",
     listDescription:
-      "Έλεγξε τις εισαγόμενες κρατήσεις, δες το πραγματικό διάστημα από check-out έως επόμενο check-in, εξέτασε τα εισαγόμενα στοιχεία μόνο όπου χρειάζεται και συνέχισε με αντιστοίχιση ή δημιουργία εργασίας.",
+      "Δες γρήγορα το ακίνητο, το check-out, το επόμενο check-in και το διαθέσιμο παράθυρο εργασίας.",
+    bookingsHistory: "Ιστορικό κρατήσεων",
+    bookingsHistoryHelp:
+      "Ανοίγει την προβολή ιστορικού κρατήσεων με έμφαση στα παράθυρα εργασίας και στη ροή εργασιών.",
     bookingsCalendar: "Ημερολόγιο κρατήσεων",
     bookingsCalendarHelp:
-      "Ανοίγει την ημερολογιακή προβολή των παραθύρων εργασίας των κρατήσεων. Εστιάζει στα λειτουργικά παράθυρα και όχι σε πυκνή λίστα κρατήσεων.",
+      "Ανοίγει την ημερολογιακή προβολή των παραθύρων εργασίας των κρατήσεων.",
     searchPlaceholder: "Αναζήτηση κρατήσεων...",
     searchHelp:
       "Αναζήτηση με ακίνητο, επισκέπτη, listing, κωδικό κράτησης ή πλατφόρμα.",
     propertyFilter: "Ακίνητο",
     propertyFilterAll: "Όλα τα ακίνητα",
     propertyFilterHelp:
-      "Φιλτράρει τη λίστα κρατήσεων μόνο για το αντιστοιχισμένο ακίνητο.",
-    dateFrom: "Από ημερομηνία",
-    dateTo: "Έως ημερομηνία",
+      "Φιλτράρει τη λίστα κρατήσεων με βάση το αντιστοιχισμένο ακίνητο.",
+    dateFrom: "Από",
+    dateTo: "Έως",
     dateRangeHelp:
       "Φιλτράρει τις κρατήσεις με βάση την ημερομηνία check-out.",
     clearFilters: "Καθαρισμός φίλτρων",
@@ -655,13 +598,13 @@ function getLocalUiTexts(language: "el" | "en") {
       "Ανοίγει τη σελίδα λεπτομερειών της συγκεκριμένης κράτησης.",
     viewTask: "Προβολή εργασίας",
     viewTaskHelp:
-      "Ανοίγει τη συνδεδεμένη εργασία που δημιουργήθηκε για αυτή την κράτηση.",
+      "Ανοίγει τη συνδεδεμένη εργασία της κράτησης.",
     viewProperty: "Προβολή ακινήτου",
     viewPropertyHelp:
       "Ανοίγει το αντιστοιχισμένο ακίνητο της κράτησης.",
     viewPropertyTasks: "Προβολή εργασιών ακινήτου",
     viewPropertyTasksHelp:
-      "Ανοίγει τη global σελίδα εργασιών φιλτραρισμένη μόνο για το συγκεκριμένο ακίνητο.",
+      "Ανοίγει τη λίστα εργασιών μόνο για το συγκεκριμένο ακίνητο.",
     mapProperty: "Αντιστοίχιση ακινήτου",
     mapPropertyHelp:
       "Συνδέει την εισαγόμενη κράτηση με υπάρχον ακίνητο ή οδηγεί σε δημιουργία νέου.",
@@ -669,7 +612,7 @@ function getLocalUiTexts(language: "el" | "en") {
     createTaskHelp:
       "Δημιουργεί νέα εργασία για το διαθέσιμο παράθυρο μεταξύ check-out και επόμενου check-in.",
     allCounterHelp:
-      "Όλες οι κρατήσεις που ταιριάζουν στα τρέχοντα φίλτρα ημερομηνίας, ακινήτου και αναζήτησης.",
+      "Όλες οι κρατήσεις που ταιριάζουν στα τρέχοντα φίλτρα.",
     activeCounterHelp:
       "Κρατήσεις που παραμένουν ενεργές και δεν έχουν ακυρωθεί.",
     withoutTasksCounterHelp:
@@ -677,24 +620,23 @@ function getLocalUiTexts(language: "el" | "en") {
     withTasksCounterHelp:
       "Κρατήσεις που έχουν ήδη τουλάχιστον μία συνδεδεμένη εργασία.",
     needsMappingCounterHelp:
-      "Κρατήσεις που ήρθαν από πλατφόρμα αλλά δεν έχουν ακόμη συνδεθεί με ακίνητο του συστήματος.",
+      "Κρατήσεις από πλατφόρμα που δεν έχουν ακόμη συνδεθεί με ακίνητο στο σύστημα.",
     cancelledCounterHelp:
       "Κρατήσεις που έχουν ήδη ακυρωθεί.",
     todayCheckoutCounterHelp:
-      "Κρατήσεις των οποίων το check-out είναι σήμερα μέσα στα τρέχοντα φίλτρα.",
+      "Κρατήσεις με check-out σήμερα.",
     next3DaysCounterHelp:
-      "Κρατήσεις με check-out μέσα στο επόμενο τριήμερο, με βάση τα τρέχοντα φίλτρα.",
+      "Κρατήσεις με check-out μέσα στις επόμενες τρεις ημέρες.",
     bookingIdentityHelp:
-      "Η ταυτότητα κράτησης δείχνει το ακίνητο του συστήματος, το listing της πλατφόρμας και τα εισαγμένα στοιχεία διεύθυνσης όταν λείπει η αντιστοίχιση.",
+      "Δείχνει το ακίνητο της κράτησης και τη σχετική διεύθυνση που πρέπει να γνωρίζει ο διαχειριστής.",
     workWindowHelp:
       "Το διαθέσιμο παράθυρο εργασίας είναι το πραγματικό διάστημα μεταξύ check-out και επόμενου check-in.",
     availableWindowHelp:
-      "Χρησιμοποίησε αυτό το χρονικό διάστημα για να δημιουργήσεις ή να αξιολογήσεις την επιχειρησιακή εργασία της κράτησης.",
+      "Χρησιμοποίησε αυτό το διάστημα για να δημιουργήσεις ή να αξιολογήσεις την επιχειρησιακή εργασία.",
     noPropertyTasks:
       "Το ακίνητο δεν έχει ακόμη αντιστοιχιστεί, οπότε οι ενέργειες ακινήτου δεν είναι διαθέσιμες.",
   }
 }
-
 export default function BookingsPage() {
   const { language } = useAppLanguage()
   const texts = getBookingsModuleTexts(language)
@@ -965,7 +907,7 @@ export default function BookingsPage() {
       alert(
         language === "en"
           ? "This booking has no external listing id, so it cannot be mapped yet."
-          : "Αυτή η κράτηση δεν έχει external listing id, οπότε δεν μπορεί ακόμα να αντιστοιχιστεί."
+          : "Αυτή η κράτηση δεν έχει external listing id, οπότε δεν μπορεί ακόμη να αντιστοιχιστεί."
       )
       return
     }
@@ -1161,6 +1103,35 @@ export default function BookingsPage() {
     })
   }, [bookings, propertyFilterId, dateFrom, dateTo, search])
 
+  const propertyFilterOptions = useMemo(() => {
+    const map = new Map<string, PropertyOption>()
+
+    for (const property of properties) {
+      if (!property?.id) continue
+      map.set(property.id, property)
+    }
+
+    for (const booking of bookings) {
+      if (!booking.property?.id) continue
+
+      if (!map.has(booking.property.id)) {
+        map.set(booking.property.id, {
+          id: booking.property.id,
+          code: booking.property.code,
+          name: booking.property.name,
+          address: booking.property.address,
+          city: booking.property.city,
+          region: booking.property.region,
+          status: booking.property.status,
+        })
+      }
+    }
+
+    return Array.from(map.values()).sort((a, b) =>
+      String(a.name || "").localeCompare(String(b.name || ""), locale)
+    )
+  }, [bookings, locale, properties])
+
   const counters = useMemo(() => {
     const today = getTodayDateOnly()
     const next3 = new Date(today)
@@ -1322,6 +1293,20 @@ export default function BookingsPage() {
     if (propertyFilterId !== "all") params.set("propertyId", propertyFilterId)
     if (dateFrom) params.set("dateFrom", dateFrom)
     if (dateTo) params.set("dateTo", dateTo)
+    params.set("view", "day")
+
+    const query = params.toString()
+    return query ? `/bookings/history?${query}` : "/bookings/history"
+  }, [search, propertyFilterId, dateFrom, dateTo])
+
+  const calendarHref = useMemo(() => {
+    const params = new URLSearchParams()
+
+    if (search.trim()) params.set("search", search.trim())
+    if (propertyFilterId !== "all") params.set("propertyId", propertyFilterId)
+    if (dateFrom) params.set("dateFrom", dateFrom)
+    if (dateTo) params.set("dateTo", dateTo)
+    params.set("view", "month")
 
     const query = params.toString()
     return query ? `/bookings/history?${query}` : "/bookings/history"
@@ -1348,6 +1333,14 @@ export default function BookingsPage() {
         <div className="flex flex-wrap gap-2">
           <Link
             href={historyHref}
+            title={ui.bookingsHistoryHelp}
+            className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-slate-950"
+          >
+            {ui.bookingsHistory}
+          </Link>
+
+          <Link
+            href={calendarHref}
             title={ui.bookingsCalendarHelp}
             className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-slate-950"
           >
@@ -1381,9 +1374,9 @@ export default function BookingsPage() {
                 className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-slate-400"
               >
                 <option value="all">{ui.propertyFilterAll}</option>
-                {properties.map((property) => (
+                {propertyFilterOptions.map((property) => (
                   <option key={property.id} value={property.id}>
-                    {property.code} · {property.name}
+                    {property.name}
                   </option>
                 ))}
               </select>
@@ -1520,12 +1513,17 @@ export default function BookingsPage() {
               const firstTask = booking.tasks[0] || null
               const stateBlock = getBookingStateBlock(booking, language)
 
-              const propertyDisplay = booking.property
-                ? `${booking.property.code} · ${booking.property.name}`
-                : texts.list.propertyNotMapped
-
               const externalPropertyDisplay =
                 getExternalPropertyDisplay(booking) || texts.common.notAvailable
+              const propertyAddressDisplay = booking.needsMapping
+                ? externalPropertyDisplay
+                : [
+                    booking.property?.address,
+                    booking.property?.city,
+                    booking.property?.region,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ") || texts.common.notAvailable
 
               const checkOutDateTimeText = formatDateAndTime(
                 booking.checkOutDate,
@@ -1542,14 +1540,24 @@ export default function BookingsPage() {
                     texts.common.notAvailable
                   )
                 : texts.list.noNextBooking
+              const windowRangeText = getWindowRangeLabel(booking, locale, texts)
 
               return (
-                <article key={booking.id} className="p-5">
-                  <div className="space-y-5">
+                <article key={booking.id} className="p-4 sm:p-5">
+                  <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
                     <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                       <div className="min-w-0 flex-1 space-y-3">
                         <div className="flex flex-wrap items-center gap-2">
-                          <div className="text-lg font-semibold text-slate-950">
+                          <div
+                            className="min-w-0 max-w-full truncate text-lg font-semibold text-slate-950"
+                            title={
+                              booking.property
+                                ? booking.property.name
+                                : booking.externalListingName ||
+                                  booking.externalListingId ||
+                                  texts.list.propertyNotMapped
+                            }
+                          >
                             {booking.property
                               ? booking.property.name
                               : booking.externalListingName ||
@@ -1557,23 +1565,27 @@ export default function BookingsPage() {
                                 texts.list.propertyNotMapped}
                           </div>
 
-                          <span className={getBadgeClassName("neutral")}>
+                          <span
+                            className={getBadgeClassName("neutral")}
+                            title={language === "en" ? "Booking platform" : "Πλατφόρμα κράτησης"}
+                          >
                             {normalizeSourcePlatform(booking.sourcePlatform, texts)}
                           </span>
 
-                          <span className={syncBadgeClass}>
+                          <span className={syncBadgeClass} title={ui.bookingIdentityHelp}>
                             {getSyncLabel(booking.syncStatus, booking.needsMapping, texts)}
                           </span>
 
-                          <span className={taskBadgeClass}>
+                          <span className={taskBadgeClass} title={ui.createTaskHelp}>
                             {getTaskCoverageLabel(booking.taskStatus, language, texts)}
                           </span>
                         </div>
 
-                        <div className="text-sm text-slate-500">
-                          {language === "en"
-                            ? `Booking ID: ${booking.externalBookingId}`
-                            : `Κωδικός κράτησης: ${booking.externalBookingId}`}
+                        <div
+                          className="text-sm text-slate-500"
+                          title={ui.bookingIdentityHelp}
+                        >
+                          {propertyAddressDisplay}
                         </div>
                       </div>
 
@@ -1581,271 +1593,134 @@ export default function BookingsPage() {
                         <Link
                           href={`/bookings/${booking.id}`}
                           title={ui.viewBookingHelp}
-                          className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-slate-950"
+                          className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-slate-950"
                         >
                           {ui.viewBooking}
                         </Link>
+
+                        {booking.property ? (
+                          <Link
+                            href={`/properties/${booking.property.id}`}
+                            title={ui.viewPropertyHelp}
+                            className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-slate-950"
+                          >
+                            {ui.viewProperty}
+                          </Link>
+                        ) : null}
 
                         {firstTask ? (
                           <Link
                             href={`/tasks/${firstTask.id}`}
                             title={ui.viewTaskHelp}
-                            className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-slate-950"
+                            className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-slate-950"
                           >
                             {ui.viewTask}
                           </Link>
-                        ) : null}
-
-                        {booking.property ? (
-                          <>
-                            <Link
-                              href={`/properties/${booking.property.id}`}
-                              title={ui.viewPropertyHelp}
-                              className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-slate-950"
-                            >
-                              {ui.viewProperty}
-                            </Link>
-
-                            <Link
-                              href={`/tasks?propertyId=${booking.property.id}&scope=open`}
-                              title={ui.viewPropertyTasksHelp}
-                              className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-slate-950"
-                            >
-                              {ui.viewPropertyTasks}
-                            </Link>
-                          </>
-                        ) : null}
-
-                        {booking.needsMapping ? (
+                        ) : booking.needsMapping ? (
                           <button
                             type="button"
                             title={ui.mapPropertyHelp}
                             onClick={() => openMappingModal(booking)}
                             disabled={!String(booking.externalListingId || "").trim()}
-                            className="inline-flex items-center rounded-2xl bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:bg-amber-300"
+                            className="inline-flex items-center rounded-2xl bg-amber-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:bg-amber-300"
                           >
                             {ui.mapProperty}
                           </button>
-                        ) : !firstTask ? (
+                        ) : (
                           <button
                             type="button"
                             title={ui.createTaskHelp}
                             onClick={() => openCreateTaskModal(booking)}
                             disabled={isCancelledBooking(booking.status)}
-                            className="inline-flex items-center rounded-2xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                            className="inline-flex items-center rounded-2xl bg-slate-950 px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
                           >
                             {ui.createTask}
                           </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div
+                      className="mt-4 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 lg:flex-row lg:items-center lg:justify-between"
+                      title={ui.workWindowHelp}
+                    >
+                      <div className="min-w-0 text-sm text-slate-700">
+                        <span className="font-semibold text-slate-950">
+                          {language === "en" ? "Check-out" : "Check-out"}:
+                        </span>{" "}
+                        {checkOutDateTimeText}
+                      </div>
+
+                      <div className="min-w-0 text-sm text-slate-700">
+                        <span className="font-semibold text-slate-950">
+                          {language === "en" ? "Next check-in" : "Επόμενο check-in"}:
+                        </span>{" "}
+                        {nextCheckInDateTimeText}
+                      </div>
+
+                      <div className="min-w-0 text-sm text-slate-700">
+                        <span className="font-semibold text-slate-950">
+                          {language === "en" ? "Window" : "Παράθυρο"}:
+                        </span>{" "}
+                        {windowRangeText}
+                        {booking.workWindow?.windowDurationCompact ? (
+                          <span className="ml-2 text-xs text-slate-500">
+                            ({booking.workWindow.windowDurationCompact})
+                          </span>
                         ) : null}
                       </div>
                     </div>
 
-                    <div className={getStatePanelClassName(stateBlock.tone)}>
-                      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                        <div className="min-w-0">
-                          <div className={getStateTitleClassName(stateBlock.tone)}>
-                            {stateBlock.title}
-                          </div>
-
-                          <div className={getStateTextClassName(stateBlock.tone)}>
-                            {stateBlock.description}
-                          </div>
-
-                          {stateBlock.helper ? (
-                            <div className={getStateTextClassName(stateBlock.tone)}>
-                              {stateBlock.helper}
-                            </div>
-                          ) : null}
-                        </div>
-
-                        {stateBlock.nextStep ? (
-                          <div className="shrink-0 rounded-2xl border border-black/10 bg-white/70 px-3 py-2 text-sm font-medium text-slate-900">
-                            {language === "en" ? "Next step:" : "Επόμενο βήμα:"}{" "}
-                            <span className="font-semibold">{stateBlock.nextStep}</span>
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-
-                    <div className="grid gap-4 xl:grid-cols-[1.1fr_1fr]">
-                      <div
-                        className="rounded-3xl border border-slate-200 bg-slate-50 p-4"
-                        title={ui.bookingIdentityHelp}
+                    <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-4">
+                      <span
+                        className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-700"
+                        title={
+                          firstTask
+                            ? stateBlock.description
+                            : booking.needsMapping
+                              ? ui.mapPropertyHelp
+                              : ui.createTaskHelp
+                        }
                       >
-                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                          {language === "en"
-                            ? "Booking identity"
-                            : "Ταυτότητα κράτησης"}
-                        </div>
+                        {firstTask
+                          ? `${normalizeTaskTitle(firstTask.title, language)} · ${getTaskTypeDisplay(firstTask.taskType, language, texts)} · ${getTaskStatusDisplay(firstTask.status, language)}`
+                          : language === "en"
+                            ? "No task yet"
+                            : "Χωρίς εργασία ακόμη"}
+                      </span>
 
-                        <div className="mt-4 space-y-4">
-                          <div>
-                            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                              {language === "en"
-                                ? "Property in system"
-                                : "Ακίνητο στο σύστημα"}
-                            </div>
-                            <div className="mt-1 text-sm font-semibold text-slate-950">
-                              {propertyDisplay}
-                            </div>
-                          </div>
-
-                          <div>
-                            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                              {language === "en"
-                                ? "Platform listing"
-                                : "Listing πλατφόρμας"}
-                            </div>
-                            <div className="mt-1 text-sm font-medium text-slate-900">
-                              {booking.externalListingName ||
-                                booking.externalListingId ||
-                                "-"}
-                            </div>
-                          </div>
-
-                          {booking.needsMapping ? (
-                            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3">
-                              <div className="text-xs font-semibold uppercase tracking-wide text-amber-700">
-                                {language === "en"
-                                  ? "Platform property"
-                                  : "Ακίνητο πλατφόρμας"}
-                              </div>
-                              <div className="mt-1 text-sm font-medium text-slate-900">
-                                {externalPropertyDisplay}
-                              </div>
-                              <div className="mt-2 text-xs text-amber-700">
-                                {language === "en"
-                                  ? "These are the imported address details from the platform that are waiting to be linked to a property in the system."
-                                  : "Αυτά είναι τα εισαγμένα στοιχεία διεύθυνσης από την πλατφόρμα που περιμένουν να συνδεθούν με ακίνητο του συστήματος."}
-                              </div>
-                            </div>
-                          ) : booking.property?.address ||
-                            booking.property?.city ||
-                            booking.property?.region ? (
-                            <div>
-                              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                                {language === "en"
-                                  ? "Mapped property location"
-                                  : "Τοποθεσία αντιστοιχισμένου ακινήτου"}
-                              </div>
-                              <div className="mt-1 text-sm font-medium text-slate-900">
-                                {[
-                                  booking.property?.address,
-                                  booking.property?.city,
-                                  booking.property?.region,
-                                ]
-                                  .filter(Boolean)
-                                  .join(" · ") || texts.common.notAvailable}
-                              </div>
-                            </div>
-                          ) : null}
-                        </div>
-                      </div>
-
-                      <div
-                        className="rounded-3xl border border-slate-200 bg-white p-4"
-                        title={ui.workWindowHelp}
+                      <span
+                        className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${
+                          firstTask?.alertEnabled && firstTask?.alertAt
+                            ? "border border-rose-200 bg-rose-50 text-rose-700"
+                            : "border border-slate-200 bg-white text-slate-600"
+                        }`}
+                        title={
+                          firstTask?.alertEnabled && firstTask?.alertAt
+                            ? language === "en"
+                              ? "Task alert is active for this booking."
+                              : "Υπάρχει ενεργό alert για την εργασία αυτής της κράτησης."
+                            : stateBlock.title
+                        }
                       >
-                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                          {texts.list.windowLabel}
-                        </div>
-
-                        <div className="mt-1 text-xs text-slate-500">
-                          {language === "en"
-                            ? "Available time for work between check-out and next check-in."
-                            : "Διαθέσιμος χρόνος για εργασία μεταξύ check-out και επόμενου check-in."}
-                        </div>
-
-                        <div className="mt-4 grid gap-3 md:grid-cols-2">
-                          <div className="rounded-2xl bg-slate-50 p-3">
-                            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                              {texts.labels.checkOut}
-                            </div>
-                            <div className="mt-1 text-sm font-semibold text-slate-950">
-                              {checkOutDateTimeText}
-                            </div>
-                          </div>
-
-                          <div className="rounded-2xl bg-slate-50 p-3">
-                            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                              {texts.labels.nextCheckIn}
-                            </div>
-                            <div className="mt-1 text-sm font-semibold text-slate-950">
-                              {nextCheckInDateTimeText}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div
-                          className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-4"
-                          title={ui.availableWindowHelp}
-                        >
-                          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            {language === "en"
-                              ? "Available work window"
-                              : "Διαθέσιμο παράθυρο εργασίας"}
-                          </div>
-
-                          <div className="mt-2 text-sm font-semibold text-slate-950">
-                            {getWindowRangeLabel(booking, locale, texts)}
-                          </div>
-
-                          {booking.workWindow?.windowDurationCompact ? (
-                            <div className="mt-2 text-sm text-slate-600">
-                              {language === "en"
-                                ? `Available duration: ${booking.workWindow.windowDurationCompact}`
-                                : `Διαθέσιμη διάρκεια: ${booking.workWindow.windowDurationCompact}`}
-                            </div>
-                          ) : null}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
-                      <div className="mb-3 flex items-center justify-between gap-3">
-                        <div className="text-sm font-semibold text-slate-950">
-                          {texts.list.linkedTasks}
-                        </div>
-                        <div className="text-sm text-slate-500">
-                          {getTaskSummaryLabel(booking.tasks, language, texts)}
-                        </div>
-                      </div>
-
-                      {firstTask ? (
-                        <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                            <div className="min-w-0">
-                              <div className="text-sm font-semibold text-slate-950">
-                                {normalizeTaskTitle(firstTask.title, language)}
-                              </div>
-                              <div className="mt-1 text-sm text-slate-600">
-                                {getTaskTypeDisplay(firstTask.taskType, language, texts)} ·{" "}
-                                {getTaskStatusDisplay(firstTask.status, language)} ·{" "}
-                                {getPriorityDisplay(firstTask.priority, language)}
-                              </div>
-                            </div>
-
-                            <Link
-                              href={`/tasks/${firstTask.id}`}
-                              title={ui.viewTaskHelp}
-                              className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-                            >
-                              {ui.viewTask}
-                            </Link>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-4 text-sm text-slate-500">
-                          {language === "en"
-                            ? "No task has been created for this booking yet."
-                            : "Δεν έχει δημιουργηθεί ακόμη εργασία για αυτή την κράτηση."}
-                        </div>
-                      )}
+                        {firstTask
+                          ? `${getPriorityDisplay(firstTask.priority, language)}${
+                              firstTask.alertEnabled && firstTask.alertAt
+                                ? ` · Alert ${formatTime(firstTask.alertAt)}`
+                                : ""
+                            }`
+                          : stateBlock.title}
+                      </span>
 
                       {!booking.property ? (
-                        <div className="mt-3 text-xs text-slate-500">
-                          {ui.noPropertyTasks}
-                        </div>
+                        <span
+                          className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700"
+                          title={ui.mapPropertyHelp}
+                        >
+                          {language === "en"
+                            ? "Property mapping required"
+                            : "Απαιτείται αντιστοίχιση ακινήτου"}
+                        </span>
                       ) : null}
                     </div>
                   </div>
@@ -2263,7 +2138,7 @@ export default function BookingsPage() {
                     <div className="mt-1 text-sm text-amber-800">
                       {language === "en"
                         ? "Adjust anything you want before creating the new property."
-                        : "Προσαρμόζεις ό,τι θέλεις πριν δημιουργήσεις το νέο ακίνητο."}
+                        : "Προσάρμοσε ό,τι θέλεις πριν δημιουργήσεις το νέο ακίνητο."}
                     </div>
                   </div>
 
@@ -2397,3 +2272,6 @@ export default function BookingsPage() {
     </div>
   )
 }
+
+
+
