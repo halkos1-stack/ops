@@ -19,6 +19,11 @@ import {
   normalizeTaskStatus,
   normalizeTaskTitleText,
 } from "@/lib/i18n/normalizers"
+import {
+  getReadinessBadgeClasses,
+  getReadinessLabel,
+  getOperationalStatusBadgeClasses,
+} from "@/lib/readiness/readiness-ui"
 import { getSupplyDisplayName } from "@/lib/supply-presets"
 import { buildCanonicalSupplySnapshot } from "@/lib/supplies/compute-supply-state"
 
@@ -547,17 +552,14 @@ function normalizeCanonicalReadinessStatus(value?: string | null): CanonicalRead
 }
 
 function getCanonicalReadinessLabel(language: "el" | "en", status: CanonicalReadinessStatus, unknownLabel: string) {
-  if (status === "READY") return language === "en" ? "Ready" : "Έτοιμο"
-  if (status === "BORDERLINE") return language === "en" ? "Borderline" : "Οριακό"
-  if (status === "NOT_READY") return language === "en" ? "Not ready" : "Μη έτοιμο"
-  return unknownLabel
+  // Delegates to shared readiness-ui helper. Local wrapper kept for CanonicalReadinessStatus type compatibility.
+  if (status === "UNKNOWN") return unknownLabel
+  return getReadinessLabel(language, status.toLowerCase())
 }
 
 function getReadinessTone(status: CanonicalReadinessStatus) {
-  if (status === "READY") return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
-  if (status === "BORDERLINE") return "bg-amber-50 text-amber-700 ring-1 ring-amber-200"
-  if (status === "NOT_READY") return "bg-red-50 text-red-700 ring-1 ring-red-200"
-  return "bg-slate-100 text-slate-700 ring-1 ring-slate-200"
+  // Delegates to shared readiness-ui helper.
+  return getReadinessBadgeClasses(status.toLowerCase())
 }
 
 function badgeClasses(status?: string | null) {
@@ -1935,20 +1937,6 @@ export default function PropertyDetailPage() {
 
     const raw = String(property.operationalStatus ?? "unknown").toLowerCase()
 
-    const toneMap: Record<string, string> = {
-      occupied: "bg-blue-50 text-blue-700 ring-1 ring-blue-200",
-      no_task_coverage: "bg-red-50 text-red-700 ring-1 ring-red-200",
-      task_unaccepted: "bg-amber-50 text-amber-700 ring-1 ring-amber-200",
-      task_in_progress: "bg-sky-50 text-sky-700 ring-1 ring-sky-200",
-      awaiting_proof: "bg-purple-50 text-purple-700 ring-1 ring-purple-200",
-      // backward compat
-      waiting_cleaning: "bg-amber-50 text-amber-700 ring-1 ring-amber-200",
-      ready: "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200",
-      borderline: "bg-amber-50 text-amber-700 ring-1 ring-amber-200",
-      not_ready: "bg-red-50 text-red-700 ring-1 ring-red-200",
-      unknown: "bg-slate-100 text-slate-700 ring-1 ring-slate-200",
-    }
-
     const labelObj = property.operationalStatusLabel
     const reasonObj = property.operationalStatusReason
     const explanationObj = property.operationalStatusExplanation
@@ -1972,7 +1960,8 @@ export default function PropertyDetailPage() {
       label,
       reason,
       explanation,
-      tone: toneMap[raw] ?? toneMap.unknown,
+      // Shared helper — single source of truth για operational badge colors (9 states)
+      tone: getOperationalStatusBadgeClasses(raw),
       alertActive: Boolean(property.operationalAlertActive),
     }
   }, [property, language])

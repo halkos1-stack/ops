@@ -608,7 +608,10 @@ export function getReadinessStatusLabel(language: AppLanguage, value: unknown) {
 
 export type NormalizedOperationalStatus =
   | "OCCUPIED"
-  | "WAITING_CLEANING"
+  | "NO_TASK_COVERAGE"
+  | "TASK_UNACCEPTED"
+  | "TASK_IN_PROGRESS"
+  | "AWAITING_PROOF"
   | "READY"
   | "BORDERLINE"
   | "NOT_READY"
@@ -617,7 +620,11 @@ export type NormalizedOperationalStatus =
 export function normalizeOperationalStatusForLabel(value: unknown): NormalizedOperationalStatus {
   const s = String(value ?? "").trim().toLowerCase()
   if (s === "occupied") return "OCCUPIED"
-  if (s === "waiting_cleaning") return "WAITING_CLEANING"
+  if (s === "no_task_coverage") return "NO_TASK_COVERAGE"
+  if (s === "task_unaccepted") return "TASK_UNACCEPTED"
+  if (s === "waiting_cleaning") return "TASK_UNACCEPTED" // backward compat
+  if (s === "task_in_progress") return "TASK_IN_PROGRESS"
+  if (s === "awaiting_proof") return "AWAITING_PROOF"
   if (s === "ready") return "READY"
   if (s === "borderline" || s === "needs_attention") return "BORDERLINE"
   if (s === "not_ready") return "NOT_READY"
@@ -631,15 +638,21 @@ export function getOperationalStatusLabel(language: AppLanguage, value: unknown)
     language === "en"
       ? {
           OCCUPIED: "Occupied",
-          WAITING_CLEANING: "Awaiting cleaning",
+          NO_TASK_COVERAGE: "No task coverage",
+          TASK_UNACCEPTED: "Awaiting partner acceptance",
+          TASK_IN_PROGRESS: "Task in progress",
+          AWAITING_PROOF: "Awaiting proof submission",
           READY: "Ready",
           BORDERLINE: "Borderline",
           NOT_READY: "Not ready",
           UNKNOWN: "Unknown status",
         }
       : {
-          OCCUPIED: "Με κόσμο",
-          WAITING_CLEANING: "Αναμονή καθαρισμού",
+          OCCUPIED: "Έχει φιλοξενούμενους",
+          NO_TASK_COVERAGE: "Εκκρεμεί δημιουργία εργασίας",
+          TASK_UNACCEPTED: "Εκκρεμεί αποδοχή συνεργάτη",
+          TASK_IN_PROGRESS: "Εργασία σε εξέλιξη",
+          AWAITING_PROOF: "Αναμονή υποβολής λιστών",
           READY: "Έτοιμο",
           BORDERLINE: "Οριακό",
           NOT_READY: "Μη έτοιμο",

@@ -1310,13 +1310,16 @@ async function getFullProperty(id: string) {
     operationalPendingCleaningTask: operationalStatusResult.pendingCleaningTask,
     operationalRelevantTask: operationalStatusResult.relevantTask,
 
-    readinessStatus: readinessComputed.status,
+    // derivedReadinessStatus: canonical readiness που ενοποιεί operational context + conditions.
+    // Όταν υπάρχει turnover εκκρεμότητα → "not_ready" ανεξάρτητα conditions.
+    // Αυτό είναι το readiness που εμφανίζεται στο UI ως κύρια αλήθεια.
+    readinessStatus: operationalStatusResult.derivedReadinessStatus,
     readinessUpdatedAt: readinessComputed.readinessUpdatedAt,
     readinessReasonsText: readinessComputed.readinessReasonsText,
     nextCheckInAt: readinessComputed.nextCheckInAt,
     nextBooking: readinessComputed.nextBooking,
     readinessSummary: {
-      status: readinessComputed.status,
+      status: operationalStatusResult.derivedReadinessStatus,
       statusLabel: readinessComputed.statusLabel,
       score: readinessComputed.score,
       explain: readinessComputed.explain,

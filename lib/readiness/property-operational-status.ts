@@ -1,22 +1,28 @@
 /**
- * Property Operational Status
+ * Property Operational Status — canonical property truth module
  *
- * Ξεχωριστό από το readiness snapshot που παράγεται από canonical conditions.
- * Αυτό το module υπολογίζει την ΕΠΙΧΕΙΡΗΣΙΑΚΗ κατάσταση του ακινήτου
- * βάσει του κύκλου εκτέλεσης (turnover window):
+ * Αυτό το module ορίζει την ΠΡΑΓΜΑΤΙΚΗ ΕΙΚΟΝΑ ακινήτου βάσει σειράς προτεραιότητας:
  *
- *   occupied         : υπάρχει ενεργή διαμονή τώρα
- *   no_task_coverage : checkout πέρασε, δεν υπάρχει εργασία που να καλύπτει τον κύκλο
- *   task_unaccepted  : εργασία υπάρχει αλλά ο συνεργάτης δεν την έχει αποδεχτεί
- *   task_in_progress : εργασία αποδεκτή / σε εξέλιξη (χωρίς εκκρεμείς υποχρεωτικές λίστες)
- *   awaiting_proof   : εργασία σε εξέλιξη, απαιτούμενες λίστες δεν έχουν υποβληθεί
- *   ready            : fallback από conditions (εκτέλεση ολοκληρώθηκε ή δεν υπάρχει window)
- *   borderline       : fallback από conditions
- *   not_ready        : fallback από conditions
- *   unknown          : ανεπαρκή δεδομένα
+ *   A. ACTIVE STAY / OCCUPANCY
+ *      occupied         : υπάρχει ενεργή διαμονή τώρα
  *
- * ΔΕΝ αλλάζει τη λογική του readiness από conditions.
- * Προτάσσεται μπροστά από το readiness snapshot στο UI.
+ *   B. TURNOVER WINDOW (≤ 3 ημέρες μετά checkout)
+ *      no_task_coverage : checkout πέρασε, δεν υπάρχει εργασία → όχι έτοιμο
+ *      task_unaccepted  : εργασία υπάρχει αλλά δεν αποδεκτεί → όχι έτοιμο
+ *      task_in_progress : εργασία αποδεκτή / σε εξέλιξη → όχι έτοιμο
+ *      awaiting_proof   : εκκρεμούν απαιτούμενες λίστες → όχι έτοιμο
+ *
+ *   C. CONDITIONS (fallback όταν δεν υπάρχει ενεργό turnover window)
+ *      ready            : καθαρές conditions
+ *      borderline       : conditions χωρίς blocking
+ *      not_ready        : blocking conditions
+ *      unknown          : ανεπαρκή δεδομένα
+ *
+ * ΚΑΝΟΝΑΣ: Turnover window pending → derivedReadinessStatus = "not_ready"
+ *          Το readiness δεν επιστρέφει "ready" όταν υπάρχει εκκρεμής εκτέλεση.
+ *
+ * Δεν αλλάζει τη λογική του compute-property-readiness.ts (conditions analyzer).
+ * Παράγει derivedReadinessStatus ως canonical contract για όλα τα layers.
  */
 
 export type PropertyOperationalStatus =
@@ -29,6 +35,14 @@ export type PropertyOperationalStatus =
   | "borderline"
   | "not_ready"
   | "unknown"
+
+/**
+ * Ετοιμότητα ως canonical output της επιχειρησιακής κατάστασης.
+ * Turnover pending → πάντα "not_ready".
+ * Occupied + conditions ready → "ready".
+ * Conditions → αντίστοιχα.
+ */
+export type DerivedReadinessStatus = "ready" | "borderline" | "not_ready" | "unknown"
 
 export type OperationalStatusBooking = {
   id: string
@@ -82,6 +96,12 @@ export type PropertyOperationalStatusResult = {
   reason: { el: string; en: string }
   /** Hover/tooltip: πλήρης εξήγηση για το UI */
   explanation: { el: string; en: string }
+  /**
+   * Canonical readiness output — ενοποιεί operational context + conditions.
+   * Χρησιμοποιείται στο API route για να παράγει το readinessSummary.status.
+   * ΚΑΝΟΝΑΣ: turnover pending → πάντα "not_ready", ανεξάρτητα conditions.
+   */
+  derivedReadinessStatus: DerivedReadinessStatus
   alertActive: boolean
   alertTask: {
     id: string
@@ -155,14 +175,46 @@ function isCleaningOrTurnoverTask(task: OperationalStatusTask): boolean {
   return type === "cleaning" || task.sendCleaningChecklist === true
 }
 
-function normalizeReadinessToOperational(
+function normalizeReadinessToConditionsStatus(
   readinessStatus: string | null | undefined
-): PropertyOperationalStatus {
+): DerivedReadinessStatus {
   const s = String(readinessStatus ?? "").trim().toLowerCase()
   if (s === "ready") return "ready"
   if (s === "borderline" || s === "needs_attention") return "borderline"
   if (s === "not_ready") return "not_ready"
   return "unknown"
+}
+
+/**
+ * Canonical derivation: παράγει DerivedReadinessStatus από operational context.
+ *
+ * ΚΑΝΟΝΑΣ:
+ * - Turnover pending (no_task_coverage / task_unaccepted / task_in_progress / awaiting_proof)
+ *   → "not_ready" ανεξάρτητα conditions.
+ *   Αιτιολόγηση: η απόδειξη ετοιμότητας δεν έχει επιστραφεί ακόμα.
+ * - occupied → conditions-based (property ετοιμάστηκε πριν check-in, conditions είναι η αλήθεια)
+ * - ready / borderline / not_ready / unknown → απευθείας από conditions fallback
+ */
+function deriveReadinessStatus(
+  operationalStatus: PropertyOperationalStatus,
+  inputReadinessStatus: string | null | undefined
+): DerivedReadinessStatus {
+  if (
+    operationalStatus === "no_task_coverage" ||
+    operationalStatus === "task_unaccepted" ||
+    operationalStatus === "task_in_progress" ||
+    operationalStatus === "awaiting_proof"
+  ) {
+    return "not_ready"
+  }
+
+  // occupied / ready / borderline / not_ready / unknown → conditions-based
+  return normalizeReadinessToConditionsStatus(inputReadinessStatus !== null && inputReadinessStatus !== undefined
+    ? inputReadinessStatus
+    : operationalStatus === "ready" ? "ready"
+    : operationalStatus === "borderline" ? "borderline"
+    : operationalStatus === "not_ready" ? "not_ready"
+    : "unknown")
 }
 
 function toRelevantTask(task: OperationalStatusTask): OperationalRelevantTask {
@@ -321,6 +373,7 @@ export function computePropertyOperationalStatus(
       label: LABELS.occupied,
       reason: REASONS.occupied,
       explanation: EXPLANATIONS.occupied,
+      derivedReadinessStatus: deriveReadinessStatus("occupied", input.readinessStatus),
       alertActive: alertTask !== null,
       alertTask,
       activeBooking: {
@@ -348,11 +401,8 @@ export function computePropertyOperationalStatus(
     // Βρίσκουμε την πιο σχετική εργασία για το τρέχον turnover
     const relevantTaskRaw = tasks.find((task) => {
       if (isCompletedOrCancelledTaskStatus(task.status)) return false
-      // Αν είναι καθαριστική/turnover εργασία
       if (!isCleaningOrTurnoverTask(task)) return false
-      // Σύνδεση με booking ή χωρίς (γενική)
       if (task.bookingId && task.bookingId !== recentCheckout.id) return false
-      // Δεν είναι προγραμματισμένη πριν από το checkout
       const scheduledDate = toDateOrNull(task.scheduledDate)
       const checkOut = toDateOrNull(recentCheckout.checkOutDate)
       if (scheduledDate && checkOut && scheduledDate < checkOut) return false
@@ -368,6 +418,7 @@ export function computePropertyOperationalStatus(
         label: LABELS.no_task_coverage,
         reason: REASONS.no_task_coverage,
         explanation: EXPLANATIONS.no_task_coverage,
+        derivedReadinessStatus: "not_ready",
         alertActive: alertTask !== null,
         alertTask,
         activeBooking: null,
@@ -385,6 +436,7 @@ export function computePropertyOperationalStatus(
         label: LABELS.task_unaccepted,
         reason: REASONS.task_unaccepted,
         explanation: EXPLANATIONS.task_unaccepted,
+        derivedReadinessStatus: "not_ready",
         alertActive: alertTask !== null,
         alertTask,
         activeBooking: null,
@@ -407,6 +459,7 @@ export function computePropertyOperationalStatus(
           label: LABELS.awaiting_proof,
           reason: REASONS.awaiting_proof,
           explanation: EXPLANATIONS.awaiting_proof,
+          derivedReadinessStatus: "not_ready",
           alertActive: alertTask !== null,
           alertTask,
           activeBooking: null,
@@ -426,6 +479,7 @@ export function computePropertyOperationalStatus(
         label: LABELS.task_in_progress,
         reason: REASONS.task_in_progress,
         explanation: EXPLANATIONS.task_in_progress,
+        derivedReadinessStatus: "not_ready",
         alertActive: alertTask !== null,
         alertTask,
         activeBooking: null,
@@ -447,13 +501,20 @@ export function computePropertyOperationalStatus(
   const alertTask = findAlertTask(tasks, now)
 
   // ─── 4. FALLBACK: readiness από conditions ───────────────────────────────
-  const operationalStatus = normalizeReadinessToOperational(input.readinessStatus)
+  const conditionsStatus = normalizeReadinessToConditionsStatus(input.readinessStatus)
+  // Map conditions status to operational status enum values
+  const operationalStatus: PropertyOperationalStatus =
+    conditionsStatus === "ready" ? "ready"
+    : conditionsStatus === "borderline" ? "borderline"
+    : conditionsStatus === "not_ready" ? "not_ready"
+    : "unknown"
 
   return {
     operationalStatus,
     label: LABELS[operationalStatus],
     reason: REASONS[operationalStatus],
     explanation: EXPLANATIONS[operationalStatus],
+    derivedReadinessStatus: conditionsStatus,
     alertActive: alertTask !== null,
     alertTask,
     activeBooking: null,
@@ -510,8 +571,9 @@ export function normalizeOperationalStatus(value: unknown): PropertyOperationalS
 }
 
 /**
- * Επιστρέφει αν η κατάσταση υποδηλώνει ότι η εκτέλεση είναι σε εξέλιξη
- * (δηλ. δεν έχει ολοκληρωθεί ο κύκλος προετοιμασίας).
+ * Επιστρέφει αν η κατάσταση υποδηλώνει ότι η εκτέλεση είναι εκκρεμής
+ * (δηλ. turnover window ενεργό και εκτέλεση δεν έχει αποδειχθεί).
+ * Σε αυτές τις καταστάσεις: derivedReadinessStatus = "not_ready" πάντα.
  */
 export function isOperationallyPending(status: PropertyOperationalStatus): boolean {
   return ["no_task_coverage", "task_unaccepted", "task_in_progress", "awaiting_proof"].includes(

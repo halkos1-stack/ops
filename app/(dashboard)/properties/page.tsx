@@ -1,7 +1,7 @@
 ﻿"use client"
 
 import Link from "next/link"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
 import { useAppLanguage } from "@/components/i18n/LanguageProvider"
 import { isTaskAlertActive } from "@/components/tasks/task-ui"
 import {
@@ -400,6 +400,22 @@ function getCounterToneClasses(count: number) {
   return count > 0
     ? "bg-red-50 text-red-700 ring-red-200"
     : "bg-slate-100 text-slate-700 ring-slate-200"
+}
+
+/**
+ * Inline CSS hover tooltip. Χρησιμοποιείται σε κάθε status chip / counter badge.
+ * Απαντά: τι δείχνει, γιατί, τι πρέπει να γίνει.
+ */
+function ListTooltip({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <span className="group relative inline-flex">
+      {children}
+      <span className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 w-64 -translate-x-1/2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs leading-relaxed text-slate-700 shadow-xl opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+        {label}
+        <span className="absolute left-1/2 top-full h-0 w-0 -translate-x-1/2 border-x-4 border-t-4 border-x-transparent border-t-slate-200" />
+      </span>
+    </span>
+  )
 }
 
 function getCounterConfigs(language: "el" | "en"): CounterConfig[] {
@@ -1047,17 +1063,14 @@ export default function PropertiesPage() {
                             <div className="flex flex-wrap gap-2">
                               {counterConfigs.map((config) => {
                                 const count = counts[config.key]
-
                                 return (
-                                  <span
-                                    key={config.key}
-                                    title={config.description}
-                                    className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${getCounterToneClasses(
-                                      count
-                                    )}`}
-                                  >
-                                    {config.label}: {count}
-                                  </span>
+                                  <ListTooltip key={config.key} label={config.description}>
+                                    <span
+                                      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${getCounterToneClasses(count)}`}
+                                    >
+                                      {config.label}: {count}
+                                    </span>
+                                  </ListTooltip>
                                 )
                               })}
                             </div>
@@ -1135,17 +1148,14 @@ export default function PropertiesPage() {
                       <div className="mt-4 flex flex-wrap gap-2">
                         {counterConfigs.map((config) => {
                           const count = counts[config.key]
-
                           return (
-                            <span
-                              key={config.key}
-                              title={config.description}
-                              className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${getCounterToneClasses(
-                                count
-                              )}`}
-                            >
-                              {config.label}: {count}
-                            </span>
+                            <ListTooltip key={config.key} label={config.description}>
+                              <span
+                                className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${getCounterToneClasses(count)}`}
+                              >
+                                {config.label}: {count}
+                              </span>
+                            </ListTooltip>
                           )
                         })}
                       </div>
