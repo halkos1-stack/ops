@@ -31,6 +31,7 @@ export default function DashboardSidebar() {
           { label: "Tasks", href: "/tasks" },
           { label: "Calendar", href: "/calendar" },
           { label: "Partners", href: "/partners" },
+          { label: "Users", href: "/users" },
           { label: "My account", href: "/account" },
           { label: "Settings", href: "/settings" },
         ]
@@ -42,6 +43,7 @@ export default function DashboardSidebar() {
           { label: "Εργασίες", href: "/tasks" },
           { label: "Ημερολόγιο", href: "/calendar" },
           { label: "Συνεργάτες", href: "/partners" },
+          { label: "Χρήστες", href: "/users" },
           { label: "Ο λογαριασμός μου", href: "/account" },
           { label: "Ρυθμίσεις", href: "/settings" },
         ]
