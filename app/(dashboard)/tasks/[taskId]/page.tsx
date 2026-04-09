@@ -1663,6 +1663,17 @@ function HelpDot({ text }: { text: string }) {
   )
 }
 
+function BadgeTooltip({ text, children }: { text: string; children: ReactNode }) {
+  return (
+    <span className="group relative inline-flex">
+      {children}
+      <span className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-2 w-56 -translate-x-1/2 rounded-xl border border-slate-200 bg-white p-3 text-xs leading-5 text-slate-700 opacity-0 shadow-lg transition duration-150 group-hover:opacity-100">
+        {text}
+      </span>
+    </span>
+  )
+}
+
 function FieldCard({
   label,
   value,
@@ -2820,26 +2831,26 @@ export default function TaskDetailsPage() {
             </h1>
 
             <div className="mt-4 flex flex-wrap items-center gap-2">
-              <span title={texts.header.detailsHelp}>
+              <BadgeTooltip text={texts.header.detailsHelp}>
                 <Badge tone={taskStatusTone}>{getTaskStatusLabel(language, task.status)}</Badge>
-              </span>
+              </BadgeTooltip>
 
-              <span title={texts.schedule.durationHelp}>
+              <BadgeTooltip text={texts.schedule.durationHelp}>
                 <Badge tone="slate">
                   {getPriorityLabel(language, normalizePriority(task.priority))}
                 </Badge>
-              </span>
+              </BadgeTooltip>
 
-              <span title={texts.header.detailsLabel}>
+              <BadgeTooltip text={texts.header.detailsLabel}>
                 <Badge tone="blue">{getTaskTypeLabel(language, task.taskType)}</Badge>
-              </span>
+              </BadgeTooltip>
 
               {task.property?.status ? (
-                <span title={texts.property.sectionHelp}>
+                <BadgeTooltip text={texts.property.sectionHelp}>
                   <Badge tone="violet">
                     {getPropertyStatusLabel(language, task.property.status)}
                   </Badge>
-                </span>
+                </BadgeTooltip>
               ) : null}
             </div>
 

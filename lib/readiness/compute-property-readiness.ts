@@ -30,10 +30,32 @@ export type ReadinessConditionInput = PropertyConditionRuleInput & {
   mergeKey?: string | null
 }
 
+/**
+ * Operational context που μπορεί να override το conditions-only readiness.
+ * Όταν υπάρχει turnover εκκρεμότητα, η ετοιμότητα δεν μπορεί να είναι "ready"
+ * ακόμα και αν δεν υπάρχουν active conditions.
+ */
+export type ReadinessOperationalContext = {
+  /**
+   * Canonical readiness από το operational status module.
+   * Όταν "not_ready" λόγω turnover → override των conditions-based "ready".
+   */
+  derivedReadinessStatus: "ready" | "borderline" | "not_ready" | "unknown"
+  /** Human-readable αιτιολόγηση για το operational override */
+  operationalReason?: string | null
+}
+
 export type ComputePropertyReadinessInput = {
   now?: Date
   nextCheckInAt?: Date | string | null
   conditions?: ReadinessConditionInput[]
+  /**
+   * Προαιρετικό operational context.
+   * Όταν παρέχεται και `derivedReadinessStatus === "not_ready"`,
+   * το αποτέλεσμα δεν επιστρέφει "ready" ακόμα και αν δεν υπάρχουν active conditions.
+   * Αυτό διασφαλίζει ότι το readiness αντικατοπτρίζει την πραγματική επιχειρησιακή αλήθεια.
+   */
+  operationalContext?: ReadinessOperationalContext
 }
 
 export type ReadinessReason = {
@@ -45,6 +67,7 @@ export type ReadinessReason = {
     | "MONITORING_CONDITION"
     | "ALLOW_WITH_ISSUE"
     | "UNKNOWN_DATA"
+    | "OPERATIONAL_PENDING"
   label: string
   message: string
   conditionId?: string
@@ -320,17 +343,24 @@ function buildExplainText(params: {
   nextCheckInAt: Date | null
   reasons: ReadinessReason[]
   counts: PropertyReadinessCounts
+  operationalContext?: ReadinessOperationalContext
 }): string {
   const { status, nextCheckInAt, reasons, counts } = params
 
+  const operationalOverride =
+    params.operationalContext?.derivedReadinessStatus === "not_ready" &&
+    status === "ready"
+      ? " However, an operational turnover window is pending — the property cannot be confirmed ready until execution proof is returned."
+      : ""
+
   const base =
     status === "ready"
-      ? "The property is ready today because there are no active conditions affecting readiness."
+      ? "The property has no active conditions affecting readiness." + (operationalOverride || " It is available for the next guest.")
       : status === "borderline"
-        ? "The property is borderline today because active conditions still exist, but they do not currently block operations outright."
+        ? "The property is borderline because active conditions still exist, but they do not currently block operations outright."
         : status === "not_ready"
-          ? "The property is not ready today because active blocking conditions still exist."
-          : "The property state for today cannot be confirmed from the available canonical condition data."
+          ? "The property is not ready because active blocking conditions still exist."
+          : "The property state cannot be confirmed from the available condition data."
 
   const nextCheckInText = nextCheckInAt
     ? ` Next check-in: ${nextCheckInAt.toISOString()}.`
@@ -352,12 +382,13 @@ function buildExplainText(params: {
 function sortReasons(reasons: ReadinessReason[]): ReadinessReason[] {
   const priorityMap: Record<ReadinessReason["code"], number> = {
     BLOCKING_CONDITION: 1,
-    ALLOW_WITH_ISSUE: 2,
-    MONITORING_CONDITION: 3,
-    WARNING_CONDITION: 4,
-    UNKNOWN_DATA: 5,
-    NO_ACTIVE_CONDITIONS: 6,
-    NO_NEXT_CHECKIN: 7,
+    OPERATIONAL_PENDING: 2,
+    ALLOW_WITH_ISSUE: 3,
+    MONITORING_CONDITION: 4,
+    WARNING_CONDITION: 5,
+    UNKNOWN_DATA: 6,
+    NO_ACTIVE_CONDITIONS: 7,
+    NO_NEXT_CHECKIN: 8,
   }
 
   return [...reasons].sort((a, b) => {
@@ -391,6 +422,7 @@ export function computePropertyReadiness(
 ): PropertyReadinessResult {
   const computedAt = input.now instanceof Date ? input.now : new Date()
   const nextCheckInAt = toDateOrNull(input.nextCheckInAt)
+  const operationalContext = input.operationalContext
 
   if (!Array.isArray(input.conditions)) {
     const reasons: ReadinessReason[] = [
@@ -443,6 +475,61 @@ export function computePropertyReadiness(
   const nextActions: ReadinessNextAction[] = []
 
   if (activeConditions.length === 0) {
+    // ΚΑΝΟΝΑΣ: Ακόμα και αν δεν υπάρχουν active conditions,
+    // αν το operational context δείχνει turnover pending → "not_ready".
+    // Η απόδειξη ετοιμότητας δεν έχει επιστραφεί ακόμα.
+    const operationalPending =
+      operationalContext?.derivedReadinessStatus === "not_ready"
+
+    if (operationalPending) {
+      pushUniqueReason(reasons, {
+        code: "OPERATIONAL_PENDING",
+        label: "Operational execution pending",
+        message:
+          operationalContext?.operationalReason ||
+          "The turnover preparation window is open but execution has not been confirmed. The property cannot be treated as ready until proof of completion is returned.",
+      })
+
+      pushUniqueAction(nextActions, {
+        code: "VERIFY_PROPERTY_STATE",
+        label: "Complete turnover execution",
+        message:
+          "Ensure the assigned task has been accepted and all required checklists have been submitted before treating the property as ready.",
+      })
+
+      if (!nextCheckInAt) {
+        pushUniqueReason(reasons, {
+          code: "NO_NEXT_CHECKIN",
+          label: "No next check-in linked",
+          message:
+            "No next check-in is currently linked. The property is still in an open turnover window.",
+        })
+      }
+
+      const sortedReasons = sortReasons(reasons)
+      const sortedActions = sortActions(nextActions)
+
+      return {
+        status: "not_ready",
+        score: 10,
+        reasons: sortedReasons,
+        nextActions: sortedActions,
+        counts,
+        activeConditionIds: [],
+        blockingConditionIds: [],
+        warningConditionIds: [],
+        computedAt,
+        nextCheckInAt,
+        explain: buildExplainText({
+          status: "not_ready",
+          nextCheckInAt,
+          reasons: sortedReasons,
+          counts,
+          operationalContext,
+        }),
+      }
+    }
+
     pushUniqueReason(reasons, {
       code: "NO_ACTIVE_CONDITIONS",
       label: "No active conditions",
