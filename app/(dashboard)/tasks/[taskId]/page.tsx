@@ -22,6 +22,10 @@ import {
 } from "@/lib/i18n/normalizers"
 import { getTaskDetailsPageTexts } from "@/lib/i18n/translations"
 import { resolveSupplyDisplayName } from "@/lib/supply-display"
+import {
+  getReadinessLabel as getReadinessLabelUI,
+  getReadinessTone,
+} from "@/lib/readiness/readiness-ui"
 
 type PropertySummary = {
   id: string
@@ -1552,20 +1556,7 @@ function normalizeManagerDecisionLabel(value: unknown, language: "el" | "en") {
 }
 
 function getReadinessLabel(value: unknown, language: "el" | "en") {
-  const normalized = String(value ?? "").trim().toLowerCase()
-  if (normalized === "ready") return language === "en" ? "Ready" : "Έτοιμο"
-  if (normalized === "borderline") return language === "en" ? "Borderline" : "Οριακό"
-  if (normalized === "not_ready") return language === "en" ? "Not ready" : "Μη έτοιμο"
-  if (normalized === "unknown") return language === "en" ? "Unknown" : "Άγνωστο"
-  return String(value ?? "").trim() || getLanguageUnknownLabel(language)
-}
-
-function getReadinessTone(value: unknown): "green" | "amber" | "red" | "slate" {
-  const normalized = String(value ?? "").trim().toLowerCase()
-  if (normalized === "ready") return "green"
-  if (normalized === "borderline") return "amber"
-  if (normalized === "not_ready") return "red"
-  return "slate"
+  return getReadinessLabelUI(language, value)
 }
 
 function getSeverityTone(value: unknown): "green" | "amber" | "red" | "slate" {

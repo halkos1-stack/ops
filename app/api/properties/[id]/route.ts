@@ -16,6 +16,7 @@ import {
   mapDbConditionToRawRecord,
   type RawPropertyConditionRecord,
 } from "@/lib/readiness/property-condition-mappers";
+import { computePropertyOperationalStatus } from "@/lib/readiness/property-operational-status";
 
 type RouteContext = {
   params: Promise<{
@@ -1209,6 +1210,44 @@ async function getFullProperty(id: string) {
     nextCheckInAt: property.nextCheckInAt,
   });
 
+  const operationalStatusResult = computePropertyOperationalStatus({
+    readinessStatus: readinessComputed.status,
+    bookings: safeArray(property.bookings).map((b) => ({
+      id: b.id,
+      status: b.status ?? null,
+      checkInDate: b.checkInDate ?? null,
+      checkOutDate: b.checkOutDate ?? null,
+      guestName: b.guestName ?? null,
+    })),
+    tasks: safeArray(property.tasks).map((t) => {
+      const assignments = Array.isArray(t.assignments)
+        ? (t.assignments as Array<{ status?: string | null }>)
+        : [];
+      const checklistRun = t.checklistRun as { status?: string | null } | null | undefined;
+      const supplyRun = t.supplyRun as { status?: string | null } | null | undefined;
+      const issueRun = t.issueRun as { status?: string | null } | null | undefined;
+
+      return {
+        id: String(t.id ?? ""),
+        title: String(t.title ?? ""),
+        taskType: String(t.taskType ?? ""),
+        status: String(t.status ?? ""),
+        scheduledDate: t.scheduledDate ?? null,
+        sendCleaningChecklist: Boolean(t.sendCleaningChecklist),
+        sendSuppliesChecklist: Boolean(t.sendSuppliesChecklist),
+        sendIssuesChecklist: Boolean(t.sendIssuesChecklist),
+        alertEnabled: Boolean(t.alertEnabled),
+        alertAt: t.alertAt ?? null,
+        completedAt: t.completedAt ?? null,
+        bookingId: t.bookingId ?? null,
+        latestAssignmentStatus: assignments[0]?.status ?? null,
+        checklistRunStatus: checklistRun?.status ?? null,
+        supplyRunStatus: supplyRun?.status ?? null,
+        issueRunStatus: issueRun?.status ?? null,
+      };
+    }),
+  });
+
   const normalizedChecklistTemplates = safeArray(property.checklistTemplates);
 
   const normalizedIssueTemplates = safeArray(property.issueTemplates);
@@ -1260,6 +1299,16 @@ async function getFullProperty(id: string) {
       supplies: "Καταγραφή επιπέδου αναλωσίμων",
       issues: "Αναφορά ζημιών, βλαβών ή προβλημάτων",
     },
+
+    operationalStatus: operationalStatusResult.operationalStatus,
+    operationalStatusLabel: operationalStatusResult.label,
+    operationalStatusReason: operationalStatusResult.reason,
+    operationalStatusExplanation: operationalStatusResult.explanation,
+    operationalAlertActive: operationalStatusResult.alertActive,
+    operationalAlertTask: operationalStatusResult.alertTask,
+    operationalActiveBooking: operationalStatusResult.activeBooking,
+    operationalPendingCleaningTask: operationalStatusResult.pendingCleaningTask,
+    operationalRelevantTask: operationalStatusResult.relevantTask,
 
     readinessStatus: readinessComputed.status,
     readinessUpdatedAt: readinessComputed.readinessUpdatedAt,

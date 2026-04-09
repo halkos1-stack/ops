@@ -605,3 +605,46 @@ export function getReadinessStatusLabel(language: AppLanguage, value: unknown) {
 
   return labels[normalized]
 }
+
+export type NormalizedOperationalStatus =
+  | "OCCUPIED"
+  | "WAITING_CLEANING"
+  | "READY"
+  | "BORDERLINE"
+  | "NOT_READY"
+  | "UNKNOWN"
+
+export function normalizeOperationalStatusForLabel(value: unknown): NormalizedOperationalStatus {
+  const s = String(value ?? "").trim().toLowerCase()
+  if (s === "occupied") return "OCCUPIED"
+  if (s === "waiting_cleaning") return "WAITING_CLEANING"
+  if (s === "ready") return "READY"
+  if (s === "borderline" || s === "needs_attention") return "BORDERLINE"
+  if (s === "not_ready") return "NOT_READY"
+  return "UNKNOWN"
+}
+
+export function getOperationalStatusLabel(language: AppLanguage, value: unknown): string {
+  const normalized = normalizeOperationalStatusForLabel(value)
+
+  const labels: Record<NormalizedOperationalStatus, string> =
+    language === "en"
+      ? {
+          OCCUPIED: "Occupied",
+          WAITING_CLEANING: "Awaiting cleaning",
+          READY: "Ready",
+          BORDERLINE: "Borderline",
+          NOT_READY: "Not ready",
+          UNKNOWN: "Unknown status",
+        }
+      : {
+          OCCUPIED: "Με κόσμο",
+          WAITING_CLEANING: "Αναμονή καθαρισμού",
+          READY: "Έτοιμο",
+          BORDERLINE: "Οριακό",
+          NOT_READY: "Μη έτοιμο",
+          UNKNOWN: "Άγνωστη κατάσταση",
+        }
+
+  return labels[normalized]
+}

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { Prisma } from "@prisma/client"
+import { buildCanonicalSupplySnapshot } from "@/lib/supplies/compute-supply-state"
 
 type RouteContext = {
   params: Promise<{
@@ -18,54 +19,126 @@ function isExpired(date?: Date | string | null) {
   return parsed.getTime() < Date.now()
 }
 
-function mapSupplyFillLevel(params: {
-  currentStock?: number | null
-  targetStock?: number | null
-  reorderThreshold?: number | null
-  minimumStock?: number | null
-}) {
-  const currentStock =
-    typeof params.currentStock === "number" && Number.isFinite(params.currentStock)
-      ? params.currentStock
-      : 0
+function normalizeStatus(value: unknown) {
+  return String(value ?? "").trim().toLowerCase()
+}
 
-  const targetStock =
-    typeof params.targetStock === "number" && Number.isFinite(params.targetStock)
-      ? params.targetStock
-      : null
+function normalizeSupplyMode(value: unknown) {
+  return String(value ?? "").trim().toLowerCase() === "numeric_thresholds"
+    ? "numeric_thresholds"
+    : "direct_state"
+}
 
-  const reorderThreshold =
-    typeof params.reorderThreshold === "number" &&
-    Number.isFinite(params.reorderThreshold)
-      ? params.reorderThreshold
-      : null
-
-  const minimumStock =
-    typeof params.minimumStock === "number" && Number.isFinite(params.minimumStock)
-      ? params.minimumStock
-      : null
-
-  if (currentStock <= 0) {
-    return "low"
-  }
-
-  if (targetStock !== null && targetStock > 0 && currentStock >= targetStock) {
-    return "full"
-  }
-
-  if (reorderThreshold !== null && currentStock <= reorderThreshold) {
-    return "medium"
-  }
-
-  if (minimumStock !== null && currentStock <= minimumStock) {
-    return "medium"
-  }
-
-  if (targetStock !== null && currentStock < targetStock) {
-    return "medium"
-  }
-
+function toPortalFillLevel(state: "missing" | "medium" | "full") {
+  if (state === "missing") return "low"
+  if (state === "medium") return "medium"
   return "full"
+}
+
+function buildPartnerSupplyPayload(params: {
+  propertySupply: {
+    id: string
+    fillLevel: string
+    stateMode: string
+    currentStock: number
+    mediumThreshold: number | null
+    fullThreshold: number | null
+    targetStock: number | null
+    reorderThreshold: number | null
+    targetLevel: number | null
+    minimumThreshold: number | null
+    trackingMode: string
+    isCritical: boolean
+    warningThreshold: number | null
+    lastUpdatedAt: Date
+    notes: string | null
+    supplyItem: {
+      id: string
+      code: string
+      name: string
+      nameEl: string | null
+      nameEn: string | null
+      category: string
+      unit: string
+      minimumStock: number | null
+      isActive: boolean
+    } | null
+  }
+  runItem?: {
+    id: string
+    stateMode: string
+    mediumThreshold: number | null
+    fullThreshold: number | null
+  } | null
+  answerFillLevel?: string | null
+  answerQuantityValue?: number | null
+}) {
+  const { propertySupply, runItem, answerFillLevel, answerQuantityValue } = params
+
+  const computed = buildCanonicalSupplySnapshot({
+    isActive: true,
+    stateMode: runItem?.stateMode ?? propertySupply.stateMode,
+    fillLevel: answerFillLevel ?? propertySupply.fillLevel,
+    currentStock:
+      typeof answerQuantityValue === "number" && Number.isFinite(answerQuantityValue)
+        ? answerQuantityValue
+        : propertySupply.currentStock,
+    mediumThreshold: runItem?.mediumThreshold ?? propertySupply.mediumThreshold,
+    fullThreshold: runItem?.fullThreshold ?? propertySupply.fullThreshold,
+    minimumThreshold: propertySupply.minimumThreshold,
+    reorderThreshold: propertySupply.reorderThreshold,
+    warningThreshold: propertySupply.warningThreshold,
+    targetLevel: propertySupply.targetLevel,
+    targetStock: propertySupply.targetStock,
+    trackingMode: propertySupply.trackingMode,
+    supplyMinimumStock: propertySupply.supplyItem?.minimumStock ?? null,
+  })
+
+  return {
+    id: propertySupply.id,
+    fillLevel: toPortalFillLevel(computed.derivedState),
+    derivedState: computed.derivedState,
+    stateMode: computed.stateMode,
+    inputMode:
+      computed.stateMode === "numeric_thresholds" ? "quantity" : "state",
+    isCountBased: computed.stateMode === "numeric_thresholds",
+    currentStock:
+      typeof answerQuantityValue === "number" && Number.isFinite(answerQuantityValue)
+        ? answerQuantityValue
+        : computed.currentStock,
+    mediumThreshold: runItem?.mediumThreshold ?? computed.mediumThreshold,
+    fullThreshold: runItem?.fullThreshold ?? computed.fullThreshold,
+    targetStock: propertySupply.targetStock,
+    reorderThreshold: propertySupply.reorderThreshold,
+    targetLevel: propertySupply.targetLevel,
+    minimumThreshold: propertySupply.minimumThreshold,
+    warningThreshold: propertySupply.warningThreshold,
+    trackingMode: propertySupply.trackingMode,
+    isCritical: propertySupply.isCritical,
+    lastUpdatedAt: propertySupply.lastUpdatedAt,
+    notes: propertySupply.notes,
+    runItem: runItem
+      ? {
+          id: runItem.id,
+          stateMode: normalizeSupplyMode(runItem.stateMode),
+          mediumThreshold: runItem.mediumThreshold,
+          fullThreshold: runItem.fullThreshold,
+        }
+      : null,
+    supplyItem: propertySupply.supplyItem
+      ? {
+          id: propertySupply.supplyItem.id,
+          code: propertySupply.supplyItem.code,
+          name: propertySupply.supplyItem.name,
+          nameEl: propertySupply.supplyItem.nameEl,
+          nameEn: propertySupply.supplyItem.nameEn,
+          category: propertySupply.supplyItem.category,
+          unit: propertySupply.supplyItem.unit,
+          minimumStock: propertySupply.supplyItem.minimumStock,
+          isActive: propertySupply.supplyItem.isActive,
+        }
+      : null,
+  }
 }
 
 const taskAssignmentWithDetailsArgs =
@@ -114,6 +187,8 @@ const taskAssignmentWithDetailsArgs =
                       id: true,
                       code: true,
                       name: true,
+                      nameEl: true,
+                      nameEn: true,
                       category: true,
                       unit: true,
                       minimumStock: true,
@@ -186,6 +261,7 @@ const taskAssignmentWithDetailsArgs =
           },
           supplyRun: {
             include: {
+              items: true,
               answers: {
                 include: {
                   propertySupply: {
@@ -195,6 +271,8 @@ const taskAssignmentWithDetailsArgs =
                           id: true,
                           code: true,
                           name: true,
+                          nameEl: true,
+                          nameEn: true,
                           category: true,
                           unit: true,
                           minimumStock: true,
@@ -241,10 +319,6 @@ const taskAssignmentWithDetailsArgs =
 type TaskAssignmentWithDetails = Prisma.TaskAssignmentGetPayload<
   typeof taskAssignmentWithDetailsArgs
 >
-
-function normalizeStatus(value: unknown) {
-  return String(value ?? "").trim().toLowerCase()
-}
 
 export async function GET(_req: NextRequest, context: RouteContext) {
   try {
@@ -326,6 +400,12 @@ export async function GET(_req: NextRequest, context: RouteContext) {
 
     const latestAssignment = assignments[0]
 
+    const supplyRunItemsByPropertySupplyId = new Map(
+      (latestAssignment.task.supplyRun?.items || [])
+        .filter((item) => Boolean(item.propertySupplyId))
+        .map((item) => [String(item.propertySupplyId), item])
+    )
+
     const activePropertySupplies = latestAssignment.task.property.propertySupplies.filter(
       (propertySupply) => propertySupply.supplyItem?.isActive
     )
@@ -383,28 +463,13 @@ export async function GET(_req: NextRequest, context: RouteContext) {
           country: latestAssignment.task.property.country,
           type: latestAssignment.task.property.type,
           status: latestAssignment.task.property.status,
-          supplies: activePropertySupplies.map((propertySupply) => ({
-            id: propertySupply.id,
-            fillLevel: mapSupplyFillLevel({
-              currentStock: propertySupply.currentStock,
-              targetStock: propertySupply.targetStock,
-              reorderThreshold: propertySupply.reorderThreshold,
-              minimumStock: propertySupply.supplyItem?.minimumStock ?? null,
-            }),
-            lastUpdatedAt: propertySupply.lastUpdatedAt,
-            notes: propertySupply.notes,
-            supplyItem: propertySupply.supplyItem
-              ? {
-                  id: propertySupply.supplyItem.id,
-                  code: propertySupply.supplyItem.code,
-                  name: propertySupply.supplyItem.name,
-                  category: propertySupply.supplyItem.category,
-                  unit: propertySupply.supplyItem.unit,
-                  minimumStock: propertySupply.supplyItem.minimumStock,
-                  isActive: propertySupply.supplyItem.isActive,
-                }
-              : null,
-          })),
+          supplies: activePropertySupplies.map((propertySupply) =>
+            buildPartnerSupplyPayload({
+              propertySupply,
+              runItem:
+                supplyRunItemsByPropertySupplyId.get(propertySupply.id) ?? null,
+            })
+          ),
         },
         booking: latestAssignment.task.booking,
         checklistRun: latestAssignment.task.checklistRun
@@ -467,37 +532,39 @@ export async function GET(_req: NextRequest, context: RouteContext) {
               status: latestAssignment.task.supplyRun.status,
               startedAt: latestAssignment.task.supplyRun.startedAt,
               completedAt: latestAssignment.task.supplyRun.completedAt,
-              answers: latestAssignment.task.supplyRun.answers.map((answer) => ({
-                id: answer.id,
-                fillLevel: answer.fillLevel,
-                notes: answer.notes,
-                propertySupply: answer.propertySupply
-                  ? {
-                      id: answer.propertySupply.id,
-                      fillLevel: mapSupplyFillLevel({
-                        currentStock: answer.propertySupply.currentStock,
-                        targetStock: answer.propertySupply.targetStock,
-                        reorderThreshold: answer.propertySupply.reorderThreshold,
-                        minimumStock:
-                          answer.propertySupply.supplyItem?.minimumStock ?? null,
-                      }),
-                      lastUpdatedAt: answer.propertySupply.lastUpdatedAt,
-                      notes: answer.propertySupply.notes,
-                      supplyItem: answer.propertySupply.supplyItem
-                        ? {
-                            id: answer.propertySupply.supplyItem.id,
-                            code: answer.propertySupply.supplyItem.code,
-                            name: answer.propertySupply.supplyItem.name,
-                            category: answer.propertySupply.supplyItem.category,
-                            unit: answer.propertySupply.supplyItem.unit,
-                            minimumStock:
-                              answer.propertySupply.supplyItem.minimumStock,
-                            isActive: answer.propertySupply.supplyItem.isActive,
-                          }
-                        : null,
-                    }
-                  : null,
+              items: latestAssignment.task.supplyRun.items.map((item) => ({
+                id: item.id,
+                propertySupplyId: item.propertySupplyId,
+                stateMode: normalizeSupplyMode(item.stateMode),
+                mediumThreshold: item.mediumThreshold,
+                fullThreshold: item.fullThreshold,
+                label: item.label,
+                labelEn: item.labelEn,
+                sortOrder: item.sortOrder,
               })),
+              answers: latestAssignment.task.supplyRun.answers.map((answer) => {
+                const runItem = answer.propertySupplyId
+                  ? supplyRunItemsByPropertySupplyId.get(answer.propertySupplyId) ?? null
+                  : null
+
+                const propertySupplyPayload = answer.propertySupply
+                  ? buildPartnerSupplyPayload({
+                      propertySupply: answer.propertySupply,
+                      runItem,
+                      answerFillLevel: answer.fillLevel,
+                      answerQuantityValue: answer.quantityValue,
+                    })
+                  : null
+
+                return {
+                  id: answer.id,
+                  fillLevel: propertySupplyPayload?.fillLevel ?? "full",
+                  derivedState: propertySupplyPayload?.derivedState ?? "full",
+                  quantityValue: answer.quantityValue,
+                  notes: answer.notes,
+                  propertySupply: propertySupplyPayload,
+                }
+              }),
             }
           : null,
         issues: latestAssignment.task.issues,

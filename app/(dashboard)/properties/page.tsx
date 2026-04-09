@@ -9,6 +9,11 @@ import {
   getPropertyTypeLabel,
 } from "@/lib/i18n/labels"
 import {
+  getReadinessBadgeClasses,
+  getReadinessLabel as getReadinessLabelUI,
+  normalizeReadinessForUI,
+} from "@/lib/readiness/readiness-ui"
+import {
   normalizeBookingStatus,
   normalizeIssueStatus,
   normalizePropertyStatus,
@@ -237,40 +242,6 @@ function getMetricCardClasses(active: boolean) {
   return "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
 }
 
-function getReadinessBadgeClasses(status: CanonicalReadinessStatus) {
-  if (status === "READY") {
-    return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
-  }
-
-  if (status === "BORDERLINE") {
-    return "bg-amber-50 text-amber-700 ring-1 ring-amber-200"
-  }
-
-  if (status === "NOT_READY") {
-    return "bg-red-50 text-red-700 ring-1 ring-red-200"
-  }
-
-  return "bg-slate-100 text-slate-700 ring-1 ring-slate-200"
-}
-
-function getReadinessLabel(
-  language: "el" | "en",
-  status: CanonicalReadinessStatus
-) {
-  if (status === "READY") {
-    return language === "en" ? "Ready" : "Ετοιμο"
-  }
-
-  if (status === "BORDERLINE") {
-    return language === "en" ? "Borderline" : "Οριακο"
-  }
-
-  if (status === "NOT_READY") {
-    return language === "en" ? "Not ready" : "Μη ετοιμο"
-  }
-
-  return language === "en" ? "Unknown" : "Αγνωστο"
-}
 
 function isTodayOpenTask(task: PropertyTaskListItem, now: Date) {
   const scheduledDate = normalizeDate(task.scheduledDate)
@@ -353,13 +324,10 @@ function getOperationalCountsForToday(
 function getCanonicalReadinessStatus(
   property: PropertyListItem
 ): CanonicalReadinessStatus {
-  const normalized = String(property.readinessStatus || "")
-    .trim()
-    .toLowerCase()
-
-  if (normalized === "ready") return "READY"
-  if (normalized === "borderline") return "BORDERLINE"
-  if (normalized === "not_ready") return "NOT_READY"
+  const ui = normalizeReadinessForUI(property.readinessStatus)
+  if (ui === "ready") return "READY"
+  if (ui === "borderline") return "BORDERLINE"
+  if (ui === "not_ready") return "NOT_READY"
   return "UNKNOWN"
 }
 
@@ -376,25 +344,25 @@ function getCanonicalReadinessExplanation(
 
   if (status === "READY") {
     return language === "en"
-      ? "The property is ready today because there are no active property conditions."
-      : "Το ακινητο ειναι ετοιμο σημερα επειδη δεν υπαρχουν ενεργα property conditions."
+      ? "No active conditions affecting readiness."
+      : "Δεν υπάρχουν ενεργές συνθήκες που να επηρεάζουν την ετοιμότητα."
   }
 
   if (status === "NOT_READY") {
     return language === "en"
-      ? "The property is not ready today because active property conditions remain open."
-      : "Το ακινητο δεν ειναι ετοιμο σημερα επειδη παραμενουν ενεργα property conditions."
+      ? "Active conditions are blocking readiness."
+      : "Ενεργές συνθήκες μπλοκάρουν την ετοιμότητα."
   }
 
   if (status === "BORDERLINE") {
     return language === "en"
-      ? "The property remains in a borderline state and should not be treated as fully ready."
-      : "Το ακινητο παραμενει σε οριακη κατασταση και δεν πρεπει να θεωρειται πληρως ετοιμο."
+      ? "Active conditions keep the property in a borderline state."
+      : "Ενεργές συνθήκες κρατούν το ακίνητο σε οριακή κατάσταση."
   }
 
   return language === "en"
-    ? "Canonical readiness has not been confirmed yet."
-    : "Η canonical readiness εικονα δεν εχει επιβεβαιωθει ακομα."
+    ? "Readiness status is not yet available."
+    : "Η κατάσταση ετοιμότητας δεν είναι ακόμα διαθέσιμη."
 }
 
 function getNextUpcomingBooking(property: PropertyListItem) {
@@ -441,40 +409,40 @@ function getCounterConfigs(language: "el" | "en"): CounterConfig[] {
       label: language === "en" ? "Tasks" : "Εργ.",
       description:
         language === "en"
-          ? "Open tasks scheduled for today. Execution detail only; canonical readiness still comes from active property conditions."
-          : "Ανοιχτες εργασιες με σημερινη ημερομηνια. Δειχνει execution detail και οχι την canonical αποφαση readiness.",
+          ? "Open tasks scheduled for today."
+          : "Ανοιχτές εργασίες με σημερινή ημερομηνία.",
     },
     {
       key: "activeAlerts",
       label: language === "en" ? "Alerts" : "Alert",
       description:
         language === "en"
-          ? "Active alerts on open tasks. This is an execution urgency signal from task creation."
-          : "Ενεργα alert σε ανοιχτες εργασιες. Δειχνει επειγον execution signal απο τη δημιουργια εργασιας.",
+          ? "Active alerts on open tasks."
+          : "Ενεργά alert σε ανοιχτές εργασίες.",
     },
     {
       key: "openIssues",
       label: language === "en" ? "Issues" : "Βλαβ.",
       description:
         language === "en"
-          ? "Open non-damage issues visible in operations. Canonical readiness comes from the linked active property conditions."
-          : "Ανοιχτες βλαβες που φαινονται επιχειρησιακα. Το canonical readiness προκυπτει απο τα συνδεδεμενα ενεργα property conditions.",
+          ? "Open non-damage issues."
+          : "Ανοιχτές βλάβες.",
     },
     {
       key: "openDamages",
       label: language === "en" ? "Damages" : "Ζημ.",
       description:
         language === "en"
-          ? "Open damage records visible in operations. Canonical readiness comes from the active property conditions."
-          : "Ανοιχτες ζημιες στην επιχειρησιακη εικονα. Το canonical readiness προκυπτει απο τα ενεργα property conditions.",
+          ? "Open damage records."
+          : "Ανοιχτές ζημίες.",
     },
     {
       key: "supplyShortages",
       label: language === "en" ? "Supply" : "Ελλ.",
       description:
         language === "en"
-          ? "Visible supply shortages in operations. Canonical readiness stays tied to active supply conditions."
-          : "Ορατες ελλειψεις αναλωσιμων στην επιχειρησιακη εικονα. Το canonical readiness μενει δεμενο με τα ενεργα supply conditions.",
+          ? "Supply shortages."
+          : "Ελλείψεις αναλωσίμων.",
     },
   ]
 }
@@ -1046,7 +1014,7 @@ export default function PropertiesPage() {
                                   readinessStatus
                                 )}`}
                               >
-                                {getReadinessLabel(language, readinessStatus)}
+                                {getReadinessLabelUI(language, readinessStatus)}
                               </span>
 
                               <div className="text-xs leading-5 text-slate-500">
@@ -1152,7 +1120,7 @@ export default function PropertiesPage() {
                             readinessStatus
                           )}`}
                         >
-                          {getReadinessLabel(language, readinessStatus)}
+                          {getReadinessLabelUI(language, readinessStatus)}
                         </span>
                       </div>
 

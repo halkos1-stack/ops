@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useEffect, useMemo, useState } from "react"
+import { type ReactNode, useEffect, useMemo, useState } from "react"
 import { useParams } from "next/navigation"
 import { useAppLanguage } from "@/components/i18n/LanguageProvider"
 import { resolveSupplyDisplayName } from "@/lib/supply-display"
@@ -13,6 +13,7 @@ import {
 type Language = "el" | "en"
 type SupplyFilter = "all" | "missing" | "medium" | "full"
 type SupplyState = "missing" | "medium" | "full"
+type SupplyStateMode = "direct_state" | "numeric_thresholds"
 
 type SupplyItem = {
   id: string
@@ -39,6 +40,9 @@ type PropertySupply = {
   reorderThreshold?: number | null
   targetLevel?: number | null
   minimumThreshold?: number | null
+  trackingMode?: string | null
+  isCritical?: boolean
+  warningThreshold?: number | null
   notes?: string | null
   updatedAt?: string | null
   lastUpdatedAt?: string | null
@@ -89,6 +93,28 @@ type SuppliesPayload = {
   customCatalog: CustomCatalogRow[]
 }
 
+type SupplyEditorState = {
+  rowId: string
+  displayName: string
+  code: string
+  category: string
+  unit: string
+  stateMode: SupplyStateMode
+  fillLevel: SupplyState
+  currentStock: string
+  mediumThreshold: string
+  fullThreshold: string
+  isCritical: boolean
+  notes: string
+}
+
+type DecoratedSupplyRow = PropertySupply & {
+  derivedState: SupplyState
+  safeUpdatedAt: string | null
+  displayName: string
+  normalizedMode: SupplyStateMode
+}
+
 function normalizeLanguage(value: string | undefined): Language {
   return value === "en" ? "en" : "el"
 }
@@ -113,6 +139,27 @@ function formatDateTime(value: string | null | undefined, locale: string) {
   }).format(date)
 }
 
+function toNullableNumber(value: string) {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+
+  const parsed = Number(trimmed)
+  if (!Number.isFinite(parsed)) return null
+
+  return parsed
+}
+
+function toIntegerDisplay(value: number | null | undefined) {
+  if (value === null || value === undefined || Number.isNaN(value)) return "—"
+  return Number.isInteger(value) ? String(value) : String(value)
+}
+
+function normalizeSupplyMode(value?: string | null): SupplyStateMode {
+  return String(value || "").trim().toLowerCase() === "numeric_thresholds"
+    ? "numeric_thresholds"
+    : "direct_state"
+}
+
 function getTexts(language: Language) {
   if (language === "en") {
     return {
@@ -120,7 +167,7 @@ function getTexts(language: Language) {
       backToProperty: "Back to property",
       pageTitle: "Supplies management",
       pageSubtitle:
-        "Only the active supplies of this property are shown here. Activation of built-in and custom supplies is handled through the popup.",
+        "Only the active supplies of this property are shown here. Activation of built-in and custom supplies is handled through the popup. For each active supply you can define whether the state is set directly or derived from a numeric count.",
       emptyInline:
         "No active supplies have been selected for this property yet. Use the popup to activate the supplies you want.",
       loading: "Loading supplies...",
@@ -149,13 +196,42 @@ function getTexts(language: Language) {
       full: "Full",
       status: "Status",
       updatedAt: "Last updated",
-      changeStatus: "Update status",
+      configureSupply: "Configure supply",
       save: "Save",
       cancel: "Cancel",
       deleteRow: "Remove from property",
       deleting: "Removing...",
       saving: "Saving...",
       popupEmpty: "No available built-in supplies.",
+      stateModeTitle: "State definition mode",
+      stateModeDirect: "Direct state",
+      stateModeNumeric: "Count based",
+      stateModeDirectDescription:
+        "The manager or partner selects Missing / Medium / Full directly.",
+      stateModeNumericDescription:
+        "The partner submits a numeric quantity and the system derives the state automatically.",
+      currentQuantity: "Current quantity",
+      mediumThreshold: "Medium threshold",
+      fullThreshold: "Full threshold",
+      derivedState: "Derived state",
+      mode: "Mode",
+      category: "Category",
+      unit: "Unit",
+      itemCode: "Code",
+      notes: "Notes",
+      criticalSupply: "Critical supply",
+      quantityRules: "Quantity rules",
+      directRules: "Direct state",
+      preview: "Preview",
+      thresholdsHelp:
+        "Missing is below the medium threshold. Medium starts at the medium threshold. Full starts at the full threshold.",
+      invalidThresholds:
+        "The full threshold must be greater than the medium threshold.",
+      quantityPlaceholder: "Quantity",
+      thresholdPlaceholder: "Threshold",
+      noNumericData: "No numeric setup",
+      quantityBased: "Count based",
+      directStateBased: "Direct state",
     }
   }
 
@@ -164,7 +240,7 @@ function getTexts(language: Language) {
     backToProperty: "Επιστροφή στο ακίνητο",
     pageTitle: "Διαχείριση αναλωσίμων",
     pageSubtitle:
-      "Στη σελίδα εμφανίζονται μόνο τα αναλώσιμα που έχουν ενεργοποιηθεί για το συγκεκριμένο ακίνητο. Η ενεργοποίηση built-in και custom γίνεται μόνο από το popup.",
+      "Στη σελίδα εμφανίζονται μόνο τα αναλώσιμα που έχουν ενεργοποιηθεί για το συγκεκριμένο ακίνητο. Η ενεργοποίηση built-in και custom γίνεται μόνο από το popup. Για κάθε ενεργό αναλώσιμο μπορείς να ορίσεις αν η κατάσταση δίνεται άμεσα ή προκύπτει από αριθμητική καταμέτρηση.",
     emptyInline:
       "Δεν έχουν ενεργοποιηθεί ακόμη αναλώσιμα για το συγκεκριμένο ακίνητο. Πάτησε «Επιλογή αναλωσίμων» για να τα ορίσεις.",
     loading: "Φόρτωση αναλωσίμων...",
@@ -193,19 +269,53 @@ function getTexts(language: Language) {
     full: "Πλήρης",
     status: "Κατάσταση",
     updatedAt: "Τελευταία ενημέρωση",
-    changeStatus: "Ενημέρωση κατάστασης",
+    configureSupply: "Ρύθμιση αναλωσίμου",
     save: "Αποθήκευση",
     cancel: "Ακύρωση",
     deleteRow: "Αφαίρεση από το ακίνητο",
     deleting: "Αφαίρεση...",
     saving: "Αποθήκευση...",
     popupEmpty: "Δεν υπάρχουν διαθέσιμα built-in αναλώσιμα.",
+    stateModeTitle: "Τρόπος ορισμού κατάστασης",
+    stateModeDirect: "Άμεση κατάσταση",
+    stateModeNumeric: "Καταμέτρηση",
+    stateModeDirectDescription:
+      "Ο διαχειριστής ή ο συνεργάτης επιλέγει απευθείας Έλλειψη / Μέτρια / Πλήρης.",
+    stateModeNumericDescription:
+      "Ο συνεργάτης δίνει αριθμητική ποσότητα και το σύστημα αναγνωρίζει μόνο του την κατάσταση.",
+    currentQuantity: "Τρέχουσα ποσότητα",
+    mediumThreshold: "Όριο μέτριας",
+    fullThreshold: "Όριο πλήρους",
+    derivedState: "Παράγωγη κατάσταση",
+    mode: "Τρόπος",
+    category: "Κατηγορία",
+    unit: "Μονάδα",
+    itemCode: "Κωδικός",
+    notes: "Σημειώσεις",
+    criticalSupply: "Κρίσιμο αναλώσιμο",
+    quantityRules: "Κανόνες καταμέτρησης",
+    directRules: "Άμεση κατάσταση",
+    preview: "Προεπισκόπηση",
+    thresholdsHelp:
+      "Κάτω από το όριο μέτριας το αναλώσιμο είναι σε έλλειψη. Από το όριο μέτριας και πάνω είναι μέτρια, και από το όριο πλήρους και πάνω θεωρείται πλήρες.",
+    invalidThresholds:
+      "Το όριο πλήρους πρέπει να είναι μεγαλύτερο από το όριο μέτριας.",
+    quantityPlaceholder: "Ποσότητα",
+    thresholdPlaceholder: "Όριο",
+    noNumericData: "Δεν έχουν οριστεί αριθμητικά όρια",
+    quantityBased: "Με καταμέτρηση",
+    directStateBased: "Με άμεση κατάσταση",
   }
 }
 
 function getSupplyDisplayName(
   language: Language,
-  supplyItem?: { code?: string | null; name?: string | null; nameEl?: string | null; nameEn?: string | null } | null
+  supplyItem?: {
+    code?: string | null
+    name?: string | null
+    nameEl?: string | null
+    nameEn?: string | null
+  } | null
 ) {
   return resolveSupplyDisplayName(language, supplyItem)
 }
@@ -223,6 +333,7 @@ function getSupplyState(row: PropertySupply): SupplyState {
     targetLevel: row.targetLevel,
     targetStock: row.targetStock,
     supplyMinimumStock: row.supplyItem?.minimumStock,
+    trackingMode: row.trackingMode,
   }).derivedState
 }
 
@@ -238,6 +349,14 @@ function getSupplyStateLabel(language: Language, state: SupplyState) {
   return "Πλήρης"
 }
 
+function getSupplyModeLabel(language: Language, mode: SupplyStateMode) {
+  if (language === "en") {
+    return mode === "numeric_thresholds" ? "Count based" : "Direct state"
+  }
+
+  return mode === "numeric_thresholds" ? "Καταμέτρηση" : "Άμεση κατάσταση"
+}
+
 function supplyStateBadgeClass(state: SupplyState) {
   if (state === "missing") {
     return "bg-red-50 text-red-700 ring-1 ring-red-200"
@@ -250,30 +369,19 @@ function supplyStateBadgeClass(state: SupplyState) {
   return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
 }
 
-function computeStockForState(row: PropertySupply, state: SupplyState) {
-  return buildCanonicalSupplyWriteData(
-    row.stateMode === "numeric_thresholds"
-      ? {
-          stateMode: "numeric_thresholds",
-          currentStock:
-            state === "missing"
-              ? 0
-              : state === "medium"
-                ? row.mediumThreshold ?? 1
-                : row.fullThreshold ??
-                  Math.max((row.mediumThreshold ?? 1) + 1, 2),
-          mediumThreshold: row.mediumThreshold ?? row.minimumThreshold ?? 1,
-          fullThreshold:
-            row.fullThreshold ??
-            row.targetLevel ??
-            row.targetStock ??
-            Math.max((row.mediumThreshold ?? row.minimumThreshold ?? 1) + 1, 2),
-        }
-      : {
-          stateMode: "direct_state",
-          fillLevel: state,
-        }
-  ).currentStock
+function getEditorPreview(editor: SupplyEditorState) {
+  const mediumThreshold = toNullableNumber(editor.mediumThreshold)
+  const fullThreshold = toNullableNumber(editor.fullThreshold)
+  const currentStock = toNullableNumber(editor.currentStock)
+
+  return buildCanonicalSupplySnapshot({
+    isActive: true,
+    stateMode: editor.stateMode,
+    fillLevel: editor.fillLevel,
+    currentStock,
+    mediumThreshold,
+    fullThreshold,
+  })
 }
 
 function CounterButton({
@@ -330,7 +438,7 @@ function Modal({
   title: string
   subtitle?: string
   onClose: () => void
-  children: React.ReactNode
+  children: ReactNode
   closeLabel: string
 }) {
   return (
@@ -373,8 +481,7 @@ export default function PropertySuppliesPage() {
   const [popupOpen, setPopupOpen] = useState(false)
   const [filter, setFilter] = useState<SupplyFilter>("all")
   const [customName, setCustomName] = useState("")
-  const [editingRow, setEditingRow] = useState<PropertySupply | null>(null)
-  const [selectedState, setSelectedState] = useState<SupplyState>("full")
+  const [editingRow, setEditingRow] = useState<SupplyEditorState | null>(null)
 
   async function loadData() {
     if (!propertyId) return
@@ -433,12 +540,13 @@ export default function PropertySuppliesPage() {
 
   const activeSupplies = data?.activeSupplies || []
 
-  const supplyRows = useMemo(() => {
+  const supplyRows = useMemo<DecoratedSupplyRow[]>(() => {
     return activeSupplies.map((row) => ({
       ...row,
       derivedState: getSupplyState(row),
       safeUpdatedAt: row.lastUpdatedAt || row.updatedAt || null,
       displayName: getSupplyDisplayName(lang, row.supplyItem),
+      normalizedMode: normalizeSupplyMode(row.stateMode),
     }))
   }, [activeSupplies, lang])
 
@@ -457,6 +565,36 @@ export default function PropertySuppliesPage() {
     if (filter === "all") return supplyRows
     return supplyRows.filter((row) => row.derivedState === filter)
   }, [supplyRows, filter])
+
+  const editorPreview = useMemo(() => {
+    return editingRow ? getEditorPreview(editingRow) : null
+  }, [editingRow])
+
+  function openEditor(row: DecoratedSupplyRow) {
+    setEditingRow({
+      rowId: row.id,
+      displayName: row.displayName,
+      code: row.supplyItem?.code || "—",
+      category: row.supplyItem?.category || "—",
+      unit: row.supplyItem?.unit || "—",
+      stateMode: row.normalizedMode,
+      fillLevel: row.derivedState,
+      currentStock:
+        row.currentStock === null || row.currentStock === undefined
+          ? ""
+          : String(row.currentStock),
+      mediumThreshold:
+        row.mediumThreshold === null || row.mediumThreshold === undefined
+          ? ""
+          : String(row.mediumThreshold),
+      fullThreshold:
+        row.fullThreshold === null || row.fullThreshold === undefined
+          ? ""
+          : String(row.fullThreshold),
+      isCritical: Boolean(row.isCritical),
+      notes: row.notes || "",
+    })
+  }
 
   async function toggleBuiltIn(code: string, enabled: boolean) {
     if (!propertyId) return
@@ -560,39 +698,53 @@ export default function PropertySuppliesPage() {
     }
   }
 
-  async function updateSupplyState() {
+  async function updateSupplyConfiguration() {
     if (!propertyId || !editingRow) return
 
     try {
       setSaving(true)
       setError("")
 
-      const nextStock = computeStockForState(editingRow, selectedState)
+      if (editingRow.stateMode === "numeric_thresholds") {
+        const mediumThreshold = toNullableNumber(editingRow.mediumThreshold)
+        const fullThreshold = toNullableNumber(editingRow.fullThreshold)
+
+        if (
+          mediumThreshold === null ||
+          fullThreshold === null ||
+          fullThreshold <= mediumThreshold
+        ) {
+          throw new Error(t.invalidThresholds)
+        }
+      }
+
+      const patchPayload =
+        editingRow.stateMode === "numeric_thresholds"
+          ? {
+              stateMode: "numeric_thresholds",
+              currentStock: toNullableNumber(editingRow.currentStock) ?? 0,
+              mediumThreshold: toNullableNumber(editingRow.mediumThreshold) ?? 1,
+              fullThreshold:
+                toNullableNumber(editingRow.fullThreshold) ??
+                Math.max((toNullableNumber(editingRow.mediumThreshold) ?? 1) + 1, 2),
+              isCritical: editingRow.isCritical,
+              notes: editingRow.notes || null,
+            }
+          : {
+              stateMode: "direct_state",
+              fillLevel: editingRow.fillLevel,
+              isCritical: editingRow.isCritical,
+              notes: editingRow.notes || null,
+            }
 
       const res = await fetch(
-        `/api/properties/${propertyId}/supplies/${editingRow.id}`,
+        `/api/properties/${propertyId}/supplies/${editingRow.rowId}`,
         {
           method: "PATCH",
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({
-            stateMode: editingRow.stateMode || "direct_state",
-            ...(editingRow.stateMode === "numeric_thresholds"
-              ? {
-                  currentStock: nextStock,
-                  mediumThreshold:
-                    editingRow.mediumThreshold ?? editingRow.minimumThreshold ?? 1,
-                  fullThreshold:
-                    editingRow.fullThreshold ??
-                    editingRow.targetLevel ??
-                    editingRow.targetStock ??
-                    2,
-                }
-              : {
-                  fillLevel: selectedState,
-                }),
-          }),
+          body: JSON.stringify(patchPayload),
         }
       )
 
@@ -605,7 +757,7 @@ export default function PropertySuppliesPage() {
       setEditingRow(null)
       await refreshAfterMutation()
     } catch (err) {
-      console.error("Update supply state error:", err)
+      console.error("Update supply configuration error:", err)
       setError(err instanceof Error ? err.message : t.updateError)
     } finally {
       setSaving(false)
@@ -739,9 +891,7 @@ export default function PropertySuppliesPage() {
                   <div key={row.id} className="rounded-2xl border border-slate-200 p-4">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="font-semibold text-slate-900">
-                          {row.displayName}
-                        </div>
+                        <div className="font-semibold text-slate-900">{row.displayName}</div>
                         <div className="mt-1 text-sm text-slate-500">
                           {row.supplyItem?.code || "—"}
                         </div>
@@ -756,6 +906,66 @@ export default function PropertySuppliesPage() {
                       </span>
                     </div>
 
+                    <div className="mt-4 grid grid-cols-2 gap-3">
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          {t.mode}
+                        </div>
+                        <div className="mt-1 text-sm font-semibold text-slate-900">
+                          {getSupplyModeLabel(lang, row.normalizedMode)}
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          {t.currentQuantity}
+                        </div>
+                        <div className="mt-1 text-sm font-semibold text-slate-900">
+                          {toIntegerDisplay(row.currentStock)}
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          {t.mediumThreshold}
+                        </div>
+                        <div className="mt-1 text-sm font-semibold text-slate-900">
+                          {row.normalizedMode === "numeric_thresholds"
+                            ? toIntegerDisplay(row.mediumThreshold)
+                            : "—"}
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          {t.fullThreshold}
+                        </div>
+                        <div className="mt-1 text-sm font-semibold text-slate-900">
+                          {row.normalizedMode === "numeric_thresholds"
+                            ? toIntegerDisplay(row.fullThreshold)
+                            : "—"}
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          {t.unit}
+                        </div>
+                        <div className="mt-1 text-sm font-semibold text-slate-900">
+                          {row.supplyItem?.unit || "—"}
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          {t.category}
+                        </div>
+                        <div className="mt-1 text-sm font-semibold text-slate-900">
+                          {row.supplyItem?.category || "—"}
+                        </div>
+                      </div>
+                    </div>
+
                     <div className="mt-4 text-sm text-slate-500">
                       {t.updatedAt}: {formatDateTime(row.safeUpdatedAt, t.locale)}
                     </div>
@@ -763,13 +973,10 @@ export default function PropertySuppliesPage() {
                     <div className="mt-4 flex flex-wrap gap-2">
                       <button
                         type="button"
-                        onClick={() => {
-                          setEditingRow(row)
-                          setSelectedState(row.derivedState)
-                        }}
+                        onClick={() => openEditor(row)}
                         className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                       >
-                        {t.changeStatus}
+                        {t.configureSupply}
                       </button>
 
                       <button
@@ -830,9 +1037,7 @@ export default function PropertySuppliesPage() {
                         <button
                           type="button"
                           disabled={saving}
-                          onClick={() =>
-                            toggleBuiltIn(row.code, !row.isActiveForProperty)
-                          }
+                          onClick={() => toggleBuiltIn(row.code, !row.isActiveForProperty)}
                           className={`rounded-xl px-3 py-2 text-sm font-semibold ${
                             row.isActiveForProperty
                               ? "border border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
@@ -857,7 +1062,9 @@ export default function PropertySuppliesPage() {
                     <div key={row.id} className="rounded-2xl border border-slate-200 p-4">
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <div className="font-semibold text-slate-900">{resolveSupplyDisplayName(lang, row)}</div>
+                          <div className="font-semibold text-slate-900">
+                            {resolveSupplyDisplayName(lang, row)}
+                          </div>
                           <div className="mt-1 text-sm text-slate-500">{row.code}</div>
                         </div>
 
@@ -876,9 +1083,7 @@ export default function PropertySuppliesPage() {
                         <button
                           type="button"
                           disabled={saving}
-                          onClick={() =>
-                            toggleCustom(row.id, !row.isActiveForProperty)
-                          }
+                          onClick={() => toggleCustom(row.id, !row.isActiveForProperty)}
                           className={`rounded-xl px-3 py-2 text-sm font-semibold ${
                             row.isActiveForProperty
                               ? "border border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
@@ -924,57 +1129,344 @@ export default function PropertySuppliesPage() {
 
       {editingRow ? (
         <Modal
-          title={getSupplyDisplayName(lang, editingRow.supplyItem) || t.changeStatus}
-          subtitle={t.status}
+          title={editingRow.displayName || t.configureSupply}
+          subtitle={`${t.itemCode}: ${editingRow.code}`}
           onClose={() => setEditingRow(null)}
           closeLabel={t.close}
         >
-          <div className="space-y-5">
-            <div className="grid gap-3 md:grid-cols-3">
+          <div className="space-y-6">
+            <div className="grid gap-3 md:grid-cols-2">
               <button
                 type="button"
-                onClick={() => setSelectedState("missing")}
+                onClick={() =>
+                  setEditingRow((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          stateMode: "direct_state",
+                        }
+                      : prev
+                  )
+                }
                 className={`rounded-2xl border p-4 text-left transition ${
-                  selectedState === "missing"
-                    ? "border-red-600 bg-red-600 text-white"
-                    : "border-red-200 bg-white text-red-700 hover:bg-red-50"
+                  editingRow.stateMode === "direct_state"
+                    ? "border-slate-900 bg-slate-900 text-white"
+                    : "border-slate-200 bg-white text-slate-800 hover:bg-slate-50"
                 }`}
               >
-                <div className="text-xs font-semibold uppercase tracking-wide opacity-80">
-                  {t.status}
-                </div>
-                <div className="mt-2 text-xl font-bold">{t.missing}</div>
+                <div className="text-sm font-semibold">{t.stateModeDirect}</div>
+                <div className="mt-2 text-xs opacity-80">{t.stateModeDirectDescription}</div>
               </button>
 
               <button
                 type="button"
-                onClick={() => setSelectedState("medium")}
+                onClick={() =>
+                  setEditingRow((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          stateMode: "numeric_thresholds",
+                          currentStock:
+                            prev.currentStock.trim() === "" ? "0" : prev.currentStock,
+                          mediumThreshold:
+                            prev.mediumThreshold.trim() === "" ? "1" : prev.mediumThreshold,
+                          fullThreshold:
+                            prev.fullThreshold.trim() === ""
+                              ? String(
+                                  Math.max(
+                                    (toNullableNumber(prev.mediumThreshold) ?? 1) + 1,
+                                    2
+                                  )
+                                )
+                              : prev.fullThreshold,
+                        }
+                      : prev
+                  )
+                }
                 className={`rounded-2xl border p-4 text-left transition ${
-                  selectedState === "medium"
-                    ? "border-amber-500 bg-amber-500 text-white"
-                    : "border-amber-200 bg-white text-amber-700 hover:bg-amber-50"
+                  editingRow.stateMode === "numeric_thresholds"
+                    ? "border-slate-900 bg-slate-900 text-white"
+                    : "border-slate-200 bg-white text-slate-800 hover:bg-slate-50"
                 }`}
               >
-                <div className="text-xs font-semibold uppercase tracking-wide opacity-80">
-                  {t.status}
-                </div>
-                <div className="mt-2 text-xl font-bold">{t.medium}</div>
+                <div className="text-sm font-semibold">{t.stateModeNumeric}</div>
+                <div className="mt-2 text-xs opacity-80">{t.stateModeNumericDescription}</div>
               </button>
+            </div>
 
-              <button
-                type="button"
-                onClick={() => setSelectedState("full")}
-                className={`rounded-2xl border p-4 text-left transition ${
-                  selectedState === "full"
-                    ? "border-emerald-600 bg-emerald-600 text-white"
-                    : "border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50"
-                }`}
-              >
-                <div className="text-xs font-semibold uppercase tracking-wide opacity-80">
-                  {t.status}
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  {t.category}
                 </div>
-                <div className="mt-2 text-xl font-bold">{t.full}</div>
-              </button>
+                <div className="mt-1 text-sm font-semibold text-slate-900">
+                  {editingRow.category || "—"}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  {t.unit}
+                </div>
+                <div className="mt-1 text-sm font-semibold text-slate-900">
+                  {editingRow.unit || "—"}
+                </div>
+              </div>
+            </div>
+
+            {editingRow.stateMode === "direct_state" ? (
+              <div className="space-y-4 rounded-2xl border border-slate-200 p-4">
+                <div>
+                  <div className="text-sm font-semibold text-slate-900">{t.directRules}</div>
+                  <div className="mt-1 text-sm text-slate-500">
+                    {t.stateModeDirectDescription}
+                  </div>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-3">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEditingRow((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              fillLevel: "missing",
+                            }
+                          : prev
+                      )
+                    }
+                    className={`rounded-2xl border p-4 text-left transition ${
+                      editingRow.fillLevel === "missing"
+                        ? "border-red-600 bg-red-600 text-white"
+                        : "border-red-200 bg-white text-red-700 hover:bg-red-50"
+                    }`}
+                  >
+                    <div className="text-xs font-semibold uppercase tracking-wide opacity-80">
+                      {t.status}
+                    </div>
+                    <div className="mt-2 text-xl font-bold">{t.missing}</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEditingRow((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              fillLevel: "medium",
+                            }
+                          : prev
+                      )
+                    }
+                    className={`rounded-2xl border p-4 text-left transition ${
+                      editingRow.fillLevel === "medium"
+                        ? "border-amber-500 bg-amber-500 text-white"
+                        : "border-amber-200 bg-white text-amber-700 hover:bg-amber-50"
+                    }`}
+                  >
+                    <div className="text-xs font-semibold uppercase tracking-wide opacity-80">
+                      {t.status}
+                    </div>
+                    <div className="mt-2 text-xl font-bold">{t.medium}</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEditingRow((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              fillLevel: "full",
+                            }
+                          : prev
+                      )
+                    }
+                    className={`rounded-2xl border p-4 text-left transition ${
+                      editingRow.fillLevel === "full"
+                        ? "border-emerald-600 bg-emerald-600 text-white"
+                        : "border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50"
+                    }`}
+                  >
+                    <div className="text-xs font-semibold uppercase tracking-wide opacity-80">
+                      {t.status}
+                    </div>
+                    <div className="mt-2 text-xl font-bold">{t.full}</div>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4 rounded-2xl border border-slate-200 p-4">
+                <div>
+                  <div className="text-sm font-semibold text-slate-900">{t.quantityRules}</div>
+                  <div className="mt-1 text-sm text-slate-500">{t.thresholdsHelp}</div>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-slate-700">
+                      {t.currentQuantity}
+                    </label>
+                    <input
+                      type="number"
+                      value={editingRow.currentStock}
+                      onChange={(e) =>
+                        setEditingRow((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                currentStock: e.target.value,
+                              }
+                            : prev
+                        )
+                      }
+                      className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-slate-900"
+                      placeholder={t.quantityPlaceholder}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-slate-700">
+                      {t.mediumThreshold}
+                    </label>
+                    <input
+                      type="number"
+                      value={editingRow.mediumThreshold}
+                      onChange={(e) =>
+                        setEditingRow((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                mediumThreshold: e.target.value,
+                              }
+                            : prev
+                        )
+                      }
+                      className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-slate-900"
+                      placeholder={t.thresholdPlaceholder}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-slate-700">
+                      {t.fullThreshold}
+                    </label>
+                    <input
+                      type="number"
+                      value={editingRow.fullThreshold}
+                      onChange={(e) =>
+                        setEditingRow((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                fullThreshold: e.target.value,
+                              }
+                            : prev
+                        )
+                      }
+                      className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-slate-900"
+                      placeholder={t.thresholdPlaceholder}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  {t.preview}
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <span
+                    className={`rounded-full px-2.5 py-1 text-xs font-semibold ${supplyStateBadgeClass(
+                      editorPreview?.derivedState || "full"
+                    )}`}
+                  >
+                    {getSupplyStateLabel(lang, editorPreview?.derivedState || "full")}
+                  </span>
+
+                  <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700">
+                    {getSupplyModeLabel(lang, editingRow.stateMode)}
+                  </span>
+                </div>
+
+                {editingRow.stateMode === "numeric_thresholds" ? (
+                  <div className="mt-4 grid grid-cols-3 gap-3">
+                    <div className="rounded-2xl border border-slate-200 bg-white p-3">
+                      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        {t.currentQuantity}
+                      </div>
+                      <div className="mt-1 text-sm font-semibold text-slate-900">
+                        {toIntegerDisplay(toNullableNumber(editingRow.currentStock))}
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-slate-200 bg-white p-3">
+                      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        {t.mediumThreshold}
+                      </div>
+                      <div className="mt-1 text-sm font-semibold text-slate-900">
+                        {toIntegerDisplay(toNullableNumber(editingRow.mediumThreshold))}
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-slate-200 bg-white p-3">
+                      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        {t.fullThreshold}
+                      </div>
+                      <div className="mt-1 text-sm font-semibold text-slate-900">
+                        {toIntegerDisplay(toNullableNumber(editingRow.fullThreshold))}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="space-y-4 rounded-2xl border border-slate-200 p-4">
+                <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <input
+                    type="checkbox"
+                    checked={editingRow.isCritical}
+                    onChange={(e) =>
+                      setEditingRow((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              isCritical: e.target.checked,
+                            }
+                          : prev
+                      )
+                    }
+                  />
+                  <span className="text-sm font-medium text-slate-700">
+                    {t.criticalSupply}
+                  </span>
+                </label>
+
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-slate-700">
+                    {t.notes}
+                  </label>
+                  <textarea
+                    rows={4}
+                    value={editingRow.notes}
+                    onChange={(e) =>
+                      setEditingRow((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              notes: e.target.value,
+                            }
+                          : prev
+                      )
+                    }
+                    className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-slate-900"
+                  />
+                </div>
+              </div>
             </div>
 
             <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
@@ -989,7 +1481,7 @@ export default function PropertySuppliesPage() {
 
               <button
                 type="button"
-                onClick={updateSupplyState}
+                onClick={updateSupplyConfiguration}
                 className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
                 disabled={saving}
               >

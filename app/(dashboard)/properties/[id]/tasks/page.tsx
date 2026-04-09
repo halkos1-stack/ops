@@ -26,6 +26,10 @@ import {
 import { getPropertyDetailTexts } from "@/lib/i18n/translations"
 import { getSupplyDisplayName } from "@/lib/supply-presets"
 import { buildCanonicalSupplySnapshot } from "@/lib/supplies/compute-supply-state"
+import {
+  getReadinessBadgeClasses,
+  getReadinessLabel,
+} from "@/lib/readiness/readiness-ui"
 
 type PartnerOption = {
   id: string
@@ -215,6 +219,11 @@ type PropertyDetail = {
       isActive: boolean
     } | null
   }>
+
+  readinessSummary?: {
+    status: string | null
+    readinessReasonsText?: string | null
+  } | null
 }
 
 type ModalKey =
@@ -555,67 +564,14 @@ function getReadinessState(
     }
   }
 
-  const issues = safeArray(property.issues)
-  const openIssues = issues.filter((issue) => {
-    const normalized = normalizeIssueStatus(issue.status)
-    return normalized === "OPEN" || normalized === "IN_PROGRESS"
-  })
+  const status = property.readinessSummary?.status ?? null
+  const label = getReadinessLabel(language, status)
+  const badgeClasses = getReadinessBadgeClasses(status)
+  const tone = `rounded-full px-2.5 py-1 text-xs font-semibold ${badgeClasses}`
+  const details = property.readinessSummary?.readinessReasonsText
+    ?? (language === "en" ? "No readiness data available." : "Δεν υπάρχουν διαθέσιμα δεδομένα ετοιμότητας.")
 
-  const criticalIssues = openIssues.filter((issue) => {
-    const normalized = normalizeIssuePriority(issue.severity)
-    return normalized === "HIGH" || normalized === "URGENT"
-  })
-
-  const openTasks = safeArray(property.tasks).filter((task) => {
-    const normalized = normalizeTaskStatus(task.status)
-    return ["PENDING", "ASSIGNED", "WAITING_ACCEPTANCE", "ACCEPTED", "IN_PROGRESS"].includes(
-      normalized
-    )
-  })
-
-  const activeAlerts = openTasks.filter((task) => isTaskAlertActive(task))
-  const hasPrimaryCleaningChecklist = Boolean(getPrimaryCleaningChecklist(property))
-
-  const notFullSupplies = safeArray(property.propertySupplies).filter((supply) => {
-    return getDerivedSupplyState(supply) !== "full"
-  })
-
-  if (criticalIssues.length > 0) {
-    return {
-      label: texts.notReady,
-      tone: "rounded-full border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700",
-      details:
-        language === "en"
-          ? `There are ${criticalIssues.length} critical open issues.`
-          : `Υπάρχουν ${criticalIssues.length} κρίσιμα ανοιχτά θέματα.`,
-    }
-  }
-
-  if (
-    activeAlerts.length > 0 ||
-    openIssues.length > 0 ||
-    openTasks.length > 0 ||
-    !hasPrimaryCleaningChecklist ||
-    notFullSupplies.length > 0
-  ) {
-    return {
-      label: texts.actionNeeded,
-      tone: "rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700",
-      details:
-        language === "en"
-          ? `Alerts: ${activeAlerts.length} · Open tasks: ${openTasks.length} · Open issues: ${openIssues.length} · Supplies not full: ${notFullSupplies.length}`
-          : `Alert: ${activeAlerts.length} · Ανοιχτές εργασίες: ${openTasks.length} · Ανοιχτά θέματα: ${openIssues.length} · Αναλώσιμα μη πλήρη: ${notFullSupplies.length}`,
-    }
-  }
-
-  return {
-    label: texts.ready,
-    tone: "rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700",
-    details:
-      language === "en"
-        ? "No open blockers were detected."
-        : "Δεν εντοπίστηκαν ανοιχτά blockers.",
-  }
+  return { label, tone, details }
 }
 
 function getStatePanelClassName(tone: StateTone) {

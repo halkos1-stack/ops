@@ -41,6 +41,11 @@ type ChecklistItem = {
 type SupplyItemPayload = {
   id: string
   fillLevel: string
+  isCountBased?: boolean
+  stateMode?: string | null
+  currentStock?: number | null
+  mediumThreshold?: number | null
+  fullThreshold?: number | null
   isActive: boolean
   lastUpdatedAt?: string | null
   notes?: string | null
@@ -58,6 +63,7 @@ type SupplyItemPayload = {
 type SupplyAnswerPayload = {
   id: string
   fillLevel: string
+  quantityValue?: number | null
   notes?: string | null
   propertySupply: SupplyItemPayload
 }
@@ -179,6 +185,7 @@ type ChecklistFormValue = {
 
 type SupplyFormValue = {
   fillLevel: string
+  quantityValue: number | null
   notes: string
 }
 
@@ -204,6 +211,7 @@ function getEmptyChecklistFormValue(): ChecklistFormValue {
 function getEmptySupplyFormValue(): SupplyFormValue {
   return {
     fillLevel: "",
+    quantityValue: null,
     notes: "",
   }
 }
@@ -388,6 +396,7 @@ function getTaskPageTexts(language: PortalLanguage) {
       savingSupplies: "Saving...",
       submittingSupplies: "Submitting...",
       supplyLevel: "Level",
+      supplyQuantity: "Quantity",
       lowOption: "Low",
       mediumOption: "Medium",
       fullOption: "Full",
@@ -501,6 +510,7 @@ function getTaskPageTexts(language: PortalLanguage) {
     savingSupplies: "Αποθήκευση...",
     submittingSupplies: "Υποβολή...",
     supplyLevel: "Επίπεδο",
+    supplyQuantity: "Ποσότητα",
     lowOption: "Έλλειψη",
     mediumOption: "Μέτρια",
     fullOption: "Πλήρης",
@@ -765,8 +775,18 @@ export default function PartnerPortalTaskPage() {
         (answer) => answer.propertySupply?.id === supply.id
       )
 
+      const existingQty =
+        typeof existing?.quantityValue === "number" &&
+        Number.isFinite(existing.quantityValue)
+          ? existing.quantityValue
+          : typeof supply.currentStock === "number" &&
+              Number.isFinite(supply.currentStock)
+            ? supply.currentStock
+            : null
+
       nextValues[supply.id] = {
         fillLevel: existing?.fillLevel || supply.fillLevel || "",
+        quantityValue: supply.isCountBased ? existingQty : null,
         notes: existing?.notes || supply.notes || "",
       }
     }
@@ -1071,7 +1091,8 @@ export default function PartnerPortalTaskPage() {
 
         return {
           propertySupplyId: supply.id,
-          fillLevel: value.fillLevel || null,
+          fillLevel: supply.isCountBased ? null : value.fillLevel || null,
+          quantityValue: supply.isCountBased ? value.quantityValue : null,
           notes: value.notes || null,
         }
       })
@@ -1812,55 +1833,78 @@ export default function PartnerPortalTaskPage() {
                   <div className="mt-4 space-y-4">
                     <div>
                       <label className="mb-2 block text-sm font-medium text-slate-700">
-                        {t.supplyLevel}
+                        {supply.isCountBased ? t.supplyQuantity : t.supplyLevel}
                       </label>
 
-                      <div className="grid gap-3 md:grid-cols-3">
-                        <button
-                          type="button"
+                      {supply.isCountBased ? (
+                        <input
+                          type="number"
+                          min={0}
                           disabled={!canEditSupplies}
-                          onClick={() =>
-                            updateSupplyValue(supply.id, { fillLevel: "low" })
+                          value={
+                            value.quantityValue === null ||
+                            value.quantityValue === undefined
+                              ? ""
+                              : value.quantityValue
                           }
-                          className={`rounded-2xl border px-4 py-3 text-sm font-semibold transition ${
-                            currentLevel === "low"
-                              ? "border-red-300 bg-red-400 text-white"
-                              : "border-red-200 bg-white text-red-600"
-                          } disabled:opacity-60`}
-                        >
-                          {t.lowOption}
-                        </button>
+                          onChange={(e) => {
+                            const raw = e.target.value
+                            const num = raw === "" ? null : Number(raw)
+                            updateSupplyValue(supply.id, {
+                              quantityValue:
+                                num !== null && Number.isFinite(num) ? num : null,
+                            })
+                          }}
+                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-slate-400 disabled:bg-slate-50"
+                        />
+                      ) : (
+                        <div className="grid gap-3 md:grid-cols-3">
+                          <button
+                            type="button"
+                            disabled={!canEditSupplies}
+                            onClick={() =>
+                              updateSupplyValue(supply.id, { fillLevel: "low" })
+                            }
+                            className={`rounded-2xl border px-4 py-3 text-sm font-semibold transition ${
+                              currentLevel === "low"
+                                ? "border-red-300 bg-red-400 text-white"
+                                : "border-red-200 bg-white text-red-600"
+                            } disabled:opacity-60`}
+                          >
+                            {t.lowOption}
+                          </button>
 
-                        <button
-                          type="button"
-                          disabled={!canEditSupplies}
-                          onClick={() =>
-                            updateSupplyValue(supply.id, { fillLevel: "medium" })
-                          }
-                          className={`rounded-2xl border px-4 py-3 text-sm font-semibold transition ${
-                            currentLevel === "medium"
-                              ? "border-amber-300 bg-amber-400 text-white"
-                              : "border-amber-200 bg-white text-amber-600"
-                          } disabled:opacity-60`}
-                        >
-                          {t.mediumOption}
-                        </button>
+                          <button
+                            type="button"
+                            disabled={!canEditSupplies}
+                            onClick={() =>
+                              updateSupplyValue(supply.id, { fillLevel: "medium" })
+                            }
+                            className={`rounded-2xl border px-4 py-3 text-sm font-semibold transition ${
+                              currentLevel === "medium"
+                                ? "border-amber-300 bg-amber-400 text-white"
+                                : "border-amber-200 bg-white text-amber-600"
+                            } disabled:opacity-60`}
+                          >
+                            {t.mediumOption}
+                          </button>
 
-                        <button
-                          type="button"
-                          disabled={!canEditSupplies}
-                          onClick={() =>
-                            updateSupplyValue(supply.id, { fillLevel: "full" })
-                          }
-                          className={`rounded-2xl border px-4 py-3 text-sm font-semibold transition ${
-                            currentLevel === "full"
-                              ? "border-emerald-300 bg-emerald-400 text-white"
-                              : "border-emerald-200 bg-white text-emerald-600"
-                          } disabled:opacity-60`}
-                        >
-                          {t.fullOption}
-                        </button>
-                      </div>
+                          <button
+                            type="button"
+                            disabled={!canEditSupplies}
+                            onClick={() =>
+                              updateSupplyValue(supply.id, { fillLevel: "full" })
+                            }
+                            className={`rounded-2xl border px-4 py-3 text-sm font-semibold transition ${
+                              currentLevel === "full"
+                                ? "border-emerald-300 bg-emerald-400 text-white"
+                                : "border-emerald-200 bg-white text-emerald-600"
+                            } disabled:opacity-60`}
+                          >
+                            {t.fullOption}
+                          </button>
+                        </div>
+                      )}
                     </div>
 
                     <div>

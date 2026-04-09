@@ -34,12 +34,26 @@ type BookingTask = {
   }>
 }
 
+type BookingWorkWindow = {
+  nextCheckInDate?: string | null
+  nextCheckInTime?: string | null
+  windowStart?: string | null
+  windowEnd?: string | null
+  windowDurationMinutes?: number | null
+  windowDurationCompact?: string | null
+}
+
 type BookingRow = {
   id: string
   sourcePlatform: string
   externalBookingId: string
   externalListingId?: string | null
   externalListingName?: string | null
+  externalPropertyAddress?: string | null
+  externalPropertyCity?: string | null
+  externalPropertyRegion?: string | null
+  externalPropertyPostalCode?: string | null
+  externalPropertyCountry?: string | null
   guestName?: string | null
   guestPhone?: string | null
   guestEmail?: string | null
@@ -52,6 +66,7 @@ type BookingRow = {
   needsMapping: boolean
   notes?: string | null
   taskStatus?: "no_task" | "created" | "assigned" | "completed" | string
+  workWindow?: BookingWorkWindow | null
   property?: {
     id: string
     code: string
@@ -73,7 +88,6 @@ type BookingRow = {
 type WorkWindowRow = {
   id: string
   booking: BookingRow
-  nextBooking: BookingRow | null
   windowStartDateTime: Date
   windowEndDateTime: Date | null
   windowDurationMinutes: number | null
@@ -106,6 +120,12 @@ function normalizeModeQuery(value: string | null): ModeKey {
   return "active"
 }
 
+function isValidDate(value?: string | null) {
+  if (!value) return false
+  const date = new Date(value)
+  return !Number.isNaN(date.getTime())
+}
+
 function isValidTimeString(value?: string | null) {
   if (!value) return false
   return /^([01]\d|2[0-3]):([0-5]\d)$/.test(value.trim())
@@ -116,10 +136,53 @@ function formatTime(value?: string | null) {
   return value.trim().slice(0, 5)
 }
 
+function normalizeDateOnlyValue(value?: string | Date | null) {
+  if (!value) return null
+
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return null
+    const year = value.getFullYear()
+    const month = String(value.getMonth() + 1).padStart(2, "0")
+    const day = String(value.getDate()).padStart(2, "0")
+    return `${year}-${month}-${day}`
+  }
+
+  const text = String(value).slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return null
+  return text
+}
+
 function combineDateTime(dateValue: string, timeValue?: string | null) {
-  const datePart = new Date(dateValue).toISOString().slice(0, 10)
+  const datePart = normalizeDateOnlyValue(dateValue)
+  if (!datePart) return new Date(NaN)
   const timePart = formatTime(timeValue) || "00:00"
   return new Date(`${datePart}T${timePart}:00`)
+}
+
+function parseDateTimeValue(value?: string | null) {
+  if (!value) return null
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return null
+  return parsed
+}
+
+function formatDate(value: string | null | undefined, locale: string) {
+  if (!value || !isValidDate(value)) return "-"
+  return new Date(value).toLocaleDateString(locale)
+}
+
+function formatDateAndTime(
+  dateValue: string | null | undefined,
+  timeValue: string | null | undefined,
+  locale: string,
+  emptyText: string
+) {
+  if (!dateValue || !isValidDate(dateValue)) return emptyText
+
+  const dateText = formatDate(dateValue, locale)
+  const timeText = formatTime(timeValue)
+
+  return timeText ? `${dateText} · ${timeText}` : dateText
 }
 
 function formatDateTime(
@@ -241,19 +304,6 @@ function getWeekdayLabels(language: "el" | "en") {
     : ["Δευ", "Τρι", "Τετ", "Πεμ", "Παρ", "Σαβ", "Κυρ"]
 }
 
-function normalizeDateOnlyValue(value?: string | Date | null) {
-  if (!value) return null
-
-  if (value instanceof Date) {
-    if (Number.isNaN(value.getTime())) return null
-    return value.toISOString().slice(0, 10)
-  }
-
-  const text = String(value).slice(0, 10)
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return null
-  return text
-}
-
 function isDateInRange(
   targetDate?: string | Date | null,
   fromDate?: string,
@@ -353,79 +403,70 @@ function getPropertyFilterLabel(
   return fallbackText
 }
 
+function resolveWindowStartDateTime(booking: BookingRow) {
+  const fromWorkWindow = parseDateTimeValue(booking.workWindow?.windowStart)
+  if (fromWorkWindow) return fromWorkWindow
+
+  return combineDateTime(booking.checkOutDate, booking.checkOutTime)
+}
+
+function resolveWindowEndDateTime(booking: BookingRow) {
+  const fromWorkWindow = parseDateTimeValue(booking.workWindow?.windowEnd)
+  if (fromWorkWindow) return fromWorkWindow
+
+  if (booking.workWindow?.nextCheckInDate) {
+    const end = combineDateTime(
+      booking.workWindow.nextCheckInDate,
+      booking.workWindow.nextCheckInTime
+    )
+    if (!Number.isNaN(end.getTime())) return end
+  }
+
+  return null
+}
+
 function buildWorkWindows(
   bookings: BookingRow[],
   propertyFallbackText: string
 ) {
-  const grouped = new Map<string, BookingRow[]>()
+  return bookings
+    .map((booking) => {
+      const windowStartDateTime = resolveWindowStartDateTime(booking)
+      const windowEndDateTime = resolveWindowEndDateTime(booking)
 
-  for (const booking of bookings) {
-    const key = getGroupingKey(booking)
-    if (!grouped.has(key)) grouped.set(key, [])
-    grouped.get(key)!.push(booking)
-  }
-
-  const windows: WorkWindowRow[] = []
-
-  for (const group of grouped.values()) {
-    const sorted = [...group].sort((a, b) => {
-      const aTime = combineDateTime(a.checkOutDate, a.checkOutTime).getTime()
-      const bTime = combineDateTime(b.checkOutDate, b.checkOutTime).getTime()
-      return aTime - bTime
-    })
-
-    for (let i = 0; i < sorted.length; i++) {
-      const current = sorted[i]
-      const currentCheckout = combineDateTime(
-        current.checkOutDate,
-        current.checkOutTime
-      )
-
-      let nextBooking: BookingRow | null = null
-
-      for (let j = i + 1; j < sorted.length; j++) {
-        const candidate = sorted[j]
-        const candidateCheckIn = combineDateTime(
-          candidate.checkInDate,
-          candidate.checkInTime
-        )
-
-        if (candidateCheckIn.getTime() > currentCheckout.getTime()) {
-          nextBooking = candidate
-          break
-        }
+      if (Number.isNaN(windowStartDateTime.getTime())) {
+        return null
       }
-
-      const windowEndDateTime = nextBooking
-        ? combineDateTime(nextBooking.checkInDate, nextBooking.checkInTime)
-        : null
 
       let windowDurationMinutes: number | null = null
 
-      if (windowEndDateTime) {
+      if (typeof booking.workWindow?.windowDurationMinutes === "number") {
+        windowDurationMinutes = booking.workWindow.windowDurationMinutes
+      } else if (windowEndDateTime) {
         const diff = Math.floor(
-          (windowEndDateTime.getTime() - currentCheckout.getTime()) / 60000
+          (windowEndDateTime.getTime() - windowStartDateTime.getTime()) / 60000
         )
         windowDurationMinutes = diff > 0 ? diff : 0
       }
 
-      windows.push({
-        id: current.id,
-        booking: current,
-        nextBooking,
-        windowStartDateTime: currentCheckout,
+      return {
+        id: booking.id,
+        booking,
+        windowStartDateTime,
         windowEndDateTime,
         windowDurationMinutes,
-        propertyFilterKey: getPropertyFilterKey(current),
-        propertyFilterLabel: getPropertyFilterLabel(current, propertyFallbackText),
-        hasTask: current.tasks.length > 0,
-      })
-    }
-  }
-
-  return windows.sort((a, b) => {
-    return a.windowStartDateTime.getTime() - b.windowStartDateTime.getTime()
-  })
+        propertyFilterKey: getPropertyFilterKey(booking),
+        propertyFilterLabel: getPropertyFilterLabel(
+          booking,
+          propertyFallbackText
+        ),
+        hasTask: booking.tasks.length > 0,
+      } satisfies WorkWindowRow
+    })
+    .filter((row): row is WorkWindowRow => row !== null)
+    .sort((a, b) => {
+      return a.windowStartDateTime.getTime() - b.windowStartDateTime.getTime()
+    })
 }
 
 function getWindowDurationLabel(
@@ -488,17 +529,29 @@ function getWindowCalendarLabel(
   return `${propertyText} · ${start} - ${end}`
 }
 
+function getExternalPropertyDisplay(booking: BookingRow) {
+  return [
+    booking.externalPropertyAddress,
+    booking.externalPropertyCity,
+    booking.externalPropertyRegion,
+    booking.externalPropertyPostalCode,
+    booking.externalPropertyCountry,
+  ]
+    .filter((value) => String(value || "").trim())
+    .join(" · ")
+}
+
 function getBookingAddressDisplay(
   booking: BookingRow,
   fallbackText: string
 ) {
-  if (!booking.needsMapping && booking.property) {
-    return [booking.property.address, booking.property.city, booking.property.region]
-      .filter(Boolean)
-      .join(" · ") || fallbackText
+  if (booking.needsMapping) {
+    return getExternalPropertyDisplay(booking) || fallbackText
   }
 
-  return booking.externalListingName || booking.externalListingId || fallbackText
+  return [booking.property?.address, booking.property?.city, booking.property?.region]
+    .filter(Boolean)
+    .join(" · ") || fallbackText
 }
 
 function normalizeTaskTitle(
@@ -575,6 +628,146 @@ function getPriorityDisplay(
   return getPriorityLabel(language, priority)
 }
 
+function getTaskCoverageLabel(
+  value: string | undefined,
+  language: "el" | "en",
+  texts: ReturnType<typeof getBookingsModuleTexts>
+) {
+  const normalized = String(value || "").trim().toLowerCase()
+
+  if (normalized === "completed") {
+    return language === "en" ? "Completed" : "Ολοκληρώθηκε"
+  }
+
+  if (normalized === "assigned") {
+    return language === "en" ? "Assigned" : "Ανατέθηκε"
+  }
+
+  if (normalized === "created") {
+    return language === "en" ? "Created" : "Δημιουργήθηκε"
+  }
+
+  return texts.statuses.noTask
+}
+
+function getTaskCoverageBadgeClass(value: string | undefined) {
+  const normalized = String(value || "").trim().toLowerCase()
+
+  if (normalized === "completed") return getBadgeClassName("neutral")
+  if (normalized === "assigned") return getBadgeClassName("success")
+  if (normalized === "created") return getBadgeClassName("neutral")
+  return getBadgeClassName("warning")
+}
+
+function getWindowRangeLabel(
+  windowRow: WorkWindowRow,
+  locale: string,
+  noNextCheckinText: string,
+  emptyText: string
+) {
+  const start = formatDateTime(windowRow.windowStartDateTime, locale, emptyText)
+  const end = formatDateTime(windowRow.windowEndDateTime, locale, noNextCheckinText)
+  return `${start} - ${end}`
+}
+
+function getBookingStateBlock(booking: BookingRow, language: "el" | "en") {
+  const firstTask = booking.tasks[0] || null
+
+  if (isCancelledBooking(booking.status)) {
+    return {
+      tone: "danger",
+      title:
+        language === "en"
+          ? "This booking is cancelled"
+          : "Η κράτηση είναι ακυρωμένη",
+      description:
+        language === "en"
+          ? "This booking is no longer active. Review it only if you need history or verification."
+          : "Η κράτηση δεν είναι πλέον ενεργή. Προβάλλεται μόνο για ιστορικό ή επιβεβαίωση.",
+      nextStep:
+        language === "en" ? "Review details only" : "Μόνο προβολή λεπτομερειών",
+    }
+  }
+
+  if (booking.needsMapping) {
+    return {
+      tone: "warning",
+      title:
+        language === "en"
+          ? "Property mapping is required"
+          : "Χρειάζεται αντιστοίχιση ακινήτου",
+      description:
+        language === "en"
+          ? "This booking was imported from a platform but is not yet linked to a property in the system."
+          : "Η κράτηση εισήχθη από πλατφόρμα αλλά δεν έχει ακόμη συνδεθεί με ακίνητο στο σύστημα.",
+      helper:
+        language === "en"
+          ? "You cannot create a task before the booking is mapped to a property."
+          : "Δεν μπορείς να δημιουργήσεις εργασία πριν η κράτηση αντιστοιχιστεί με ακίνητο.",
+      nextStep:
+        language === "en"
+          ? "Map existing property or create a new one"
+          : "Αντιστοίχιση υπάρχοντος ακινήτου ή δημιουργία νέου",
+    }
+  }
+
+  if (!firstTask) {
+    return {
+      tone: "neutral",
+      title:
+        language === "en"
+          ? "Ready for task creation"
+          : "Έτοιμη για δημιουργία εργασίας",
+      description:
+        language === "en"
+          ? "The booking is already linked to a property and can now continue to operations."
+          : "Η κράτηση έχει ήδη συνδεθεί με ακίνητο και μπορεί τώρα να περάσει στη λειτουργική ροή.",
+      helper:
+        language === "en"
+          ? "Create the task using the available work window between check-out and next check-in."
+          : "Δημιούργησε την εργασία με βάση το διαθέσιμο παράθυρο μεταξύ check-out και επόμενου check-in.",
+      nextStep:
+        language === "en" ? "Create task" : "Δημιουργία εργασίας",
+    }
+  }
+
+  const normalizedTaskStatus = String(firstTask.status || "").trim().toLowerCase()
+
+  if (normalizedTaskStatus === "completed") {
+    return {
+      tone: "success",
+      title:
+        language === "en"
+          ? "A related task has been completed"
+          : "Έχει ολοκληρωθεί σχετική εργασία",
+      description:
+        language === "en"
+          ? "This booking already has a completed linked task."
+          : "Αυτή η κράτηση έχει ήδη ολοκληρωμένη συνδεδεμένη εργασία.",
+      nextStep:
+        language === "en" ? "View task" : "Προβολή εργασίας",
+    }
+  }
+
+  return {
+    tone: "success",
+    title:
+      language === "en"
+        ? "A related task already exists"
+        : "Υπάρχει ήδη συνδεδεμένη εργασία",
+    description:
+      language === "en"
+        ? "This booking is already connected to an active task."
+        : "Η κράτηση αυτή έχει ήδη συνδεθεί με ενεργή εργασία.",
+    helper:
+      language === "en"
+        ? "Open the task view to continue assignment, checklist or execution."
+        : "Άνοιξε την προβολή της εργασίας για να συνεχίσεις με ανάθεση, λίστες ή εκτέλεση.",
+    nextStep:
+      language === "en" ? "View task" : "Προβολή εργασίας",
+  }
+}
+
 function getLocalTexts(language: "el" | "en") {
   if (language === "en") {
     return {
@@ -591,7 +784,7 @@ function getLocalTexts(language: "el" | "en") {
       allProperties: "All properties",
       selectedWindow: "Selected window",
       selectedWindowHelp:
-        "Shows the operational details of the currently selected work window without repeating the same information twice.",
+        "Shows the operational details of the currently selected work window using the exact same booking card structure.",
       selectedDay: "Selected day",
       searchPlaceholder: "Search by property, guest, listing, booking...",
       searchHelp:
@@ -605,9 +798,9 @@ function getLocalTexts(language: "el" | "en") {
       viewProperty: "View property",
       viewPropertyHelp:
         "Open the mapped property of this booking.",
-      viewPropertyTasks: "View property tasks",
-      viewPropertyTasksHelp:
-        "Open the global tasks page filtered only for this property.",
+      viewTask: "View task",
+      viewTaskHelp:
+        "Open the linked task created for this booking.",
       checkoutDateTime: "Check-out",
       checkoutDateTimeHelp:
         "The exact check-out date and time that starts this work window.",
@@ -617,18 +810,9 @@ function getLocalTexts(language: "el" | "en") {
       duration: "Duration",
       durationHelp:
         "The total available time between check-out and the next check-in.",
-      systemProperty: "Property in system",
-      systemPropertyHelp:
-        "The property currently linked to this booking inside the OPS system.",
-      rangeTitle: "Window period",
+      rangeTitle: "Window",
       rangeTitleHelp:
         "The exact operational range from the start of the window until its closing check-in.",
-      from: "From",
-      fromHelp:
-        "The start of the work window.",
-      to: "To",
-      toHelp:
-        "The end of the work window or an open state when no next check-in exists.",
       noNextCheckin: "No next check-in",
       openWindowShort: "Open window",
       activeHint:
@@ -670,6 +854,12 @@ function getLocalTexts(language: "el" | "en") {
         "This booking is not mapped to a property yet.",
       viewSelectedOnly:
         "The panel below shows only the selected window.",
+      bookingIdentityHelp:
+        "Booking identity shows the system property and the relevant address for this booking.",
+      workWindowHelp:
+        "The available work window is the real time range between check-out and the next check-in.",
+      availableWindowHelp:
+        "Use this time range to create or evaluate the operational task for this booking.",
     }
   }
 
@@ -687,7 +877,7 @@ function getLocalTexts(language: "el" | "en") {
     allProperties: "Όλα τα ακίνητα",
     selectedWindow: "Επιλεγμένο παράθυρο",
     selectedWindowHelp:
-      "Δείχνει τα λειτουργικά στοιχεία του παραθύρου που έχεις επιλέξει χωρίς διπλές πληροφορίες.",
+      "Δείχνει το επιλεγμένο παράθυρο με το ίδιο ακριβώς card UI της λίστας κρατήσεων.",
     selectedDay: "Επιλεγμένη ημέρα",
     searchPlaceholder: "Αναζήτηση με ακίνητο, επισκέπτη, listing, κράτηση...",
     searchHelp:
@@ -701,9 +891,9 @@ function getLocalTexts(language: "el" | "en") {
     viewProperty: "Προβολή ακινήτου",
     viewPropertyHelp:
       "Ανοίγει το αντιστοιχισμένο ακίνητο αυτής της κράτησης.",
-    viewPropertyTasks: "Προβολή εργασιών ακινήτου",
-    viewPropertyTasksHelp:
-      "Ανοίγει τη global σελίδα εργασιών φιλτραρισμένη μόνο για το συγκεκριμένο ακίνητο.",
+    viewTask: "Προβολή εργασίας",
+    viewTaskHelp:
+      "Ανοίγει τη συνδεδεμένη εργασία της κράτησης.",
     checkoutDateTime: "Check-out",
     checkoutDateTimeHelp:
       "Η ακριβής ημερομηνία και ώρα check-out που ξεκινά αυτό το παράθυρο εργασίας.",
@@ -713,18 +903,9 @@ function getLocalTexts(language: "el" | "en") {
     duration: "Διάρκεια",
     durationHelp:
       "Ο συνολικός διαθέσιμος χρόνος ανάμεσα στο check-out και το επόμενο check-in.",
-    systemProperty: "Ακίνητο",
-    systemPropertyHelp:
-      "Το ακίνητο που είναι σήμερα συνδεδεμένο με αυτή την κράτηση μέσα στο OPS.",
-    rangeTitle: "Παράθυρο εργασίας",
+    rangeTitle: "Παράθυρο",
     rangeTitleHelp:
       "Το ακριβές λειτουργικό διάστημα από την έναρξη του παραθύρου μέχρι το check-in που το κλείνει.",
-    from: "Από",
-    fromHelp:
-      "Η αρχή του παραθύρου εργασίας.",
-    to: "Έως",
-    toHelp:
-      "Το τέλος του παραθύρου ή κατάσταση ανοιχτού παραθύρου όταν δεν υπάρχει επόμενο check-in.",
     noNextCheckin: "Δεν υπάρχει επόμενο check-in",
     openWindowShort: "Ανοιχτό παράθυρο",
     activeHint:
@@ -767,10 +948,16 @@ function getLocalTexts(language: "el" | "en") {
       "Η κράτηση δεν έχει αντιστοιχιστεί ακόμη με ακίνητο.",
     viewSelectedOnly:
       "Το πεδίο παρακάτω δείχνει μόνο το επιλεγμένο παράθυρο.",
+    bookingIdentityHelp:
+      "Δείχνει το ακίνητο της κράτησης και τη σχετική διεύθυνση που πρέπει να γνωρίζει ο διαχειριστής.",
+    workWindowHelp:
+      "Το διαθέσιμο παράθυρο εργασίας είναι το πραγματικό διάστημα μεταξύ check-out και επόμενου check-in.",
+    availableWindowHelp:
+      "Χρησιμοποίησε αυτό το διάστημα για να δημιουργήσεις ή να αξιολογήσεις την επιχειρησιακή εργασία.",
   }
 }
 
-export default function BookingsHistoryPage() {
+export default function BookingsCalendarPage() {
   const { language } = useAppLanguage()
   const texts = getBookingsModuleTexts(language)
   const ui = getLocalTexts(language)
@@ -917,7 +1104,9 @@ export default function BookingsHistoryPage() {
   )
 
   const nonCancelledWindows = useMemo(() => {
-    return allWindows.filter((windowRow) => !isCancelledBooking(windowRow.booking.status))
+    return allWindows.filter(
+      (windowRow) => !isCancelledBooking(windowRow.booking.status)
+    )
   }, [allWindows])
 
   const searchedWindows = useMemo(() => {
@@ -940,6 +1129,9 @@ export default function BookingsHistoryPage() {
         booking.externalBookingId,
         booking.externalListingId,
         booking.externalListingName,
+        booking.externalPropertyAddress,
+        booking.externalPropertyCity,
+        booking.externalPropertyRegion,
         booking.guestName,
         booking.property?.name,
         booking.property?.code,
@@ -1047,7 +1239,8 @@ export default function BookingsHistoryPage() {
     const map = new Map<string, WorkWindowRow[]>()
 
     for (const windowRow of modeFilteredWindows) {
-      const key = windowRow.windowStartDateTime.toISOString().slice(0, 10)
+      const key = normalizeDateOnlyValue(windowRow.windowStartDateTime)
+      if (!key) continue
       if (!map.has(key)) map.set(key, [])
       map.get(key)!.push(windowRow)
     }
@@ -1277,7 +1470,7 @@ export default function BookingsHistoryPage() {
                   )
                 }
               >
-                β†
+                ←
               </button>
 
               <div className="min-w-[190px] text-center text-base font-semibold text-slate-950">
@@ -1453,7 +1646,7 @@ export default function BookingsHistoryPage() {
 
             <div className="grid grid-cols-7">
               {calendarDays.map((day) => {
-                const key = day.toISOString().slice(0, 10)
+                const key = normalizeDateOnlyValue(day) || ""
                 const dayWindows = monthWindowsMap.get(key) || []
                 const isCurrentMonth = day.getMonth() === monthCursor.getMonth()
                 const isSelectedDay = selectedDay ? sameDate(day, selectedDay) : false
@@ -1486,9 +1679,9 @@ export default function BookingsHistoryPage() {
                           ? "border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100"
                           : hasActiveAlert
                             ? "border-red-200 bg-red-50 text-red-800 hover:bg-red-100"
-                          : windowRow.hasTask
-                            ? "border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
-                            : "border-sky-200 bg-sky-50 text-sky-800 hover:bg-sky-100"
+                            : windowRow.hasTask
+                              ? "border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
+                              : "border-sky-200 bg-sky-50 text-sky-800 hover:bg-sky-100"
 
                         return (
                           <button
@@ -1512,11 +1705,13 @@ export default function BookingsHistoryPage() {
                                 windowRow.booking.externalListingId ||
                                 texts.list.propertyNotMapped}
                             </div>
+
                             {hasActiveAlert ? (
                               <div className="mt-1 truncate text-[10px] font-semibold">
                                 {language === "en" ? "Active alert" : "Ενεργό alert"}
                               </div>
                             ) : null}
+
                             <div className="mt-1 truncate">
                               {windowRow.windowStartDateTime.toLocaleTimeString(locale, {
                                 hour: "2-digit",
@@ -1658,6 +1853,7 @@ export default function BookingsHistoryPage() {
             {selectedWindowArray.map((windowRow) => {
               const booking = windowRow.booking
               const firstTask = booking.tasks[0] || null
+              const stateBlock = getBookingStateBlock(booking, language)
 
               const syncBadgeClass = booking.needsMapping
                 ? getBadgeClassName("warning")
@@ -1665,60 +1861,68 @@ export default function BookingsHistoryPage() {
                   ? getBadgeClassName("danger")
                   : getBadgeClassName("success")
 
+              const taskBadgeClass = getTaskCoverageBadgeClass(booking.taskStatus)
+
               const propertyAddressDisplay = getBookingAddressDisplay(
                 booking,
-                ui.noPropertyMessage
+                texts.common.notAvailable
               )
-              const checkoutText = formatDateTime(
+
+              const checkOutDateTimeText = formatDateTime(
                 windowRow.windowStartDateTime,
                 locale,
                 texts.common.notAvailable
               )
-              const nextCheckinText = formatDateTime(
+
+              const nextCheckInDateTimeText = formatDateTime(
                 windowRow.windowEndDateTime,
                 locale,
                 ui.noNextCheckin
               )
-              const durationText = getWindowDurationLabel(
-                windowRow.windowDurationMinutes,
-                language
+
+              const windowRangeText = getWindowRangeLabel(
+                windowRow,
+                locale,
+                ui.noNextCheckin,
+                texts.common.notAvailable
               )
 
               return (
-                <article key={windowRow.id} className="p-5">
+                <article key={windowRow.id} className="p-4 sm:p-5">
                   <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                       <div className="min-w-0 flex-1 space-y-3">
                         <div className="flex flex-wrap items-center gap-2">
-                          <div className="text-lg font-semibold text-slate-950">
-                            {booking.property?.name ||
-                              booking.externalListingName ||
-                              booking.externalListingId ||
-                              texts.list.propertyNotMapped}
+                          <div
+                            className="min-w-0 max-w-full truncate text-lg font-semibold text-slate-950"
+                            title={
+                              booking.property
+                                ? booking.property.name
+                                : booking.externalListingName ||
+                                  booking.externalListingId ||
+                                  texts.list.propertyNotMapped
+                            }
+                          >
+                            {booking.property
+                              ? booking.property.name
+                              : booking.externalListingName ||
+                                booking.externalListingId ||
+                                texts.list.propertyNotMapped}
                           </div>
 
-                          <span className={getBadgeClassName("neutral")}>
+                          <span
+                            className={getBadgeClassName("neutral")}
+                            title={language === "en" ? "Booking platform" : "Πλατφόρμα κράτησης"}
+                          >
                             {normalizeSourcePlatform(booking.sourcePlatform, texts)}
                           </span>
 
-                          <span className={syncBadgeClass}>
+                          <span className={syncBadgeClass} title={ui.bookingIdentityHelp}>
                             {getSyncLabel(booking.syncStatus, booking.needsMapping, texts)}
                           </span>
 
-                          <span
-                            className={
-                              booking.needsMapping
-                                ? getBadgeClassName("warning")
-                                : windowRow.hasTask
-                                  ? getBadgeClassName("success")
-                                  : getBadgeClassName("neutral")
-                            }
-                          >
-                            {booking.needsMapping
-                              ? ui.needsMappingBadge
-                              : windowRow.hasTask
-                                ? ui.withTaskBadge
-                                : ui.withoutTaskBadge}
+                          <span className={taskBadgeClass} title={ui.createTaskHelp}>
+                            {getTaskCoverageLabel(booking.taskStatus, language, texts)}
                           </span>
 
                           {isTaskAlertActive(firstTask) ? (
@@ -1728,16 +1932,19 @@ export default function BookingsHistoryPage() {
                           ) : null}
                         </div>
 
-                        <div className="text-sm text-slate-500">
+                        <div
+                          className="text-sm text-slate-500"
+                          title={ui.bookingIdentityHelp}
+                        >
                           {propertyAddressDisplay}
                         </div>
                       </div>
 
-                      <div className="flex flex-wrap gap-2 lg:justify-end">
+                      <div className="flex flex-wrap gap-2">
                         <Link
                           href={`/bookings/${booking.id}`}
                           title={ui.viewBookingHelp}
-                          className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-slate-950"
+                          className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-slate-950"
                         >
                           {ui.viewBooking}
                         </Link>
@@ -1746,95 +1953,117 @@ export default function BookingsHistoryPage() {
                           <Link
                             href={`/properties/${booking.property.id}`}
                             title={ui.viewPropertyHelp}
-                            className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-slate-950"
+                            className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-slate-950"
                           >
                             {ui.viewProperty}
                           </Link>
                         ) : null}
 
-                        {booking.property ? (
+                        {firstTask ? (
                           <Link
-                            href={`/tasks?propertyId=${booking.property.id}&scope=open`}
-                            title={ui.viewPropertyTasksHelp}
-                            className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-slate-950"
+                            href={`/tasks/${firstTask.id}`}
+                            title={ui.viewTaskHelp}
+                            className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-slate-950"
                           >
-                            {ui.viewPropertyTasks}
+                            {ui.viewTask}
                           </Link>
-                        ) : null}
-
-                        {!windowRow.hasTask ? (
+                        ) : (
                           <button
                             type="button"
                             title={ui.createTaskHelp}
                             onClick={() => openCreateTaskModal(windowRow)}
                             disabled={booking.needsMapping || isCancelledBooking(booking.status)}
-                            className="inline-flex items-center rounded-2xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                            className="inline-flex items-center rounded-2xl bg-slate-950 px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
                           >
                             {ui.createTask}
                           </button>
-                        ) : null}
+                        )}
                       </div>
                     </div>
 
                     <div
-                      className="mt-4 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 xl:flex-row xl:items-center xl:justify-between"
-                      title={ui.rangeTitleHelp}
+                      className="mt-4 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 lg:flex-row lg:items-center lg:justify-between"
+                      title={ui.workWindowHelp}
                     >
-                      <div className="min-w-0 text-sm text-slate-700" title={ui.checkoutDateTimeHelp}>
-                        <span className="font-semibold text-slate-950">{ui.checkoutDateTime}:</span>{" "}
-                        {checkoutText}
+                      <div className="min-w-0 text-sm text-slate-700">
+                        <span className="font-semibold text-slate-950">
+                          {language === "en" ? "Check-out" : "Check-out"}:
+                        </span>{" "}
+                        {checkOutDateTimeText}
                       </div>
 
-                      <div className="min-w-0 text-sm text-slate-700" title={ui.nextCheckinDateTimeHelp}>
-                        <span className="font-semibold text-slate-950">{ui.nextCheckinDateTime}:</span>{" "}
-                        {nextCheckinText}
+                      <div className="min-w-0 text-sm text-slate-700">
+                        <span className="font-semibold text-slate-950">
+                          {language === "en" ? "Next check-in" : "Επόμενο check-in"}:
+                        </span>{" "}
+                        {nextCheckInDateTimeText}
                       </div>
 
-                      <div className="min-w-0 text-sm text-slate-700" title={ui.durationHelp}>
-                        <span className="font-semibold text-slate-950">{ui.rangeTitle}:</span>{" "}
-                        {checkoutText} - {nextCheckinText}
-                        <span className="ml-2 text-xs text-slate-500">({durationText})</span>
+                      <div className="min-w-0 text-sm text-slate-700">
+                        <span className="font-semibold text-slate-950">
+                          {language === "en" ? "Window" : "Παράθυρο"}:
+                        </span>{" "}
+                        {windowRangeText}
+                        {typeof windowRow.windowDurationMinutes === "number" ? (
+                          <span className="ml-2 text-xs text-slate-500">
+                            ({getWindowDurationLabel(windowRow.windowDurationMinutes, language)})
+                          </span>
+                        ) : null}
                       </div>
                     </div>
 
-                    {firstTask ? (
-                      <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                        <div className="mb-3 text-sm font-semibold text-slate-950">
-                          {ui.listTaskTitle}
-                        </div>
+                    <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-4">
+                      <span
+                        className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-700"
+                        title={
+                          firstTask
+                            ? stateBlock.description
+                            : booking.needsMapping
+                              ? stateBlock.description
+                              : ui.createTaskHelp
+                        }
+                      >
+                        {firstTask
+                          ? `${normalizeTaskTitle(firstTask.title, language)} · ${getTaskTypeDisplay(firstTask.taskType, language, texts)} · ${getTaskStatusDisplay(firstTask.status, language)}`
+                          : language === "en"
+                            ? "No task yet"
+                            : "Χωρίς εργασία ακόμη"}
+                      </span>
 
-                        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                          <div className="min-w-0 text-sm">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <div className="font-semibold text-slate-950">
-                                {normalizeTaskTitle(firstTask.title, language)}
-                              </div>
-                              {isTaskAlertActive(firstTask) ? (
-                                <span className="rounded-full border border-red-200 bg-red-100 px-2.5 py-1 text-xs font-semibold text-red-700">
-                                  {language === "en" ? "Active alert" : "Ενεργό alert"}
-                                </span>
-                              ) : null}
-                            </div>
-                            <div className="mt-1 text-slate-600">
-                              {getTaskTypeDisplay(firstTask.taskType, language, texts)} ·{" "}
-                              {getTaskStatusDisplay(firstTask.status, language)} ·{" "}
-                              {getPriorityDisplay(firstTask.priority, language)}
-                              {isTaskAlertActive(firstTask) && firstTask.alertAt
-                                ? ` · Alert: ${formatDateTime(firstTask.alertAt, locale, "-")}`
-                                : ""}
-                            </div>
-                          </div>
+                      <span
+                        className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${
+                          firstTask?.alertEnabled && firstTask?.alertAt
+                            ? "border border-rose-200 bg-rose-50 text-rose-700"
+                            : "border border-slate-200 bg-white text-slate-600"
+                        }`}
+                        title={
+                          firstTask?.alertEnabled && firstTask?.alertAt
+                            ? language === "en"
+                              ? "Task alert is active for this booking."
+                              : "Υπάρχει ενεργό alert για την εργασία αυτής της κράτησης."
+                            : stateBlock.title
+                        }
+                      >
+                        {firstTask
+                          ? `${getPriorityDisplay(firstTask.priority, language)}${
+                              firstTask.alertEnabled && firstTask.alertAt
+                                ? ` · Alert ${formatTime(firstTask.alertAt)}`
+                                : ""
+                            }`
+                          : stateBlock.title}
+                      </span>
 
-                          <Link
-                            href={`/tasks/${firstTask.id}`}
-                            title={ui.viewBookingHelp}
-                            className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-                          >
-                            {texts.common.viewTask}
-                          </Link>
-                        </div>
-                      </div>
-                    ) : null}
+                      {!booking.property ? (
+                        <span
+                          className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700"
+                          title={stateBlock.description}
+                        >
+                          {language === "en"
+                            ? "Property mapping required"
+                            : "Απαιτείται αντιστοίχιση ακινήτου"}
+                        </span>
+                      ) : null}
+                    </div>
                   </div>
                 </article>
               )
@@ -1903,13 +2132,20 @@ export default function BookingsHistoryPage() {
 
                 <div className="mt-3 rounded-2xl bg-white p-3">
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    {ui.duration}
+                    {ui.rangeTitle}
                   </div>
                   <div className="mt-1 text-sm font-medium text-slate-900">
-                    {getWindowDurationLabel(
-                      modal.windowRow.windowDurationMinutes,
-                      language
+                    {getWindowRangeLabel(
+                      modal.windowRow,
+                      locale,
+                      ui.noNextCheckin,
+                      texts.common.notAvailable
                     )}
+                    {typeof modal.windowRow.windowDurationMinutes === "number" ? (
+                      <span className="ml-2 text-xs text-slate-500">
+                        ({getWindowDurationLabel(modal.windowRow.windowDurationMinutes, language)})
+                      </span>
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -2163,4 +2399,3 @@ export default function BookingsHistoryPage() {
     </div>
   )
 }
-

@@ -18,6 +18,10 @@ import {
   normalizeTaskStatus,
   normalizeTaskTitleText,
 } from "@/lib/i18n/normalizers"
+import {
+  getReadinessBadgeClasses,
+  getReadinessLabel,
+} from "@/lib/readiness/readiness-ui"
 
 type ScopeFilter = "all" | "open"
 
@@ -94,6 +98,9 @@ type TaskRow = {
   } | null
   sendCleaningChecklist?: boolean
   sendSuppliesChecklist?: boolean
+  propertyReadiness?: {
+    status: string | null
+  } | null
 }
 
 type TaskStateTone = "neutral" | "success" | "warning" | "danger"
@@ -1228,9 +1235,18 @@ export default function TasksPage() {
                           ) : null}
                         </div>
 
-                        <div className="mt-2 text-sm text-slate-500">
-                          {task.property?.name || texts.none}
-                          {task.property?.code ? ` · ${task.property.code}` : ""}
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <span className="text-sm text-slate-500">
+                            {task.property?.name || texts.none}
+                            {task.property?.code ? ` · ${task.property.code}` : ""}
+                          </span>
+                          {task.propertyReadiness?.status ? (
+                            <span
+                              className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${getReadinessBadgeClasses(task.propertyReadiness.status)}`}
+                            >
+                              {getReadinessLabel(language, task.propertyReadiness.status)}
+                            </span>
+                          ) : null}
                         </div>
                       </div>
 

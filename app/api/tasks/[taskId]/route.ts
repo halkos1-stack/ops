@@ -8,8 +8,11 @@ import {
   mapDbConditionToRawRecord,
   type RawPropertyConditionRecord,
 } from "@/lib/readiness/property-condition-mappers"
-import { buildCanonicalSupplyWriteData } from "@/lib/supplies/compute-supply-state"
-import { toPrismaSupplyStateMode } from "@/lib/supplies/supply-mode-rules"
+import {
+  syncTaskChecklistRun,
+  syncTaskSupplyRun,
+  syncTaskIssueRun,
+} from "@/lib/tasks/task-run-sync"
 
 type RouteContext = {
   params: Promise<{
@@ -376,505 +379,7 @@ async function resolveTaskId(context: RouteContext) {
   return String(params.taskId || "").trim()
 }
 
-async function syncTaskRunsForTask(taskId: string) {
-  const task = await prisma.task.findUnique({
-    where: { id: taskId },
-    select: {
-      id: true,
-      propertyId: true,
-      requiresChecklist: true,
-      sendCleaningChecklist: true,
-      sendSuppliesChecklist: true,
-      sendIssuesChecklist: true,
-      checklistRun: {
-        select: {
-          id: true,
-          templateId: true,
-        },
-      },
-      supplyRun: {
-        select: {
-          id: true,
-        },
-      },
-      issueRun: {
-        select: {
-          id: true,
-          templateId: true,
-        },
-      },
-    },
-  })
 
-  if (!task || !task.propertyId) return
-
-  if (task.sendCleaningChecklist && task.requiresChecklist !== false) {
-    const primaryCleaningTemplate = await prisma.propertyChecklistTemplate.findFirst({
-      where: {
-        propertyId: task.propertyId,
-        isPrimary: true,
-        isActive: true,
-        NOT: {
-          templateType: "supplies",
-        },
-      },
-      select: {
-        id: true,
-        title: true,
-        description: true,
-        templateType: true,
-        items: {
-          orderBy: {
-            sortOrder: "asc",
-          },
-          select: {
-            id: true,
-            label: true,
-            labelEn: true,
-            description: true,
-            itemType: true,
-            isRequired: true,
-            sortOrder: true,
-            category: true,
-            requiresPhoto: true,
-            opensIssueOnFail: true,
-            optionsText: true,
-            issueTypeOnFail: true,
-            issueSeverityOnFail: true,
-            failureValuesText: true,
-            linkedSupplyItemId: true,
-            supplyUpdateMode: true,
-            supplyQuantity: true,
-            supplyItem: {
-              select: {
-                id: true,
-                name: true,
-                nameEl: true,
-                nameEn: true,
-              },
-            },
-          },
-        },
-      },
-      orderBy: {
-        updatedAt: "desc",
-      },
-    })
-
-    if (primaryCleaningTemplate) {
-      if (task.checklistRun) {
-        const shouldUpdateTemplate = task.checklistRun.templateId !== primaryCleaningTemplate.id
-
-        if (shouldUpdateTemplate) {
-          await prisma.$transaction(async (tx) => {
-            await tx.taskChecklistRun.update({
-              where: { id: task.checklistRun!.id },
-              data: {
-                templateId: primaryCleaningTemplate.id,
-                sourceTemplateTitle: primaryCleaningTemplate.title,
-                sourceTemplateDescription: primaryCleaningTemplate.description,
-                templateType: primaryCleaningTemplate.templateType,
-              },
-            })
-
-            await tx.taskChecklistRunItem.deleteMany({
-              where: {
-                checklistRunId: task.checklistRun!.id,
-              },
-            })
-
-            if (primaryCleaningTemplate.items.length > 0) {
-              await tx.taskChecklistRunItem.createMany({
-                data: primaryCleaningTemplate.items.map((item) => ({
-                  checklistRunId: task.checklistRun!.id,
-                  propertyTemplateItemId: item.id,
-                  label: item.label,
-                  labelEn: item.labelEn,
-                  description: item.description,
-                  itemType: item.itemType,
-                  isRequired: item.isRequired,
-                  sortOrder: item.sortOrder,
-                  category: item.category,
-                  requiresPhoto: item.requiresPhoto,
-                  opensIssueOnFail: item.opensIssueOnFail,
-                  optionsText: item.optionsText,
-                  issueTypeOnFail: item.issueTypeOnFail,
-                  issueSeverityOnFail: item.issueSeverityOnFail,
-                  failureValuesText: item.failureValuesText,
-                  linkedSupplyItemId: item.linkedSupplyItemId,
-                  linkedSupplyItemName: item.supplyItem?.name ?? null,
-                  linkedSupplyItemNameEl: item.supplyItem?.nameEl ?? null,
-                  linkedSupplyItemNameEn: item.supplyItem?.nameEn ?? null,
-                  supplyUpdateMode: item.supplyUpdateMode,
-                  supplyQuantity: item.supplyQuantity,
-                })),
-              })
-            }
-          })
-        }
-      } else {
-        await prisma.$transaction(async (tx) => {
-          const run = await tx.taskChecklistRun.create({
-            data: {
-              taskId: task.id,
-              templateId: primaryCleaningTemplate.id,
-              sourceTemplateTitle: primaryCleaningTemplate.title,
-              sourceTemplateDescription: primaryCleaningTemplate.description,
-              templateType: primaryCleaningTemplate.templateType,
-              status: "pending",
-            },
-            select: {
-              id: true,
-            },
-          })
-
-          if (primaryCleaningTemplate.items.length > 0) {
-            await tx.taskChecklistRunItem.createMany({
-              data: primaryCleaningTemplate.items.map((item) => ({
-                checklistRunId: run.id,
-                propertyTemplateItemId: item.id,
-                label: item.label,
-                labelEn: item.labelEn,
-                description: item.description,
-                itemType: item.itemType,
-                isRequired: item.isRequired,
-                sortOrder: item.sortOrder,
-                category: item.category,
-                requiresPhoto: item.requiresPhoto,
-                opensIssueOnFail: item.opensIssueOnFail,
-                optionsText: item.optionsText,
-                issueTypeOnFail: item.issueTypeOnFail,
-                issueSeverityOnFail: item.issueSeverityOnFail,
-                failureValuesText: item.failureValuesText,
-                linkedSupplyItemId: item.linkedSupplyItemId,
-                linkedSupplyItemName: item.supplyItem?.name ?? null,
-                linkedSupplyItemNameEl: item.supplyItem?.nameEl ?? null,
-                linkedSupplyItemNameEn: item.supplyItem?.nameEn ?? null,
-                supplyUpdateMode: item.supplyUpdateMode,
-                supplyQuantity: item.supplyQuantity,
-              })),
-            })
-          }
-        })
-      }
-    }
-  }
-
-  if (task.sendSuppliesChecklist) {
-    const activeSupplies = await prisma.propertySupply.findMany({
-      where: {
-        propertyId: task.propertyId,
-        isActive: true,
-      },
-      select: {
-        id: true,
-        propertyId: true,
-        supplyItemId: true,
-        fillLevel: true,
-        stateMode: true,
-        currentStock: true,
-        mediumThreshold: true,
-        fullThreshold: true,
-        targetStock: true,
-        reorderThreshold: true,
-        targetLevel: true,
-        minimumThreshold: true,
-        trackingMode: true,
-        isCritical: true,
-        warningThreshold: true,
-        notes: true,
-        supplyItem: {
-          select: {
-            id: true,
-            code: true,
-            name: true,
-            nameEl: true,
-            nameEn: true,
-            category: true,
-            unit: true,
-          },
-        },
-      },
-      orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
-    })
-
-    if (activeSupplies.length > 0) {
-      if (task.supplyRun) {
-        const existingItems = await prisma.taskSupplyRunItem.findMany({
-          where: {
-            taskSupplyRunId: task.supplyRun.id,
-          },
-          select: {
-            id: true,
-            propertySupplyId: true,
-          },
-        })
-
-        const existingPropertySupplyIds = new Set(
-          existingItems
-            .map((item) => item.propertySupplyId)
-            .filter((value): value is string => Boolean(value))
-        )
-
-        const incomingPropertySupplyIds = new Set(activeSupplies.map((item) => item.id))
-
-        const missingSupplies = activeSupplies.filter(
-          (item) => !existingPropertySupplyIds.has(item.id)
-        )
-
-        const obsoleteItemIds = existingItems
-          .filter(
-            (item) =>
-              !item.propertySupplyId ||
-              !incomingPropertySupplyIds.has(item.propertySupplyId)
-          )
-          .map((item) => item.id)
-
-        if (obsoleteItemIds.length > 0) {
-          await prisma.taskSupplyRunItem.deleteMany({
-            where: {
-              id: {
-                in: obsoleteItemIds,
-              },
-            },
-          })
-        }
-
-        if (missingSupplies.length > 0) {
-          const maxSortOrderRow = await prisma.taskSupplyRunItem.findFirst({
-            where: {
-              taskSupplyRunId: task.supplyRun.id,
-            },
-            orderBy: {
-              sortOrder: "desc",
-            },
-            select: {
-              sortOrder: true,
-            },
-          })
-
-          let nextSortOrder = Number(maxSortOrderRow?.sortOrder ?? -1) + 1
-
-          await prisma.taskSupplyRunItem.createMany({
-            data: missingSupplies.map((supply) => {
-              const canonical = buildCanonicalSupplyWriteData({
-                stateMode: supply.stateMode,
-                fillLevel: supply.fillLevel,
-                currentStock: supply.currentStock,
-                mediumThreshold: supply.mediumThreshold,
-                fullThreshold: supply.fullThreshold,
-              })
-              const row = {
-                taskSupplyRunId: task.supplyRun!.id,
-                propertySupplyId: supply.id,
-                supplyItemId: supply.supplyItemId,
-                propertySupplyCode: supply.supplyItem?.code ?? null,
-                label: supply.supplyItem?.nameEl ?? supply.supplyItem?.name ?? "Αναλώσιμο",
-                labelEn: supply.supplyItem?.nameEn ?? null,
-                category: supply.supplyItem?.category ?? null,
-                unit: supply.supplyItem?.unit ?? null,
-                fillLevel: canonical.fillLevel,
-                stateMode: toPrismaSupplyStateMode(canonical.stateMode),
-                currentStock: canonical.currentStock,
-                mediumThreshold: canonical.mediumThreshold,
-                fullThreshold: canonical.fullThreshold,
-                targetStock: canonical.targetStock,
-                reorderThreshold: canonical.reorderThreshold,
-                targetLevel: canonical.targetLevel,
-                minimumThreshold: canonical.minimumThreshold,
-                trackingMode: canonical.trackingMode,
-                isCritical: supply.isCritical,
-                warningThreshold: canonical.warningThreshold,
-                sortOrder: nextSortOrder,
-                isRequired: true,
-                notes: supply.notes,
-              }
-
-              nextSortOrder += 1
-              return row
-            }),
-          })
-        }
-      } else {
-        await prisma.$transaction(async (tx) => {
-          const run = await tx.taskSupplyRun.create({
-            data: {
-              taskId: task.id,
-              status: "pending",
-            },
-            select: {
-              id: true,
-            },
-          })
-
-          await tx.taskSupplyRunItem.createMany({
-            data: activeSupplies.map((supply, index) => {
-              const canonical = buildCanonicalSupplyWriteData({
-                stateMode: supply.stateMode,
-                fillLevel: supply.fillLevel,
-                currentStock: supply.currentStock,
-                mediumThreshold: supply.mediumThreshold,
-                fullThreshold: supply.fullThreshold,
-              })
-
-              return ({
-              taskSupplyRunId: run.id,
-              propertySupplyId: supply.id,
-              supplyItemId: supply.supplyItemId,
-              propertySupplyCode: supply.supplyItem?.code ?? null,
-              label: supply.supplyItem?.nameEl ?? supply.supplyItem?.name ?? "Αναλώσιμο",
-              labelEn: supply.supplyItem?.nameEn ?? null,
-              category: supply.supplyItem?.category ?? null,
-              unit: supply.supplyItem?.unit ?? null,
-              fillLevel: canonical.fillLevel,
-                stateMode: toPrismaSupplyStateMode(canonical.stateMode),
-              currentStock: canonical.currentStock,
-              mediumThreshold: canonical.mediumThreshold,
-              fullThreshold: canonical.fullThreshold,
-              targetStock: canonical.targetStock,
-              reorderThreshold: canonical.reorderThreshold,
-              targetLevel: canonical.targetLevel,
-              minimumThreshold: canonical.minimumThreshold,
-              trackingMode: canonical.trackingMode,
-              isCritical: supply.isCritical,
-              warningThreshold: canonical.warningThreshold,
-              sortOrder: index,
-              isRequired: true,
-              notes: supply.notes,
-            })
-            }),
-          })
-        })
-      }
-    }
-  }
-
-  if (task.sendIssuesChecklist) {
-    const primaryIssueTemplate = await prisma.propertyIssueTemplate.findFirst({
-      where: {
-        propertyId: task.propertyId,
-        isPrimary: true,
-        isActive: true,
-      },
-      select: {
-        id: true,
-        title: true,
-        description: true,
-        items: {
-          orderBy: {
-            sortOrder: "asc",
-          },
-          select: {
-            id: true,
-            label: true,
-            labelEn: true,
-            description: true,
-            sortOrder: true,
-            itemType: true,
-            isRequired: true,
-            allowsIssue: true,
-            allowsDamage: true,
-            defaultIssueType: true,
-            defaultSeverity: true,
-            requiresPhoto: true,
-            affectsHostingByDefault: true,
-            urgentByDefault: true,
-            locationHint: true,
-          },
-        },
-      },
-      orderBy: {
-        updatedAt: "desc",
-      },
-    })
-
-    if (primaryIssueTemplate) {
-      if (task.issueRun) {
-        const shouldUpdateTemplate = task.issueRun.templateId !== primaryIssueTemplate.id
-
-        if (shouldUpdateTemplate) {
-          await prisma.$transaction(async (tx) => {
-            await tx.taskIssueRun.update({
-              where: { id: task.issueRun!.id },
-              data: {
-                templateId: primaryIssueTemplate.id,
-                sourceTemplateTitle: primaryIssueTemplate.title,
-                sourceTemplateDescription: primaryIssueTemplate.description,
-              },
-            })
-
-            await tx.taskIssueRunItem.deleteMany({
-              where: {
-                issueRunId: task.issueRun!.id,
-              },
-            })
-
-            if (primaryIssueTemplate.items.length > 0) {
-              await tx.taskIssueRunItem.createMany({
-                data: primaryIssueTemplate.items.map((item) => ({
-                  issueRunId: task.issueRun!.id,
-                  propertyTemplateItemId: item.id,
-                  label: item.label,
-                  labelEn: item.labelEn,
-                  description: item.description,
-                  sortOrder: item.sortOrder,
-                  itemType: item.itemType,
-                  isRequired: item.isRequired,
-                  allowsIssue: item.allowsIssue,
-                  allowsDamage: item.allowsDamage,
-                  defaultIssueType: item.defaultIssueType,
-                  defaultSeverity: item.defaultSeverity,
-                  requiresPhoto: item.requiresPhoto,
-                  affectsHostingByDefault: item.affectsHostingByDefault,
-                  urgentByDefault: item.urgentByDefault,
-                  locationHint: item.locationHint,
-                })),
-              })
-            }
-          })
-        }
-      } else {
-        await prisma.$transaction(async (tx) => {
-          const run = await tx.taskIssueRun.create({
-            data: {
-              taskId: task.id,
-              templateId: primaryIssueTemplate.id,
-              sourceTemplateTitle: primaryIssueTemplate.title,
-              sourceTemplateDescription: primaryIssueTemplate.description,
-              status: "pending",
-            },
-            select: {
-              id: true,
-            },
-          })
-
-          if (primaryIssueTemplate.items.length > 0) {
-            await tx.taskIssueRunItem.createMany({
-              data: primaryIssueTemplate.items.map((item) => ({
-                issueRunId: run.id,
-                propertyTemplateItemId: item.id,
-                label: item.label,
-                labelEn: item.labelEn,
-                description: item.description,
-                sortOrder: item.sortOrder,
-                itemType: item.itemType,
-                isRequired: item.isRequired,
-                allowsIssue: item.allowsIssue,
-                allowsDamage: item.allowsDamage,
-                defaultIssueType: item.defaultIssueType,
-                defaultSeverity: item.defaultSeverity,
-                requiresPhoto: item.requiresPhoto,
-                affectsHostingByDefault: item.affectsHostingByDefault,
-                urgentByDefault: item.urgentByDefault,
-                locationHint: item.locationHint,
-              })),
-            })
-          }
-        })
-      }
-    }
-  }
-}
 async function getTaskPayload(taskId: string, auth: AuthContext) {
   const tenantWhere = buildTenantWhere(auth)
 
@@ -1717,6 +1222,9 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
         propertyId: true,
         bookingId: true,
         source: true,
+        sendCleaningChecklist: true,
+        sendSuppliesChecklist: true,
+        sendIssuesChecklist: true,
       },
     })
 
@@ -1879,7 +1387,33 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       data,
     })
 
-    await syncTaskRunsForTask(taskId)
+    const finalSendCleaningChecklist = data.sendCleaningChecklist !== undefined
+      ? Boolean(data.sendCleaningChecklist)
+      : existingTask.sendCleaningChecklist
+    const finalSendSuppliesChecklist = data.sendSuppliesChecklist !== undefined
+      ? Boolean(data.sendSuppliesChecklist)
+      : existingTask.sendSuppliesChecklist
+    const finalSendIssuesChecklist = data.sendIssuesChecklist !== undefined
+      ? Boolean(data.sendIssuesChecklist)
+      : existingTask.sendIssuesChecklist
+
+    await syncTaskChecklistRun({
+      taskId,
+      organizationId: existingTask.organizationId ?? "",
+      propertyId: existingTask.propertyId,
+      sendCleaningChecklist: finalSendCleaningChecklist,
+    })
+    await syncTaskSupplyRun({
+      taskId,
+      propertyId: existingTask.propertyId,
+      sendSuppliesChecklist: finalSendSuppliesChecklist,
+    })
+    await syncTaskIssueRun({
+      taskId,
+      organizationId: existingTask.organizationId ?? "",
+      propertyId: existingTask.propertyId,
+      sendIssuesChecklist: finalSendIssuesChecklist,
+    })
 
     const payload = await getTaskPayload(taskId, access.auth)
 
