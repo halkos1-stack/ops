@@ -21,10 +21,24 @@ export type PropertyReadinessSnapshot = {
   hasUpcomingCheckInWithin3Hours: boolean
 }
 
-type RefreshPropertyReadinessSnapshotInput = {
+export type RefreshPropertyReadinessSnapshotInput = {
   propertyId: string
-  organizationId: string
+  organizationId?: string | null
   now?: Date
+}
+
+export type RefreshedPropertyReadiness = Awaited<
+  ReturnType<typeof refreshPropertyReadiness>
+>
+
+export type PropertyReadinessSnapshotResult = {
+  property: {
+    id: string
+    organizationId: string
+  }
+  snapshot: PropertyReadinessSnapshot
+  canonicalTruth: RefreshedPropertyReadiness
+  generatedAt: Date
 }
 
 const OPEN_TASK_STATUSES = [
@@ -64,33 +78,36 @@ function isWithinNextThreeHours(target: Date | null, now: Date) {
   return diffMs >= 0 && diffMs <= 3 * 60 * 60 * 1000
 }
 
-export async function computePropertyReadinessSnapshot(
+async function resolvePropertyIdentity(
   input: RefreshPropertyReadinessSnapshotInput
-): Promise<PropertyReadinessSnapshot | null> {
-  const now = input.now ?? new Date()
-
-  const property = await prisma.property.findFirst({
+) {
+  return prisma.property.findFirst({
     where: {
       id: input.propertyId,
-      organizationId: input.organizationId,
+      ...(input.organizationId
+        ? { organizationId: input.organizationId }
+        : {}),
     },
     select: {
       id: true,
       organizationId: true,
     },
   })
+}
 
-  if (!property) {
-    return null
-  }
-
-  const canonicalTruth = await refreshPropertyReadiness(property.id)
+async function buildPropertyReadinessSnapshot(params: {
+  propertyId: string
+  organizationId: string
+  now: Date
+  canonicalTruth: RefreshedPropertyReadiness
+}): Promise<PropertyReadinessSnapshot> {
+  const { propertyId, organizationId, now, canonicalTruth } = params
 
   const [openTasksCount, openIssuesCount, activeAlertsCount] = await Promise.all([
     prisma.task.count({
       where: {
-        organizationId: input.organizationId,
-        propertyId: input.propertyId,
+        organizationId,
+        propertyId,
         ...CANONICAL_OPERATIONAL_TASK_WHERE,
         status: {
           in: OPEN_TASK_STATUSES,
@@ -99,8 +116,8 @@ export async function computePropertyReadinessSnapshot(
     }),
     prisma.issue.count({
       where: {
-        organizationId: input.organizationId,
-        propertyId: input.propertyId,
+        organizationId,
+        propertyId,
         status: {
           in: OPEN_ISSUE_STATUSES,
         },
@@ -108,8 +125,8 @@ export async function computePropertyReadinessSnapshot(
     }),
     prisma.task.count({
       where: {
-        organizationId: input.organizationId,
-        propertyId: input.propertyId,
+        organizationId,
+        propertyId,
         ...CANONICAL_OPERATIONAL_TASK_WHERE,
         alertEnabled: true,
         alertAt: {
@@ -126,11 +143,10 @@ export async function computePropertyReadinessSnapshot(
     canonicalTruth.readiness.counts.blockingConditions
 
   return {
-    propertyId: input.propertyId,
-    organizationId: input.organizationId,
+    propertyId,
+    organizationId,
     readinessStatus: toSnapshotStatus(canonicalTruth.readiness.status),
-    readinessUpdatedAt:
-      canonicalTruth.updatedProperty.readinessUpdatedAt ?? now,
+    readinessUpdatedAt: canonicalTruth.updatedProperty.readinessUpdatedAt ?? now,
     openTasksCount,
     openIssuesCount,
     activeAlertsCount,
@@ -144,8 +160,46 @@ export async function computePropertyReadinessSnapshot(
   }
 }
 
-export async function refreshPropertyReadinessSnapshot(
+export async function computePropertyReadinessSnapshot(
   input: RefreshPropertyReadinessSnapshotInput
 ): Promise<PropertyReadinessSnapshot | null> {
-  return computePropertyReadinessSnapshot(input)
+  const refreshed = await refreshPropertyReadinessSnapshot(input)
+  return refreshed?.snapshot ?? null
+}
+
+export async function refreshPropertyReadinessSnapshot(
+  input: RefreshPropertyReadinessSnapshotInput
+): Promise<PropertyReadinessSnapshotResult | null> {
+  const now = input.now ?? new Date()
+
+  const property = await resolvePropertyIdentity(input)
+
+  if (!property) {
+    return null
+  }
+
+  const canonicalTruth = await refreshPropertyReadiness(property.id)
+  const snapshot = await buildPropertyReadinessSnapshot({
+    propertyId: property.id,
+    organizationId: property.organizationId,
+    now,
+    canonicalTruth,
+  })
+
+  return {
+    property,
+    snapshot,
+    canonicalTruth,
+    generatedAt: now,
+  }
+}
+
+export async function refreshPropertyReadinessSnapshotByPropertyId(
+  propertyId: string,
+  now?: Date
+) {
+  return refreshPropertyReadinessSnapshot({
+    propertyId,
+    now,
+  })
 }

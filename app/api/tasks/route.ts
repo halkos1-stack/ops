@@ -22,6 +22,7 @@ import {
   taskDetailsInclude,
   shapeTaskForResponse,
 } from "@/lib/tasks/task-response-builder"
+import { refreshPropertyReadinessSnapshot } from "@/lib/properties/readiness-snapshot"
 
 function toNullableString(value: unknown) {
   if (value === undefined || value === null) return null
@@ -424,6 +425,11 @@ export async function POST(req: NextRequest) {
       organizationId,
       propertyId,
       sendIssuesChecklist,
+    })
+
+    await refreshPropertyReadinessSnapshot({
+      propertyId,
+      organizationId,
     })
 
     const fullTask = await prisma.task.findUnique({

@@ -4,6 +4,7 @@ import {
   requireApiAppAccess,
   canAccessOrganization,
 } from "@/lib/route-access"
+import { refreshPropertyReadinessSnapshot } from "@/lib/properties/readiness-snapshot"
 
 type RouteContext = {
   params: Promise<{
@@ -32,7 +33,7 @@ function parseDateOnly(value: unknown) {
   const text = String(value ?? "").trim()
   if (!text) return null
 
-  const date = new Date(`${text}T00:00:00`)
+  const date = new Date(`${value}T00:00:00`)
   if (Number.isNaN(date.getTime())) return null
 
   return date
@@ -436,6 +437,11 @@ export async function POST(req: NextRequest, context: RouteContext) {
           },
         },
       })
+    })
+
+    await refreshPropertyReadinessSnapshot({
+      propertyId: property.id,
+      organizationId: booking.organizationId,
     })
 
     return NextResponse.json(
