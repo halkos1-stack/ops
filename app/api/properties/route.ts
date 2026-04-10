@@ -7,6 +7,17 @@ import {
   filterCanonicalOperationalTasks,
   getOperationalTaskValidity,
 } from "@/lib/tasks/ops-task-contract"
+import {
+  computePropertyReadiness,
+  type ReadinessConditionInput,
+} from "@/lib/readiness/compute-property-readiness"
+import { computePropertyOperationalStatus } from "@/lib/readiness/property-operational-status"
+
+// ─── Utility types ────────────────────────────────────────────────────────────
+
+type LooseRecord = Record<string, unknown>
+
+// ─── Utility functions ────────────────────────────────────────────────────────
 
 function safeArray<T>(value: T[] | null | undefined): T[] {
   return Array.isArray(value) ? value : []
@@ -100,6 +111,8 @@ async function generateNextPropertyCode(
   return `${prefix}${String(nextNumber).padStart(4, "0")}`
 }
 
+// ─── Prisma query helpers ─────────────────────────────────────────────────────
+
 async function getFullPropertyList(where: Record<string, unknown>) {
   return prisma.property.findMany({
     where,
@@ -141,12 +154,14 @@ async function getFullPropertyList(where: Record<string, unknown>) {
           status: true,
           priority: true,
           taskType: true,
+          title: true,
           scheduledDate: true,
+          completedAt: true,
           alertEnabled: true,
           alertAt: true,
           sendCleaningChecklist: true,
           sendSuppliesChecklist: true,
-
+          sendIssuesChecklist: true,
           assignments: {
             orderBy: {
               assignedAt: "desc",
@@ -160,7 +175,6 @@ async function getFullPropertyList(where: Record<string, unknown>) {
               rejectedAt: true,
             },
           },
-
           checklistRun: {
             select: {
               id: true,
@@ -169,13 +183,18 @@ async function getFullPropertyList(where: Record<string, unknown>) {
               completedAt: true,
             },
           },
-
           supplyRun: {
             select: {
               id: true,
               status: true,
               startedAt: true,
               completedAt: true,
+            },
+          },
+          issueRun: {
+            select: {
+              id: true,
+              status: true,
             },
           },
         },
@@ -236,37 +255,117 @@ async function getFullPropertyList(where: Record<string, unknown>) {
         },
         take: 50,
       },
+
+      conditions: {
+        select: {
+          id: true,
+          propertyId: true,
+          conditionType: true,
+          status: true,
+          blockingStatus: true,
+          severity: true,
+          managerDecision: true,
+          title: true,
+        },
+        take: 50,
+      },
     },
   })
 }
 
 type FullPropertyRow = Awaited<ReturnType<typeof getFullPropertyList>>[number]
 
+// ─── Condition mapper ─────────────────────────────────────────────────────────
+
+function mapConditionToReadinessInput(
+  condition: FullPropertyRow["conditions"][number]
+): ReadinessConditionInput {
+  return {
+    id: condition.id,
+    propertyId: condition.propertyId,
+    conditionType: String(condition.conditionType).toLowerCase() as
+      | "supply"
+      | "issue"
+      | "damage",
+    status: String(condition.status).toLowerCase() as
+      | "open"
+      | "monitoring"
+      | "resolved"
+      | "dismissed",
+    blockingStatus: String(condition.blockingStatus).toLowerCase() as
+      | "blocking"
+      | "non_blocking"
+      | "warning",
+    severity: String(condition.severity).toLowerCase() as
+      | "low"
+      | "medium"
+      | "high"
+      | "critical",
+    managerDecision: condition.managerDecision
+      ? (String(condition.managerDecision).toLowerCase() as
+          | "allow_with_issue"
+          | "block_until_resolved"
+          | "monitor"
+          | "resolved"
+          | "dismissed")
+      : null,
+    title: condition.title ?? null,
+  }
+}
+
+// ─── Property shaping ─────────────────────────────────────────────────────────
+
+/**
+ * Μετατρέπει raw Prisma property σε operational view.
+ *
+ * Κανονική σειρά εκτέλεσης:
+ * 1. Supply canonical state (υπήρχε ήδη)
+ * 2. Operational status ΠΡΩΤΑ — bookings + canonical tasks, χωρίς readinessStatus input
+ * 3. Live readiness ΜΕ operational context — conditions + operational override
+ *
+ * Τα live πεδία (readinessStatus, readinessReasonsText, readinessUpdatedAt)
+ * αντικαθιστούν τις stale DB τιμές στο response.
+ */
 function shapePropertyForOperationalViews(property: FullPropertyRow) {
-  const allTasks = Array.isArray(property?.tasks) ? property.tasks : []
-  const tasks = filterCanonicalOperationalTasks(allTasks)
-  const invalidOperationalTaskCount = allTasks.filter(
-    (task) => getOperationalTaskValidity(task).isCanonicalOperational !== true
-  ).length
-  const propertySupplies = safeArray(property?.propertySupplies).map((supply) => {
+  // Cast σε LooseRecord[] για ασφαλή πρόσβαση — το Prisma type inference
+  // χάνεται όταν το tasks include περιέχει nested relations με optional fields.
+  const allTasks = (Array.isArray(property?.tasks) ? property.tasks : []) as LooseRecord[]
+
+  // ─── Supply canonical state ───────────────────────────────────────────────
+  const propertySupplies = (Array.isArray(property?.propertySupplies) ? property.propertySupplies : []).map((supply) => {
+    const s = supply as LooseRecord & {
+      isActive?: boolean | null
+      stateMode?: string | null
+      fillLevel?: string | null
+      currentStock?: number | null
+      mediumThreshold?: number | null
+      fullThreshold?: number | null
+      minimumThreshold?: number | null
+      reorderThreshold?: number | null
+      warningThreshold?: number | null
+      targetLevel?: number | null
+      targetStock?: number | null
+      trackingMode?: string | null
+      supplyItem?: { minimumStock?: number | null } | null
+    }
     const canonical = buildCanonicalSupplySnapshot({
-      isActive: supply.isActive,
-      stateMode: supply.stateMode,
-      fillLevel: supply.fillLevel,
-      currentStock: supply.currentStock,
-      mediumThreshold: supply.mediumThreshold,
-      fullThreshold: supply.fullThreshold,
-      minimumThreshold: supply.minimumThreshold,
-      reorderThreshold: supply.reorderThreshold,
-      warningThreshold: supply.warningThreshold,
-      targetLevel: supply.targetLevel,
-      targetStock: supply.targetStock,
-      trackingMode: supply.trackingMode,
-      supplyMinimumStock: supply.supplyItem?.minimumStock,
+      isActive: s.isActive,
+      stateMode: s.stateMode,
+      fillLevel: s.fillLevel,
+      currentStock: s.currentStock,
+      mediumThreshold: s.mediumThreshold,
+      fullThreshold: s.fullThreshold,
+      minimumThreshold: s.minimumThreshold,
+      reorderThreshold: s.reorderThreshold,
+      warningThreshold: s.warningThreshold,
+      targetLevel: s.targetLevel,
+      targetStock: s.targetStock,
+      trackingMode: s.trackingMode,
+      supplyMinimumStock: s.supplyItem?.minimumStock,
     })
 
     return {
-      ...supply,
+      ...s,
       fillLevel: canonical.derivedState,
       stateMode: canonical.stateMode,
       currentStock: canonical.currentStock,
@@ -277,31 +376,117 @@ function shapePropertyForOperationalViews(property: FullPropertyRow) {
     }
   })
 
+  const invalidOperationalTaskCount = allTasks.filter(
+    (task) => getOperationalTaskValidity(task as { source?: unknown; bookingId?: unknown }).isCanonicalOperational !== true
+  ).length
+
+  // ─── ΒΗΜΑ 1: Operational status ───────────────────────────────────────────
+  // Canonical tasks μόνο, χωρίς readinessStatus input.
+  const canonicalTasks = filterCanonicalOperationalTasks(
+    allTasks.map((t) => ({
+      ...t,
+      cleaningChecklistRun: (t.checklistRun ?? null) as LooseRecord | null,
+      suppliesChecklistRun: (t.supplyRun ?? null) as LooseRecord | null,
+      issuesChecklistRun: (t.issueRun ?? null) as LooseRecord | null,
+    }))
+  )
+
+  const operationalStatusResult = computePropertyOperationalStatus({
+    readinessStatus: null,
+    bookings: safeArray(property.bookings).map((b) => ({
+      id: b.id,
+      status: b.status ?? null,
+      checkInDate: b.checkInDate ?? null,
+      checkOutDate: b.checkOutDate ?? null,
+    })),
+    tasks: canonicalTasks.map((t) => {
+      const task = t as LooseRecord
+      const assignments = Array.isArray(task.assignments)
+        ? (task.assignments as Array<{ status?: string | null }>)
+        : []
+      const checklistRun = (task.checklistRun ?? task.cleaningChecklistRun) as {
+        status?: string | null
+      } | null
+      const supplyRun = (task.supplyRun ?? task.suppliesChecklistRun) as {
+        status?: string | null
+      } | null
+      const issueRun = (task.issueRun ?? task.issuesChecklistRun) as {
+        status?: string | null
+      } | null
+      return {
+        id: String(task.id ?? ""),
+        title: String(task.title ?? ""),
+        taskType: String(task.taskType ?? ""),
+        status: String(task.status ?? ""),
+        scheduledDate: (task.scheduledDate as Date | null) ?? null,
+        sendCleaningChecklist: Boolean(task.sendCleaningChecklist),
+        sendSuppliesChecklist: Boolean(task.sendSuppliesChecklist),
+        sendIssuesChecklist: Boolean(task.sendIssuesChecklist),
+        alertEnabled: Boolean(task.alertEnabled),
+        alertAt: (task.alertAt as Date | null) ?? null,
+        completedAt: (task.completedAt as Date | null) ?? null,
+        bookingId: (task.bookingId as string | null) ?? null,
+        latestAssignmentStatus: assignments[0]?.status ?? null,
+        checklistRunStatus: checklistRun?.status ?? null,
+        supplyRunStatus: supplyRun?.status ?? null,
+        issueRunStatus: issueRun?.status ?? null,
+      }
+    }),
+  })
+
+  // ─── ΒΗΜΑ 2: Live readiness με operational context ────────────────────────
+  const readinessConditions: ReadinessConditionInput[] = safeArray(
+    property.conditions
+  ).map(mapConditionToReadinessInput)
+
+  const readinessResult = computePropertyReadiness({
+    now: new Date(),
+    nextCheckInAt: property.nextCheckInAt ?? null,
+    conditions: readinessConditions,
+    operationalContext:
+      operationalStatusResult.derivedReadinessStatus !== "unknown"
+        ? {
+            derivedReadinessStatus: operationalStatusResult.derivedReadinessStatus,
+            operationalReason: operationalStatusResult.reason.en,
+          }
+        : undefined,
+  })
+
   return {
     ...property,
-    tasks,
+    // Canonical tasks μόνο (φιλτραρισμένα)
+    tasks: canonicalTasks,
     propertySupplies,
+    // Live readiness — αντικαθιστά stale DB fields
+    readinessStatus: readinessResult.status,
+    readinessReasonsText: readinessResult.reasons.map((r) => r.message).join("\n"),
+    readinessUpdatedAt: readinessResult.computedAt,
+    // Operational status για σελίδες που το χρειάζονται
+    operationalStatus: operationalStatusResult.operationalStatus,
+    operationalStatusLabel: operationalStatusResult.label,
     auditSummary: {
       invalidOperationalTaskCount,
     },
   }
 }
 
+// ─── Request helpers ──────────────────────────────────────────────────────────
+
 function isBasePropertyListRequest(input: {
   status: string | null
   city: string | null
   type: string | null
-  readinessStatus: string | null
   search: string | null
 }) {
   return (
     (!input.status || input.status === "all") &&
     (!input.city || input.city === "all") &&
     (!input.type || input.type === "all") &&
-    (!input.readinessStatus || input.readinessStatus === "all") &&
     !String(input.search || "").trim()
   )
 }
+
+// ─── Route handlers ───────────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
   try {
@@ -318,8 +503,9 @@ export async function GET(req: NextRequest) {
     const status = searchParams.get("status")
     const city = searchParams.get("city")
     const type = searchParams.get("type")
-    const readinessStatus = searchParams.get("readinessStatus")
     const search = searchParams.get("search")
+    // readinessStatus query param: δεν γίνεται DB filter —
+    // το live readiness υπολογίζεται στο shapePropertyForOperationalViews.
 
     let organizationId: string | null = null
 
@@ -338,9 +524,6 @@ export async function GET(req: NextRequest) {
       ...(status && status !== "all" ? { status } : {}),
       ...(city && city !== "all" ? { city } : {}),
       ...(type && type !== "all" ? { type } : {}),
-      ...(readinessStatus && readinessStatus !== "all"
-        ? { readinessStatus }
-        : {}),
     }
 
     if (search && search.trim()) {
@@ -364,7 +547,6 @@ export async function GET(req: NextRequest) {
         status,
         city,
         type,
-        readinessStatus,
         search,
       })
     ) {
@@ -600,12 +782,14 @@ export async function POST(req: NextRequest) {
             status: true,
             priority: true,
             taskType: true,
+            title: true,
             scheduledDate: true,
+            completedAt: true,
             alertEnabled: true,
             alertAt: true,
             sendCleaningChecklist: true,
             sendSuppliesChecklist: true,
-
+            sendIssuesChecklist: true,
             assignments: {
               orderBy: {
                 assignedAt: "desc",
@@ -619,7 +803,6 @@ export async function POST(req: NextRequest) {
                 rejectedAt: true,
               },
             },
-
             checklistRun: {
               select: {
                 id: true,
@@ -628,13 +811,18 @@ export async function POST(req: NextRequest) {
                 completedAt: true,
               },
             },
-
             supplyRun: {
               select: {
                 id: true,
                 status: true,
                 startedAt: true,
                 completedAt: true,
+              },
+            },
+            issueRun: {
+              select: {
+                id: true,
+                status: true,
               },
             },
           },
@@ -692,6 +880,20 @@ export async function POST(req: NextRequest) {
           },
           orderBy: {
             updatedAt: "desc",
+          },
+          take: 50,
+        },
+
+        conditions: {
+          select: {
+            id: true,
+            propertyId: true,
+            conditionType: true,
+            status: true,
+            blockingStatus: true,
+            severity: true,
+            managerDecision: true,
+            title: true,
           },
           take: 50,
         },

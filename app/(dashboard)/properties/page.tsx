@@ -1,4 +1,4 @@
-﻿"use client"
+"use client"
 
 import Link from "next/link"
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
@@ -20,7 +20,8 @@ import {
   normalizeTaskStatus,
 } from "@/lib/i18n/normalizers"
 import { getPropertiesPageTexts } from "@/lib/i18n/translations"
-import { buildCanonicalSupplySnapshot } from "@/lib/supplies/compute-supply-state"
+
+// ─── Τοπικοί τύποι ────────────────────────────────────────────────────────────
 
 type PartnerOption = {
   id: string
@@ -34,19 +35,12 @@ type PartnerOption = {
 type PropertySupplyListItem = {
   id: string
   isActive?: boolean
-  fillLevel?: string | null
-  stateMode?: string | null
-  currentStock?: number | null
-  mediumThreshold?: number | null
-  fullThreshold?: number | null
-  targetStock?: number | null
-  reorderThreshold?: number | null
-  targetLevel?: number | null
-  minimumThreshold?: number | null
-  trackingMode?: string | null
-  isCritical?: boolean
-  warningThreshold?: number | null
+  /** Canonical derived state — παρέχεται ήδη από shapePropertyForOperationalViews στο API. */
   derivedState?: string | null
+  fillLevel?: string | null
+  /** Παράγεται από το API (shapePropertyForOperationalViews). Χρησιμοποιείται απευθείας. */
+  isShortage?: boolean | null
+  isCritical?: boolean
   updatedAt?: string | null
   lastUpdatedAt?: string | null
   supplyItem?: {
@@ -96,13 +90,11 @@ type PropertyListItem = {
   maxGuests: number
   notes?: string | null
   defaultPartnerId?: string | null
+  /** DB readiness field. Σημ: η λίστα API δεν παράγει ακόμα live readiness — διαβάζεται ως-είναι. */
   readinessStatus?: string | null
   readinessUpdatedAt?: string | null
   readinessReasonsText?: string | null
   nextCheckInAt?: string | null
-  openConditionCount?: number | null
-  openBlockingConditionCount?: number | null
-  openWarningConditionCount?: number | null
   createdAt: string
   updatedAt: string
   defaultPartner?: {
@@ -122,6 +114,7 @@ type PropertyListItem = {
     checkInTime?: string | null
   }>
   tasks?: PropertyTaskListItem[]
+  /** Legacy Issue model — χρησιμοποιείται μόνο για operational counters, όχι ως readiness truth. */
   issues?: PropertyIssueListItem[]
   propertySupplies?: PropertySupplyListItem[]
 }
@@ -147,14 +140,15 @@ type MetricFilter =
   | "active"
   | "inactive"
   | "ready"
+  | "borderline"
   | "not_ready"
-
-type CanonicalReadinessStatus = "READY" | "BORDERLINE" | "NOT_READY" | "UNKNOWN"
 
 type PropertyOperationalCounts = {
   todayOpenTasks: number
   activeAlerts: number
+  /** Operational counter από legacy Issue model. Δεν είναι readiness truth. */
   openIssues: number
+  /** Operational counter από legacy Issue model. Δεν είναι readiness truth. */
   openDamages: number
   supplyShortages: number
 }
@@ -174,6 +168,8 @@ const PROPERTY_TYPE_OPTIONS = [
   "loft",
   "other",
 ] as const
+
+// ─── Utility helpers ──────────────────────────────────────────────────────────
 
 function safeArray<T>(value: T[] | undefined | null): T[] {
   return Array.isArray(value) ? value : []
@@ -242,6 +238,9 @@ function getMetricCardClasses(active: boolean) {
   return "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
 }
 
+// ─── Operational counter helpers ──────────────────────────────────────────────
+// Αυτοί οι helpers παράγουν operational πληροφορία για την ημέρα.
+// ΔΕΝ είναι source of truth για readiness — αυτή έρχεται από property.readinessStatus.
 
 function isTodayOpenTask(task: PropertyTaskListItem, now: Date) {
   const scheduledDate = normalizeDate(task.scheduledDate)
@@ -274,28 +273,17 @@ function isDamageIssue(issue: PropertyIssueListItem) {
   return normalizedType.includes("damage") || normalizedType.includes("ζημια")
 }
 
+/**
+ * Επιστρέφει αν το supply έχει shortage.
+ * Διαβάζει πρώτα το `isShortage` field που ήδη παράγει το list API
+ * (shapePropertyForOperationalViews → buildCanonicalSupplySnapshot).
+ * Fallback σε derivedState/fillLevel αν το isShortage δεν υπάρχει ακόμα.
+ */
 function isSupplyShortage(supply: PropertySupplyListItem) {
-  if (!supply.isActive) {
-    return false
-  }
-
-  const canonical = buildCanonicalSupplySnapshot({
-    isActive: supply.isActive,
-    stateMode: supply.stateMode,
-    fillLevel: supply.derivedState ?? supply.fillLevel,
-    currentStock: supply.currentStock,
-    mediumThreshold: supply.mediumThreshold,
-    fullThreshold: supply.fullThreshold,
-    minimumThreshold: supply.minimumThreshold,
-    reorderThreshold: supply.reorderThreshold,
-    warningThreshold: supply.warningThreshold,
-    targetLevel: supply.targetLevel,
-    targetStock: supply.targetStock,
-    trackingMode: supply.trackingMode,
-    supplyMinimumStock: supply.supplyItem?.minimumStock,
-  })
-
-  return canonical.isShortage
+  if (!supply.isActive) return false
+  if (typeof supply.isShortage === "boolean") return supply.isShortage
+  const state = String(supply.derivedState ?? supply.fillLevel ?? "").toLowerCase()
+  return state === "missing" || state === "empty" || state === "low"
 }
 
 function getOperationalCountsForToday(
@@ -321,40 +309,36 @@ function getOperationalCountsForToday(
   }
 }
 
-function getCanonicalReadinessStatus(
-  property: PropertyListItem
-): CanonicalReadinessStatus {
-  const ui = normalizeReadinessForUI(property.readinessStatus)
-  if (ui === "ready") return "READY"
-  if (ui === "borderline") return "BORDERLINE"
-  if (ui === "not_ready") return "NOT_READY"
-  return "UNKNOWN"
-}
+// ─── Readiness helpers ────────────────────────────────────────────────────────
+// Η σελίδα καταναλώνει readinessStatus ως canonical field από το property object.
+// Δεν ξαναϋπολογίζει readiness — απλώς κανονικοποιεί και εμφανίζει.
 
-function getCanonicalReadinessExplanation(
+/**
+ * Επιστρέφει την εξήγηση readiness.
+ * Προτεραιότητα: readinessReasonsText από backend → fallback labels.
+ */
+function getReadinessExplanation(
   property: PropertyListItem,
   language: "el" | "en"
 ) {
   const storedReason = String(property.readinessReasonsText || "").trim()
-  if (storedReason) {
-    return storedReason
-  }
+  if (storedReason) return storedReason
 
-  const status = getCanonicalReadinessStatus(property)
+  const status = normalizeReadinessForUI(property.readinessStatus)
 
-  if (status === "READY") {
+  if (status === "ready") {
     return language === "en"
       ? "No active conditions affecting readiness."
       : "Δεν υπάρχουν ενεργές συνθήκες που να επηρεάζουν την ετοιμότητα."
   }
 
-  if (status === "NOT_READY") {
+  if (status === "not_ready") {
     return language === "en"
       ? "Active conditions are blocking readiness."
       : "Ενεργές συνθήκες μπλοκάρουν την ετοιμότητα."
   }
 
-  if (status === "BORDERLINE") {
+  if (status === "borderline") {
     return language === "en"
       ? "Active conditions keep the property in a borderline state."
       : "Ενεργές συνθήκες κρατούν το ακίνητο σε οριακή κατάσταση."
@@ -396,6 +380,8 @@ function getNextUpcomingBooking(property: PropertyListItem) {
     })[0]
 }
 
+// ─── Filter helpers ───────────────────────────────────────────────────────────
+
 function getCounterToneClasses(count: number) {
   return count > 0
     ? "bg-red-50 text-red-700 ring-red-200"
@@ -404,7 +390,6 @@ function getCounterToneClasses(count: number) {
 
 /**
  * Inline CSS hover tooltip. Χρησιμοποιείται σε κάθε status chip / counter badge.
- * Απαντά: τι δείχνει, γιατί, τι πρέπει να γίνει.
  */
 function ListTooltip({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -441,16 +426,16 @@ function getCounterConfigs(language: "el" | "en"): CounterConfig[] {
       label: language === "en" ? "Issues" : "Βλαβ.",
       description:
         language === "en"
-          ? "Open non-damage issues."
-          : "Ανοιχτές βλάβες.",
+          ? "Open non-damage issues (operational info only)."
+          : "Ανοιχτές βλάβες (επιχειρησιακή πληροφορία).",
     },
     {
       key: "openDamages",
       label: language === "en" ? "Damages" : "Ζημ.",
       description:
         language === "en"
-          ? "Open damage records."
-          : "Ανοιχτές ζημίες.",
+          ? "Open damage records (operational info only)."
+          : "Ανοιχτές ζημίες (επιχειρησιακή πληροφορία).",
     },
     {
       key: "supplyShortages",
@@ -467,12 +452,17 @@ function formatLocation(property: PropertyListItem) {
   return [property.address, property.city, property.region].filter(Boolean).join(", ")
 }
 
+/**
+ * Φίλτρα metric cards.
+ * ΚΑΝΟΝΑΣ: "not_ready" αντιστοιχεί αυστηρά σε not_ready — χωρίς borderline.
+ * Το borderline έχει ξεχωριστό φίλτρο.
+ */
 function matchesMetricFilter(
   property: PropertyListItem,
   metricFilter: MetricFilter
 ) {
   const propertyStatus = normalizePropertyStatus(property.status)
-  const readinessStatus = getCanonicalReadinessStatus(property)
+  const readiness = normalizeReadinessForUI(property.readinessStatus)
 
   switch (metricFilter) {
     case "active":
@@ -480,9 +470,11 @@ function matchesMetricFilter(
     case "inactive":
       return propertyStatus === "INACTIVE"
     case "ready":
-      return readinessStatus === "READY"
+      return readiness === "ready"
+    case "borderline":
+      return readiness === "borderline"
     case "not_ready":
-      return readinessStatus === "NOT_READY" || readinessStatus === "BORDERLINE"
+      return readiness === "not_ready"
     case "all":
     default:
       return true
@@ -505,6 +497,8 @@ function getDefaultCountry(language: "el" | "en") {
   return language === "en" ? "Greece" : "Ελλάδα"
 }
 
+// ─── Αρχικές τιμές form ───────────────────────────────────────────────────────
+
 const initialCreateForm: CreatePropertyFormState = {
   name: "",
   address: "",
@@ -520,6 +514,8 @@ const initialCreateForm: CreatePropertyFormState = {
   defaultPartnerId: "",
   notes: "",
 }
+
+// ─── Component ────────────────────────────────────────────────────────────────
 
 export default function PropertiesPage() {
   const { language } = useAppLanguage()
@@ -601,6 +597,9 @@ export default function PropertiesPage() {
     return values.sort((a, b) => a.localeCompare(b, texts.locale))
   }, [properties, texts.locale])
 
+  // ─── Μετρητές summary (readiness-based) ────────────────────────────────────
+  // Το readiness διαβάζεται από property.readinessStatus (canonical field).
+  // Τα BORDERLINE και NOT_READY είναι ξεχωριστές κατηγορίες.
   const summary = useMemo(() => {
     const active = properties.filter(
       (item) => normalizePropertyStatus(item.status) === "ACTIVE"
@@ -611,14 +610,15 @@ export default function PropertiesPage() {
     ).length
 
     const ready = properties.filter(
-      (item) => getCanonicalReadinessStatus(item) === "READY"
+      (item) => normalizeReadinessForUI(item.readinessStatus) === "ready"
+    ).length
+
+    const borderline = properties.filter(
+      (item) => normalizeReadinessForUI(item.readinessStatus) === "borderline"
     ).length
 
     const notReady = properties.filter(
-      (item) => {
-        const status = getCanonicalReadinessStatus(item)
-        return status === "NOT_READY" || status === "BORDERLINE"
-      }
+      (item) => normalizeReadinessForUI(item.readinessStatus) === "not_ready"
     ).length
 
     return {
@@ -626,6 +626,7 @@ export default function PropertiesPage() {
       active,
       inactive,
       ready,
+      borderline,
       notReady,
     }
   }, [properties])
@@ -712,7 +713,7 @@ export default function PropertiesPage() {
     }))
   }
 
-  async function handleCreateProperty(e: React.FormEvent<HTMLFormElement>) {
+  async function handleCreateProperty(e: React.SyntheticEvent<HTMLFormElement>) {
     e.preventDefault()
     setCreateSubmitting(true)
     setCreateError(null)
@@ -794,7 +795,10 @@ export default function PropertiesPage() {
           </div>
         </div>
 
-        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        {/* ─── Metric cards: readiness-based counters ─────────────────────────
+            Κάθε κάρτα αντιστοιχεί σε ξεχωριστή canonical κατάσταση.
+            BORDERLINE και NOT_READY εμφανίζονται ξεχωριστά. */}
+        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
           <button
             type="button"
             onClick={() => setMetricFilter("all")}
@@ -849,13 +853,28 @@ export default function PropertiesPage() {
 
           <button
             type="button"
+            onClick={() => setMetricFilter("borderline")}
+            className={`rounded-2xl border p-5 text-left shadow-sm transition ${getMetricCardClasses(
+              metricFilter === "borderline"
+            )}`}
+          >
+            <div className="text-sm text-slate-500">
+              {language === "en" ? "Borderline" : "Οριακά"}
+            </div>
+            <div className="mt-2 text-2xl font-bold text-amber-700">
+              {summary.borderline}
+            </div>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setMetricFilter("not_ready")}
             className={`rounded-2xl border p-5 text-left shadow-sm transition ${getMetricCardClasses(
               metricFilter === "not_ready"
             )}`}
           >
             <div className="text-sm text-slate-500">
-              {language === "en" ? "Not ready" : "Μη ετοιμα"}
+              {language === "en" ? "Not ready" : "Μη έτοιμα"}
             </div>
             <div className="mt-2 text-2xl font-bold text-red-700">
               {summary.notReady}
@@ -967,6 +986,7 @@ export default function PropertiesPage() {
             <div className="p-6 text-sm text-slate-500">{texts.noResults}</div>
           ) : (
             <>
+              {/* ─── Desktop table ──────────────────────────────────────────── */}
               <div className="hidden overflow-x-auto xl:block">
                 <table className="min-w-full text-left text-sm">
                   <thead className="bg-slate-50 text-slate-600">
@@ -975,12 +995,12 @@ export default function PropertiesPage() {
                       <th className="px-4 py-3 font-semibold">{texts.address}</th>
                       <th className="px-4 py-3 font-semibold">{texts.readiness}</th>
                       <th className="px-4 py-3 font-semibold">
-                        {language === "en" ? "Next check-in" : "Επομενο check-in"}
+                        {language === "en" ? "Next check-in" : "Επόμενο check-in"}
                       </th>
                       <th className="px-4 py-3 font-semibold">
                         {language === "en"
                           ? "Operational counters"
-                          : "Επιχειρησιακοι μετρητες"}
+                          : "Επιχειρησιακοί μετρητές"}
                       </th>
                       <th className="px-4 py-3 font-semibold">{texts.updated}</th>
                       <th className="px-4 py-3 text-right font-semibold">
@@ -991,14 +1011,9 @@ export default function PropertiesPage() {
 
                   <tbody className="divide-y divide-slate-100">
                     {filteredProperties.map((property) => {
-                      const readinessStatus =
-                        getCanonicalReadinessStatus(property)
-                      const readinessExplanation =
-                        getCanonicalReadinessExplanation(property, language)
-                      const counts = getOperationalCountsForToday(
-                        property,
-                        todayReference
-                      )
+                      const readiness = normalizeReadinessForUI(property.readinessStatus)
+                      const readinessExplanation = getReadinessExplanation(property, language)
+                      const counts = getOperationalCountsForToday(property, todayReference)
                       const nextBooking = getNextUpcomingBooking(property)
                       const location = formatLocation(property)
 
@@ -1027,10 +1042,10 @@ export default function PropertiesPage() {
                             <div className="flex max-w-xs flex-col gap-2">
                               <span
                                 className={`inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold ${getReadinessBadgeClasses(
-                                  readinessStatus
+                                  readiness
                                 )}`}
                               >
-                                {getReadinessLabelUI(language, readinessStatus)}
+                                {getReadinessLabelUI(language, readiness)}
                               </span>
 
                               <div className="text-xs leading-5 text-slate-500">
@@ -1051,7 +1066,7 @@ export default function PropertiesPage() {
                                 <div className="mt-1 text-xs text-slate-500">
                                   {language === "en"
                                     ? "Upcoming confirmed or pending arrival"
-                                    : "Επομενη επιβεβαιωμενη ή εκκρεμης αφιξη"}
+                                    : "Επόμενη επιβεβαιωμένη ή εκκρεμής άφιξη"}
                                 </div>
                               </div>
                             ) : (
@@ -1097,15 +1112,12 @@ export default function PropertiesPage() {
                 </table>
               </div>
 
+              {/* ─── Mobile cards ───────────────────────────────────────────── */}
               <div className="grid gap-4 p-4 sm:p-6 xl:hidden">
                 {filteredProperties.map((property) => {
-                  const readinessStatus = getCanonicalReadinessStatus(property)
-                  const readinessExplanation =
-                    getCanonicalReadinessExplanation(property, language)
-                  const counts = getOperationalCountsForToday(
-                    property,
-                    todayReference
-                  )
+                  const readiness = normalizeReadinessForUI(property.readinessStatus)
+                  const readinessExplanation = getReadinessExplanation(property, language)
+                  const counts = getOperationalCountsForToday(property, todayReference)
                   const nextBooking = getNextUpcomingBooking(property)
                   const location = formatLocation(property)
 
@@ -1130,10 +1142,10 @@ export default function PropertiesPage() {
 
                         <span
                           className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${getReadinessBadgeClasses(
-                            readinessStatus
+                            readiness
                           )}`}
                         >
-                          {getReadinessLabelUI(language, readinessStatus)}
+                          {getReadinessLabelUI(language, readiness)}
                         </span>
                       </div>
 
@@ -1163,7 +1175,7 @@ export default function PropertiesPage() {
                       <div className="mt-4 grid gap-4 sm:grid-cols-2">
                         <div>
                           <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            {language === "en" ? "Next check-in" : "Επομενο check-in"}
+                            {language === "en" ? "Next check-in" : "Επόμενο check-in"}
                           </div>
                           <div className="mt-1 text-sm text-slate-900">
                             {nextBooking
@@ -1202,6 +1214,7 @@ export default function PropertiesPage() {
         </div>
       </div>
 
+      {/* ─── Create drawer ──────────────────────────────────────────────────── */}
       {isCreateOpen ? (
         <div className="fixed inset-0 z-50">
           <div

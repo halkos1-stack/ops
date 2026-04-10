@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { Prisma } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
 import { requireApiAppAccessWithDevBypass } from "@/lib/dev-api-access"
-import { getOperationalTaskValidity } from "@/lib/tasks/ops-task-contract"
+import { filterCanonicalOperationalTasks, getOperationalTaskValidity } from "@/lib/tasks/ops-task-contract"
 import {
   buildPropertyConditionSnapshot,
   mapDbConditionToRawRecord,
@@ -13,6 +13,12 @@ import {
   syncTaskSupplyRun,
   syncTaskIssueRun,
 } from "@/lib/tasks/task-run-sync"
+import {
+  computePropertyReadiness,
+  getReadinessStatusLabel,
+  type ReadinessConditionInput,
+} from "@/lib/readiness/compute-property-readiness"
+import { computePropertyOperationalStatus } from "@/lib/readiness/property-operational-status"
 
 type RouteContext = {
   params: Promise<{
@@ -24,7 +30,6 @@ type AuthContext = {
   systemRole?: "SUPER_ADMIN" | "USER"
   organizationId?: string | null
 }
-
 
 type ExtendedRawPropertyConditionRecord = RawPropertyConditionRecord & {
   taskId?: string | null
@@ -374,11 +379,48 @@ function mapDbConditionToExtended(condition: {
   }
 }
 
+function mapRawConditionToReadinessInput(
+  condition: ExtendedRawPropertyConditionRecord
+): ReadinessConditionInput {
+  return {
+    id: condition.id,
+    propertyId: condition.propertyId,
+    conditionType: condition.conditionType as "supply" | "issue" | "damage",
+    status: condition.status as "open" | "monitoring" | "resolved" | "dismissed",
+    blockingStatus: condition.blockingStatus as "blocking" | "non_blocking" | "warning",
+    severity: condition.severity as "low" | "medium" | "high" | "critical",
+    managerDecision: (condition.managerDecision ?? null) as
+      | "allow_with_issue"
+      | "block_until_resolved"
+      | "monitor"
+      | "resolved"
+      | "dismissed"
+      | null,
+    title: condition.title ?? null,
+    description: condition.description ?? condition.managerNotes ?? null,
+    firstDetectedAt: condition.firstDetectedAt ?? null,
+    lastDetectedAt: condition.lastDetectedAt ?? null,
+    createdAt: condition.createdAt ?? null,
+    updatedAt: condition.updatedAt ?? null,
+    resolvedAt: condition.resolvedAt ?? null,
+    dismissedAt: condition.dismissedAt ?? null,
+    sourceType: condition.sourceType ?? null,
+    sourceLabel: condition.sourceLabel ?? null,
+    sourceItemId: condition.sourceItemId ?? null,
+    sourceItemLabel: condition.sourceItemLabel ?? null,
+    sourceRunId: condition.sourceRunId ?? null,
+    sourceAnswerId: condition.sourceAnswerId ?? null,
+    taskId: condition.taskId ?? null,
+    bookingId: condition.bookingId ?? null,
+    propertySupplyId: condition.propertySupplyId ?? null,
+    mergeKey: condition.mergeKey ?? null,
+  }
+}
+
 async function resolveTaskId(context: RouteContext) {
   const params = await context.params
   return String(params.taskId || "").trim()
 }
-
 
 async function getTaskPayload(taskId: string, auth: AuthContext) {
   const tenantWhere = buildTenantWhere(auth)
@@ -431,13 +473,7 @@ async function getTaskPayload(taskId: string, auth: AuthContext) {
           country: true,
           type: true,
           status: true,
-          readinessStatus: true,
-          readinessUpdatedAt: true,
-          readinessReasonsText: true,
           nextCheckInAt: true,
-          openConditionCount: true,
-          openBlockingConditionCount: true,
-          openWarningConditionCount: true,
           defaultPartner: {
             select: {
               id: true,
@@ -481,7 +517,8 @@ async function getTaskPayload(taskId: string, auth: AuthContext) {
           startedAt: true,
           completedAt: true,
           rejectionReason: true,
-          notes: true,          partner: {
+          notes: true,
+          partner: {
             select: {
               id: true,
               code: true,
@@ -772,6 +809,62 @@ async function getTaskPayload(taskId: string, auth: AuthContext) {
 
   if (!task) return null
 
+  // Οι δύο νέες queries για operational status ξεκινούν ΕΔΩ, παράλληλα
+  // με τις υπόλοιπες. Δεν γίνεται await ακόμα — απλώς δημιουργούνται τα promises.
+  const propertyBookingsPromise = task.propertyId
+    ? prisma.booking.findMany({
+        where: { propertyId: task.propertyId, ...tenantWhere },
+        select: { id: true, status: true, checkInDate: true, checkOutDate: true, guestName: true },
+        orderBy: { checkInDate: "asc" },
+        take: 20,
+      })
+    : Promise.resolve(
+        [] as { id: string; status: string | null; checkInDate: Date | null; checkOutDate: Date | null; guestName: string | null }[]
+      )
+
+  const propertyAllTasksPromise = task.propertyId
+    ? prisma.task.findMany({
+        where: { propertyId: task.propertyId, ...tenantWhere },
+        select: {
+          id: true,
+          title: true,
+          taskType: true,
+          source: true,
+          status: true,
+          scheduledDate: true,
+          sendCleaningChecklist: true,
+          sendSuppliesChecklist: true,
+          sendIssuesChecklist: true,
+          alertEnabled: true,
+          alertAt: true,
+          completedAt: true,
+          bookingId: true,
+          assignments: {
+            select: { status: true },
+            orderBy: { assignedAt: "desc" },
+            take: 1,
+          },
+          checklistRun: { select: { status: true } },
+          supplyRun: { select: { status: true } },
+          issueRun: { select: { status: true } },
+        },
+        orderBy: { scheduledDate: "desc" },
+        take: 50,
+      })
+    : Promise.resolve(
+        [] as {
+          id: string; title: string; taskType: string; source: string; status: string;
+          scheduledDate: Date | null; sendCleaningChecklist: boolean; sendSuppliesChecklist: boolean;
+          sendIssuesChecklist: boolean; alertEnabled: boolean; alertAt: Date | null;
+          completedAt: Date | null; bookingId: string | null;
+          assignments: { status: string }[];
+          checklistRun: { status: string } | null;
+          supplyRun: { status: string } | null;
+          issueRun: { status: string } | null;
+        }[]
+      )
+
+  // Αρχικό Promise.all με 6 items — τύποι αναλλοίωτοι από το original
   const [
     issues,
     propertyConditions,
@@ -803,7 +896,8 @@ async function getTaskPayload(taskId: string, auth: AuthContext) {
         resolutionNotes: true,
         resolvedAt: true,
         createdAt: true,
-        updatedAt: true,      },
+        updatedAt: true,
+      },
       orderBy: {
         updatedAt: "desc",
       },
@@ -994,6 +1088,12 @@ async function getTaskPayload(taskId: string, auth: AuthContext) {
     }),
   ])
 
+  // Await τα δύο operational promises — έτρεχαν ήδη παράλληλα
+  const [propertyBookings, propertyAllTasks] = await Promise.all([
+    propertyBookingsPromise,
+    propertyAllTasksPromise,
+  ])
+
   const cleanedChecklistRun = sortChecklistRun(task.checklistRun)
   const cleanedSupplyRun = sortSupplyRun(task.supplyRun)
   const cleanedIssueRun = sortIssueRun(task.issueRun)
@@ -1031,11 +1131,106 @@ async function getTaskPayload(taskId: string, auth: AuthContext) {
     )
   )
 
+  // ─── Readiness: canonical σειρά εκτέλεσης ──────────────────────────────────
+  //
+  // ΒΗΜΑ 1: Operational status ΠΡΩΤΑ από canonical tasks + bookings
+  const normalizedPropertyTasks = filterCanonicalOperationalTasks(
+    propertyAllTasks.map((t) => ({
+      ...t,
+      cleaningChecklistRun: t.checklistRun ?? null,
+      suppliesChecklistRun: t.supplyRun ?? null,
+      issuesChecklistRun: t.issueRun ?? null,
+    })) as LooseRecord[]
+  )
+
+  const operationalStatusResult = computePropertyOperationalStatus({
+    readinessStatus: null,
+    bookings: propertyBookings.map((b) => ({
+      id: b.id,
+      status: b.status as string | null,
+      checkInDate: b.checkInDate ?? null,
+      checkOutDate: b.checkOutDate ?? null,
+      guestName: b.guestName ?? null,
+    })),
+    tasks: normalizedPropertyTasks.map((t) => {
+      const assignments = Array.isArray(t.assignments)
+        ? (t.assignments as Array<{ status?: string | null }>)
+        : []
+      const checklistRun = (t.checklistRun ?? t.cleaningChecklistRun) as { status?: string | null } | null
+      const supplyRun = (t.supplyRun ?? t.suppliesChecklistRun) as { status?: string | null } | null
+      const issueRun = (t.issueRun ?? t.issuesChecklistRun) as { status?: string | null } | null
+      return {
+        id: String(t.id ?? ""),
+        title: String(t.title ?? ""),
+        taskType: String(t.taskType ?? ""),
+        status: String(t.status ?? ""),
+        scheduledDate: (t.scheduledDate as Date | null) ?? null,
+        sendCleaningChecklist: Boolean(t.sendCleaningChecklist),
+        sendSuppliesChecklist: Boolean(t.sendSuppliesChecklist),
+        sendIssuesChecklist: Boolean(t.sendIssuesChecklist),
+        alertEnabled: Boolean(t.alertEnabled),
+        alertAt: (t.alertAt as Date | null) ?? null,
+        completedAt: (t.completedAt as Date | null) ?? null,
+        bookingId: (t.bookingId as string | null) ?? null,
+        latestAssignmentStatus: assignments[0]?.status ?? null,
+        checklistRunStatus: checklistRun?.status ?? null,
+        supplyRunStatus: supplyRun?.status ?? null,
+        issueRunStatus: issueRun?.status ?? null,
+      }
+    }),
+  })
+
+  // ΒΗΜΑ 2: Live readiness ΜΕ operational context
+  const readinessConditionInputs: ReadinessConditionInput[] = propertyConditions.map(
+    (condition) =>
+      mapRawConditionToReadinessInput(
+        mapDbConditionToExtended({
+          id: condition.id,
+          propertyId: condition.propertyId,
+          taskId: condition.taskId,
+          bookingId: condition.bookingId,
+          propertySupplyId: condition.propertySupplyId,
+          mergeKey: condition.mergeKey ?? null,
+          title: condition.title,
+          description: condition.description,
+          sourceType: condition.sourceType,
+          sourceLabel: condition.sourceLabel,
+          sourceItemId: condition.sourceItemId,
+          sourceItemLabel: condition.sourceItemLabel,
+          sourceRunId: condition.sourceRunId,
+          sourceAnswerId: condition.sourceAnswerId,
+          conditionType: String(condition.conditionType).toLowerCase(),
+          status: String(condition.status).toLowerCase(),
+          blockingStatus: String(condition.blockingStatus).toLowerCase(),
+          severity: String(condition.severity).toLowerCase(),
+          managerDecision: condition.managerDecision
+            ? String(condition.managerDecision).toLowerCase()
+            : null,
+          managerNotes: condition.managerNotes,
+          firstDetectedAt: condition.firstDetectedAt ?? null,
+          lastDetectedAt: condition.lastDetectedAt ?? null,
+          createdAt: condition.createdAt,
+          updatedAt: condition.updatedAt,
+          resolvedAt: condition.resolvedAt,
+          dismissedAt: condition.dismissedAt,
+        })
+      )
+  )
+
+  const readinessResult = computePropertyReadiness({
+    now: new Date(),
+    nextCheckInAt: task.property?.nextCheckInAt ?? null,
+    conditions: readinessConditionInputs,
+    operationalContext:
+      operationalStatusResult.derivedReadinessStatus !== "unknown"
+        ? {
+            derivedReadinessStatus: operationalStatusResult.derivedReadinessStatus,
+            operationalReason: operationalStatusResult.reason.en,
+          }
+        : undefined,
+  })
+
   const warnings: Array<{ code: string; title: string; message: string; severity: string }> = []
-  const readinessReasonLines = String(task.property?.readinessReasonsText ?? "")
-    .split("\n")
-    .map((part) => part.trim())
-    .filter(Boolean)
 
   if (task.sendCleaningChecklist && !primaryCleaningTemplate) {
     warnings.push({
@@ -1111,7 +1306,31 @@ async function getTaskPayload(taskId: string, auth: AuthContext) {
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
     completedAt: task.completedAt,
-    property: task.property,
+    // Το property object επιστρέφεται με live readiness fields —
+    // τα stale DB readiness fields δεν συμπεριλαμβάνονται στο select πλέον.
+    property: task.property
+      ? {
+          id: task.property.id,
+          code: task.property.code,
+          name: task.property.name,
+          address: task.property.address,
+          city: task.property.city,
+          region: task.property.region,
+          postalCode: task.property.postalCode,
+          country: task.property.country,
+          type: task.property.type,
+          status: task.property.status,
+          nextCheckInAt: task.property.nextCheckInAt,
+          defaultPartner: task.property.defaultPartner,
+          // live readiness fields — canonical lowercase τιμές
+          readinessStatus: readinessResult.status,
+          readinessUpdatedAt: readinessResult.computedAt,
+          readinessReasonsText: readinessResult.reasons.map((r) => r.message).join("\n"),
+          openConditionCount: propertyConditionSnapshot.summary.active,
+          openBlockingConditionCount: propertyConditionSnapshot.summary.blocking,
+          openWarningConditionCount: propertyConditionSnapshot.summary.warning,
+        }
+      : null,
     booking: task.booking,
     partners,
     assignments: safeArray(task.assignments).map((assignment) => ({
@@ -1142,23 +1361,26 @@ async function getTaskPayload(taskId: string, auth: AuthContext) {
         items: issues,
       },
     },
+    // canonical model — μοναδική πηγή αλήθειας για conditions
     propertyConditions: propertyConditionSnapshot.conditions,
-    issues,
+    // legacy Issue model — δευτερεύον, ιστορικό context μόνο
+    legacyIssues: issues,
     warnings,
+    // ─── Readiness: single live canonical source ─────────────────────────────
+    // Όλα τα πεδία από computePropertyReadiness με operationalContext.
+    // Κανένα stale DB field δεν χρησιμοποιείται εδώ.
     readiness: {
-      status: task.property?.readinessStatus ?? "unknown",
-      blockingCount:
-        task.property?.openBlockingConditionCount ?? propertyConditionSnapshot.summary.blocking ?? 0,
-      warningCount:
-        task.property?.openWarningConditionCount ?? propertyConditionSnapshot.summary.warning ?? 0,
-      openConditionsCount:
-        task.property?.openConditionCount ?? propertyConditionSnapshot.summary.active ?? 0,
-      reasonSummary:
-        readinessReasonLines.length > 0
-          ? readinessReasonLines
-          : propertyConditionSnapshot.reasons,
-      summary: propertyConditionSnapshot.reasons.join(" · ") || null,
-      nextCheckInAt: task.property?.nextCheckInAt ?? null,
+      status: readinessResult.status,
+      statusLabel: getReadinessStatusLabel(readinessResult.status, "el"),
+      score: readinessResult.score,
+      explain: readinessResult.explain,
+      reasons: readinessResult.reasons,
+      reasonSummary: readinessResult.reasons.map((r) => r.message),
+      summary: readinessResult.reasons.map((r) => r.message).join(" · ") || null,
+      blockingCount: propertyConditionSnapshot.summary.blocking,
+      warningCount: propertyConditionSnapshot.summary.warning,
+      openConditionsCount: propertyConditionSnapshot.summary.active,
+      nextCheckInAt: task.property?.nextCheckInAt ?? readinessResult.nextCheckInAt ?? null,
     },
     sendCleaningChecklist: Boolean(task.sendCleaningChecklist),
     sendSuppliesChecklist: Boolean(task.sendSuppliesChecklist),

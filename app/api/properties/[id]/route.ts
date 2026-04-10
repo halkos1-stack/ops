@@ -447,7 +447,15 @@ function mapRawConditionToReadinessInput(
   };
 }
 
-function buildPropertyReadinessFromConditions(property: PropertyReadinessSource) {
+type ReadinessOperationalContextInput = {
+  derivedReadinessStatus: "ready" | "borderline" | "not_ready" | "unknown";
+  operationalReason?: string | null;
+};
+
+function buildPropertyReadinessFromConditions(
+  property: PropertyReadinessSource,
+  operationalContext?: ReadinessOperationalContextInput
+) {
   const now = new Date();
 
   const bookings = safeArray(property.bookings);
@@ -506,6 +514,11 @@ function buildPropertyReadinessFromConditions(property: PropertyReadinessSource)
     conditions: rawConditions.map((condition) =>
       mapRawConditionToReadinessInput(condition)
     ),
+    // Παρέχουμε operational context ώστε explain/score/reasons να είναι
+    // συνεπή με το τελικό status. Αν υπάρχει turnover εκκρεμότητα,
+    // το readiness επιστρέφει "not_ready" με OPERATIONAL_PENDING reason,
+    // ακόμα και αν δεν υπάρχουν active conditions.
+    operationalContext: operationalContext ?? undefined,
   });
 
   return {
@@ -1204,14 +1217,14 @@ async function getFullProperty(id: string) {
     return ["medium", "low"].includes(String(supply.derivedState));
   });
 
-  const readinessComputed = buildPropertyReadinessFromConditions({
-    bookings: property.bookings,
-    conditions: property.conditions,
-    nextCheckInAt: property.nextCheckInAt,
-  });
-
+  // ─── Readiness: canonical σειρά εκτέλεσης ──────────────────────────────────
+  //
+  // ΒΗΜΑ 1: Υπολόγισε operational status ΠΡΩΤΑ (bookings + tasks).
+  // Δεν περνάμε readinessStatus εδώ — θα παραχθεί από τα conditions στη συνέχεια.
+  // Το derivedReadinessStatus του operational module είναι η αλήθεια για
+  // turnover states (no_task_coverage, task_unaccepted κ.λπ.).
   const operationalStatusResult = computePropertyOperationalStatus({
-    readinessStatus: readinessComputed.status,
+    readinessStatus: null,
     bookings: safeArray(property.bookings).map((b) => ({
       id: b.id,
       status: b.status ?? null,
@@ -1219,27 +1232,28 @@ async function getFullProperty(id: string) {
       checkOutDate: b.checkOutDate ?? null,
       guestName: b.guestName ?? null,
     })),
-    tasks: safeArray(property.tasks).map((t) => {
-      const assignments = Array.isArray(t.assignments)
-        ? (t.assignments as Array<{ status?: string | null }>)
+    tasks: normalizedTasks.map((t) => {
+      const task = t as LooseRecord;
+      const assignments = Array.isArray(task.assignments)
+        ? (task.assignments as Array<{ status?: string | null }>)
         : [];
-      const checklistRun = t.checklistRun as { status?: string | null } | null | undefined;
-      const supplyRun = t.supplyRun as { status?: string | null } | null | undefined;
-      const issueRun = t.issueRun as { status?: string | null } | null | undefined;
+      const checklistRun = (task.checklistRun ?? null) as { status?: string | null } | null;
+      const supplyRun = (task.supplyRun ?? null) as { status?: string | null } | null;
+      const issueRun = (task.issueRun ?? null) as { status?: string | null } | null;
 
       return {
-        id: String(t.id ?? ""),
-        title: String(t.title ?? ""),
-        taskType: String(t.taskType ?? ""),
-        status: String(t.status ?? ""),
-        scheduledDate: t.scheduledDate ?? null,
-        sendCleaningChecklist: Boolean(t.sendCleaningChecklist),
-        sendSuppliesChecklist: Boolean(t.sendSuppliesChecklist),
-        sendIssuesChecklist: Boolean(t.sendIssuesChecklist),
-        alertEnabled: Boolean(t.alertEnabled),
-        alertAt: t.alertAt ?? null,
-        completedAt: t.completedAt ?? null,
-        bookingId: t.bookingId ?? null,
+        id: String(task.id ?? ""),
+        title: String(task.title ?? ""),
+        taskType: String(task.taskType ?? ""),
+        status: String(task.status ?? ""),
+        scheduledDate: (task.scheduledDate as Date | null) ?? null,
+        sendCleaningChecklist: Boolean(task.sendCleaningChecklist),
+        sendSuppliesChecklist: Boolean(task.sendSuppliesChecklist),
+        sendIssuesChecklist: Boolean(task.sendIssuesChecklist),
+        alertEnabled: Boolean(task.alertEnabled),
+        alertAt: (task.alertAt as Date | null) ?? null,
+        completedAt: (task.completedAt as Date | null) ?? null,
+        bookingId: (task.bookingId as string | null) ?? null,
         latestAssignmentStatus: assignments[0]?.status ?? null,
         checklistRunStatus: checklistRun?.status ?? null,
         supplyRunStatus: supplyRun?.status ?? null,
@@ -1247,6 +1261,25 @@ async function getFullProperty(id: string) {
       };
     }),
   });
+
+  // ΒΗΜΑ 2: Υπολόγισε conditions readiness ΜΕ operational context.
+  // Αν το operational module επέστρεψε "not_ready" λόγω turnover εκκρεμότητας,
+  // η computePropertyReadiness θα παράγει status/explain/score/reasons
+  // που αντικατοπτρίζουν αυτή την πραγματικότητα — ακόμα και αν δεν υπάρχουν
+  // active conditions. Έτσι όλα τα πεδία του readinessSummary είναι συνεπή.
+  const readinessComputed = buildPropertyReadinessFromConditions(
+    {
+      bookings: property.bookings,
+      conditions: property.conditions,
+      nextCheckInAt: property.nextCheckInAt,
+    },
+    operationalStatusResult.derivedReadinessStatus !== "unknown"
+      ? {
+          derivedReadinessStatus: operationalStatusResult.derivedReadinessStatus,
+          operationalReason: operationalStatusResult.reason.en,
+        }
+      : undefined
+  );
 
   const normalizedChecklistTemplates = safeArray(property.checklistTemplates);
 
@@ -1307,19 +1340,21 @@ async function getFullProperty(id: string) {
     operationalAlertActive: operationalStatusResult.alertActive,
     operationalAlertTask: operationalStatusResult.alertTask,
     operationalActiveBooking: operationalStatusResult.activeBooking,
-    operationalPendingCleaningTask: operationalStatusResult.pendingCleaningTask,
     operationalRelevantTask: operationalStatusResult.relevantTask,
 
-    // derivedReadinessStatus: canonical readiness που ενοποιεί operational context + conditions.
-    // Όταν υπάρχει turnover εκκρεμότητα → "not_ready" ανεξάρτητα conditions.
-    // Αυτό είναι το readiness που εμφανίζεται στο UI ως κύρια αλήθεια.
-    readinessStatus: operationalStatusResult.derivedReadinessStatus,
+    // readinessStatus: convenience alias του readinessSummary.status.
+    // Προέρχεται από το readinessComputed που έχει ήδη ενσωματώσει το operational context.
+    // Δεν χρειάζεται override — readinessComputed.status ΗΔΗ είναι η canonical αλήθεια.
+    readinessStatus: readinessComputed.status,
     readinessUpdatedAt: readinessComputed.readinessUpdatedAt,
     readinessReasonsText: readinessComputed.readinessReasonsText,
     nextCheckInAt: readinessComputed.nextCheckInAt,
     nextBooking: readinessComputed.nextBooking,
     readinessSummary: {
-      status: operationalStatusResult.derivedReadinessStatus,
+      // Όλα τα πεδία προέρχονται από το ίδιο readinessComputed αποτέλεσμα.
+      // Το readinessComputed έχει ήδη λάβει operational context — δεν υπάρχει
+      // πλέον πιθανότητα contradiction μεταξύ status / statusLabel / score / explain / reasons.
+      status: readinessComputed.status,
       statusLabel: readinessComputed.statusLabel,
       score: readinessComputed.score,
       explain: readinessComputed.explain,
@@ -1350,17 +1385,6 @@ async function getFullProperty(id: string) {
         warning: readinessComputed.conditionSnapshot.buckets.warning,
         monitoring: readinessComputed.conditionSnapshot.buckets.monitoring,
       },
-    },
-    storedReadinessSummary: {
-      readinessStatus: property.readinessStatus
-        ? String(property.readinessStatus).toLowerCase()
-        : null,
-      readinessUpdatedAt: property.readinessUpdatedAt,
-      readinessReasonsText: property.readinessReasonsText,
-      openConditionCount: property.openConditionCount,
-      openBlockingConditionCount: property.openBlockingConditionCount,
-      openWarningConditionCount: property.openWarningConditionCount,
-      nextCheckInAt: property.nextCheckInAt,
     },
   };
 }
