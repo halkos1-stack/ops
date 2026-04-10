@@ -1,16 +1,12 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import { refreshPropertyReadinessSnapshot } from "@/lib/properties/readiness-snapshot"
 import {
-  computePropertyReadiness,
   getReadinessStatusLabel,
-  summarizeReadinessReasons,
-  type ReadinessConditionInput,
 } from "@/lib/readiness/compute-property-readiness"
 import {
-  buildPropertyConditionSnapshot,
   mapDbConditionToRawRecord,
   mapSinglePropertyConditionForApi,
-  type RawPropertyConditionRecord,
 } from "@/lib/readiness/property-condition-mappers"
 
 type RouteContext = {
@@ -210,163 +206,12 @@ function toPrismaManagerDecision(
   }
 }
 
-function toPropertyReadinessEnum(
-  status: "ready" | "borderline" | "not_ready" | "unknown"
-): "READY" | "BORDERLINE" | "NOT_READY" | "UNKNOWN" {
-  switch (status) {
-    case "ready":
-      return "READY"
-    case "borderline":
-      return "BORDERLINE"
-    case "not_ready":
-      return "NOT_READY"
-    case "unknown":
-    default:
-      return "UNKNOWN"
-  }
-}
-
-function mapDbConditionToExtended(condition: {
-  id: string
-  propertyId: string
-  taskId: string | null
-  bookingId: string | null
-  propertySupplyId: string | null
-  mergeKey: string | null
-  title: string
-  description: string | null
-  sourceType: string
-  sourceLabel: string | null
-  sourceItemId: string | null
-  sourceItemLabel: string | null
-  sourceRunId: string | null
-  sourceAnswerId: string | null
-  conditionType: string
-  status: string
-  blockingStatus: string
-  severity: string
-  managerDecision: string | null
-  managerNotes: string | null
-  firstDetectedAt: Date
-  lastDetectedAt: Date
-  createdAt: Date
-  updatedAt: Date
-  resolvedAt: Date | null
-  dismissedAt: Date | null
-}): RawPropertyConditionRecord & {
-  taskId: string | null
-  bookingId: string | null
-  propertySupplyId: string | null
-  mergeKey: string | null
-  sourceLabel: string | null
-  sourceItemId: string | null
-  sourceItemLabel: string | null
-  sourceRunId: string | null
-  sourceAnswerId: string | null
-  firstDetectedAt: Date
-  lastDetectedAt: Date
-} {
-  const base = mapDbConditionToRawRecord(condition)
-  return {
-    ...base,
-    taskId: condition.taskId,
-    bookingId: condition.bookingId,
-    propertySupplyId: condition.propertySupplyId,
-    mergeKey: condition.mergeKey,
-    sourceLabel: toNullableString(condition.sourceLabel),
-    sourceItemId: toNullableString(condition.sourceItemId),
-    sourceItemLabel: toNullableString(condition.sourceItemLabel),
-    sourceRunId: toNullableString(condition.sourceRunId),
-    sourceAnswerId: toNullableString(condition.sourceAnswerId),
-    firstDetectedAt: condition.firstDetectedAt,
-    lastDetectedAt: condition.lastDetectedAt,
-  }
-}
-
-function mapRawConditionToReadinessInput(
-  condition: RawPropertyConditionRecord & {
-    taskId?: string | null
-    bookingId?: string | null
-    propertySupplyId?: string | null
-    mergeKey?: string | null
-    sourceLabel?: string | null
-    sourceItemId?: string | null
-    sourceItemLabel?: string | null
-    sourceRunId?: string | null
-    sourceAnswerId?: string | null
-    firstDetectedAt?: Date | string | null
-    lastDetectedAt?: Date | string | null
-  }
-): ReadinessConditionInput {
-  return {
-    id: condition.id,
-    propertyId: condition.propertyId,
-    conditionType:
-      condition.conditionType === "supply" ||
-      condition.conditionType === "issue" ||
-      condition.conditionType === "damage"
-        ? condition.conditionType
-        : "issue",
-    status:
-      condition.status === "open" ||
-      condition.status === "monitoring" ||
-      condition.status === "resolved" ||
-      condition.status === "dismissed"
-        ? condition.status
-        : "open",
-    blockingStatus:
-      condition.blockingStatus === "blocking" ||
-      condition.blockingStatus === "non_blocking" ||
-      condition.blockingStatus === "warning"
-        ? condition.blockingStatus
-        : "warning",
-    severity:
-      condition.severity === "low" ||
-      condition.severity === "medium" ||
-      condition.severity === "high" ||
-      condition.severity === "critical"
-        ? condition.severity
-        : "medium",
-    managerDecision:
-      condition.managerDecision === "allow_with_issue" ||
-      condition.managerDecision === "block_until_resolved" ||
-      condition.managerDecision === "monitor" ||
-      condition.managerDecision === "resolved" ||
-      condition.managerDecision === "dismissed"
-        ? condition.managerDecision
-        : null,
-    title: condition.title ?? null,
-    description: condition.notes ?? null,
-    firstDetectedAt: condition.firstDetectedAt ?? null,
-    lastDetectedAt: condition.lastDetectedAt ?? null,
-    createdAt: condition.createdAt ?? null,
-    updatedAt: condition.updatedAt ?? null,
-    resolvedAt: condition.resolvedAt ?? null,
-    dismissedAt: condition.dismissedAt ?? null,
-    sourceType: condition.sourceType ?? null,
-    sourceLabel: condition.sourceLabel ?? null,
-    sourceItemId: condition.sourceItemId ?? null,
-    sourceItemLabel: condition.sourceItemLabel ?? null,
-    sourceRunId: condition.sourceRunId ?? null,
-    sourceAnswerId: condition.sourceAnswerId ?? null,
-    taskId: condition.taskId ?? condition.sourceTaskId ?? null,
-    bookingId: condition.bookingId ?? null,
-    propertySupplyId: condition.propertySupplyId ?? null,
-    mergeKey: condition.mergeKey ?? null,
-  }
-}
-
 async function refreshPropertyTruth(propertyId: string) {
-  const now = new Date()
-
   const property = await prisma.property.findUnique({
     where: { id: propertyId },
     select: {
       id: true,
-      code: true,
-      name: true,
       organizationId: true,
-      nextCheckInAt: true,
     },
   })
 
@@ -374,116 +219,10 @@ async function refreshPropertyTruth(propertyId: string) {
     return null
   }
 
-  const nextBooking = await prisma.booking.findFirst({
-    where: {
-      propertyId,
-      status: {
-        notIn: ["cancelled", "canceled"],
-      },
-      checkInDate: {
-        gte: now,
-      },
-    },
-    orderBy: {
-      checkInDate: "asc",
-    },
-    select: {
-      id: true,
-      checkInDate: true,
-      checkOutDate: true,
-      guestName: true,
-      status: true,
-      sourcePlatform: true,
-    },
+  return refreshPropertyReadinessSnapshot({
+    propertyId: property.id,
+    organizationId: property.organizationId,
   })
-
-  const dbConditions = await prisma.propertyCondition.findMany({
-    where: {
-      propertyId,
-    },
-    orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
-    select: {
-      id: true,
-      propertyId: true,
-      taskId: true,
-      bookingId: true,
-      propertySupplyId: true,
-      mergeKey: true,
-      title: true,
-      description: true,
-      sourceType: true,
-      sourceLabel: true,
-      sourceItemId: true,
-      sourceItemLabel: true,
-      sourceRunId: true,
-      sourceAnswerId: true,
-      conditionType: true,
-      status: true,
-      blockingStatus: true,
-      severity: true,
-      managerDecision: true,
-      managerNotes: true,
-      firstDetectedAt: true,
-      lastDetectedAt: true,
-      createdAt: true,
-      updatedAt: true,
-      resolvedAt: true,
-      dismissedAt: true,
-    },
-  })
-
-  const rawConditions = dbConditions.map((condition) =>
-    mapDbConditionToExtended({
-      ...condition,
-      conditionType: String(condition.conditionType).toLowerCase(),
-      status: String(condition.status).toLowerCase(),
-      blockingStatus: String(condition.blockingStatus).toLowerCase(),
-      severity: String(condition.severity).toLowerCase(),
-      managerDecision: condition.managerDecision
-        ? String(condition.managerDecision).toLowerCase()
-        : null,
-    })
-  )
-
-  const snapshot = buildPropertyConditionSnapshot(rawConditions)
-  const readinessConditions = rawConditions.map((condition) =>
-    mapRawConditionToReadinessInput(condition)
-  )
-
-  const computedNextCheckInAt =
-    nextBooking?.checkInDate ?? property.nextCheckInAt ?? null
-
-  const readiness = computePropertyReadiness({
-    now,
-    nextCheckInAt: computedNextCheckInAt,
-    conditions: readinessConditions,
-  })
-
-  const readinessReasonsText = summarizeReadinessReasons(readiness.reasons)
-
-  await prisma.property.update({
-    where: {
-      id: property.id,
-    },
-    data: {
-      readinessStatus: toPropertyReadinessEnum(readiness.status),
-      readinessUpdatedAt: readiness.computedAt,
-      readinessReasonsText,
-      openConditionCount: snapshot.summary.active,
-      openBlockingConditionCount: snapshot.summary.blocking,
-      openWarningConditionCount: snapshot.summary.warning,
-      nextCheckInAt: computedNextCheckInAt,
-    },
-  })
-
-  return {
-    property,
-    nextBooking,
-    snapshot,
-    readiness,
-    readinessReasonsText,
-    generatedAt: now,
-  }
 }
 
 export async function GET(_request: NextRequest, context: RouteContext) {
@@ -852,15 +591,18 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         },
         readiness: propertyTruth
           ? {
-              status: propertyTruth.readiness.status,
-              label: getReadinessStatusLabel(propertyTruth.readiness.status, "el"),
-              score: propertyTruth.readiness.score,
-              explain: propertyTruth.readiness.explain,
-              reasons: propertyTruth.readiness.reasons,
-              nextActions: propertyTruth.readiness.nextActions,
-              counts: propertyTruth.readiness.counts,
-              computedAt: propertyTruth.readiness.computedAt,
-              nextCheckInAt: propertyTruth.readiness.nextCheckInAt,
+              status: propertyTruth.canonicalTruth.readiness.status,
+              label: getReadinessStatusLabel(
+                propertyTruth.canonicalTruth.readiness.status,
+                "el"
+              ),
+              score: propertyTruth.canonicalTruth.readiness.score,
+              explain: propertyTruth.canonicalTruth.readiness.explain,
+              reasons: propertyTruth.canonicalTruth.readiness.reasons,
+              nextActions: propertyTruth.canonicalTruth.readiness.nextActions,
+              counts: propertyTruth.canonicalTruth.readiness.counts,
+              computedAt: propertyTruth.canonicalTruth.readiness.computedAt,
+              nextCheckInAt: propertyTruth.canonicalTruth.readiness.nextCheckInAt,
             }
           : null,
         generatedAt: new Date(),
