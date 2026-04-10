@@ -17,6 +17,31 @@ import { computePropertyOperationalStatus } from "@/lib/readiness/property-opera
 
 type LooseRecord = Record<string, unknown>
 
+type PropertyOperationalTaskRecord = LooseRecord & {
+  source?: unknown
+  bookingId?: unknown
+  booking?: {
+    id?: unknown
+  } | null
+  assignments?: Array<{ status?: string | null }> | null
+  checklistRun?: LooseRecord | null
+  supplyRun?: LooseRecord | null
+  issueRun?: LooseRecord | null
+  cleaningChecklistRun?: LooseRecord | null
+  suppliesChecklistRun?: LooseRecord | null
+  issuesChecklistRun?: LooseRecord | null
+  title?: unknown
+  taskType?: unknown
+  status?: unknown
+  scheduledDate?: Date | null
+  sendCleaningChecklist?: unknown
+  sendSuppliesChecklist?: unknown
+  sendIssuesChecklist?: unknown
+  alertEnabled?: unknown
+  alertAt?: Date | null
+  completedAt?: Date | null
+}
+
 // ─── Utility functions ────────────────────────────────────────────────────────
 
 function safeArray<T>(value: T[] | null | undefined): T[] {
@@ -327,9 +352,9 @@ function mapConditionToReadinessInput(
  * αντικαθιστούν τις stale DB τιμές στο response.
  */
 function shapePropertyForOperationalViews(property: FullPropertyRow) {
-  // Cast σε LooseRecord[] για ασφαλή πρόσβαση — το Prisma type inference
-  // χάνεται όταν το tasks include περιέχει nested relations με optional fields.
-  const allTasks = (Array.isArray(property?.tasks) ? property.tasks : []) as LooseRecord[]
+  const allTasks = (
+    Array.isArray(property?.tasks) ? property.tasks : []
+  ) as PropertyOperationalTaskRecord[]
 
   // ─── Supply canonical state ───────────────────────────────────────────────
   const propertySupplies = (Array.isArray(property?.propertySupplies) ? property.propertySupplies : []).map((supply) => {
@@ -377,18 +402,20 @@ function shapePropertyForOperationalViews(property: FullPropertyRow) {
   })
 
   const invalidOperationalTaskCount = allTasks.filter(
-    (task) => getOperationalTaskValidity(task as { source?: unknown; bookingId?: unknown }).isCanonicalOperational !== true
+    (task) => getOperationalTaskValidity(task).isCanonicalOperational !== true
   ).length
 
   // ─── ΒΗΜΑ 1: Operational status ───────────────────────────────────────────
   // Canonical tasks μόνο, χωρίς readinessStatus input.
-  const canonicalTasks = filterCanonicalOperationalTasks(
-    allTasks.map((t) => ({
-      ...t,
-      cleaningChecklistRun: (t.checklistRun ?? null) as LooseRecord | null,
-      suppliesChecklistRun: (t.supplyRun ?? null) as LooseRecord | null,
-      issuesChecklistRun: (t.issueRun ?? null) as LooseRecord | null,
-    }))
+  const canonicalTaskCandidates: PropertyOperationalTaskRecord[] = allTasks.map((t) => ({
+    ...t,
+    cleaningChecklistRun: (t.checklistRun ?? null) as LooseRecord | null,
+    suppliesChecklistRun: (t.supplyRun ?? null) as LooseRecord | null,
+    issuesChecklistRun: (t.issueRun ?? null) as LooseRecord | null,
+  }))
+
+  const canonicalTasks = filterCanonicalOperationalTasks<PropertyOperationalTaskRecord>(
+    canonicalTaskCandidates
   )
 
   const operationalStatusResult = computePropertyOperationalStatus({
@@ -400,9 +427,9 @@ function shapePropertyForOperationalViews(property: FullPropertyRow) {
       checkOutDate: b.checkOutDate ?? null,
     })),
     tasks: canonicalTasks.map((t) => {
-      const task = t as LooseRecord
+      const task = t as PropertyOperationalTaskRecord
       const assignments = Array.isArray(task.assignments)
-        ? (task.assignments as Array<{ status?: string | null }>)
+        ? task.assignments
         : []
       const checklistRun = (task.checklistRun ?? task.cleaningChecklistRun) as {
         status?: string | null
@@ -418,13 +445,13 @@ function shapePropertyForOperationalViews(property: FullPropertyRow) {
         title: String(task.title ?? ""),
         taskType: String(task.taskType ?? ""),
         status: String(task.status ?? ""),
-        scheduledDate: (task.scheduledDate as Date | null) ?? null,
+        scheduledDate: task.scheduledDate ?? null,
         sendCleaningChecklist: Boolean(task.sendCleaningChecklist),
         sendSuppliesChecklist: Boolean(task.sendSuppliesChecklist),
         sendIssuesChecklist: Boolean(task.sendIssuesChecklist),
         alertEnabled: Boolean(task.alertEnabled),
-        alertAt: (task.alertAt as Date | null) ?? null,
-        completedAt: (task.completedAt as Date | null) ?? null,
+        alertAt: task.alertAt ?? null,
+        completedAt: task.completedAt ?? null,
         bookingId: (task.bookingId as string | null) ?? null,
         latestAssignmentStatus: assignments[0]?.status ?? null,
         checklistRunStatus: checklistRun?.status ?? null,
@@ -504,8 +531,6 @@ export async function GET(req: NextRequest) {
     const city = searchParams.get("city")
     const type = searchParams.get("type")
     const search = searchParams.get("search")
-    // readinessStatus query param: δεν γίνεται DB filter —
-    // το live readiness υπολογίζεται στο shapePropertyForOperationalViews.
 
     let organizationId: string | null = null
 
