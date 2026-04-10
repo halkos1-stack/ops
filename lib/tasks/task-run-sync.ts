@@ -3,12 +3,38 @@ import { refreshPropertyReadinessSnapshot } from "@/lib/properties/readiness-sna
 import { buildCanonicalSupplyWriteData } from "@/lib/supplies/compute-supply-state"
 import { toPrismaSupplyStateMode } from "@/lib/supplies/supply-mode-rules"
 
+async function resolveOrganizationIdForTask(taskId: string) {
+  const cleanTaskId = String(taskId || "").trim()
+
+  if (!cleanTaskId) {
+    return null
+  }
+
+  const task = await prisma.task.findUnique({
+    where: {
+      id: cleanTaskId,
+    },
+    select: {
+      organizationId: true,
+    },
+  })
+
+  return task?.organizationId ?? null
+}
+
 async function refreshTaskRunPropertyReadiness(params: {
-  organizationId: string
+  organizationId?: string | null
   propertyId: string
+  taskId?: string | null
 }) {
-  const organizationId = String(params.organizationId || "").trim()
+  let organizationId = String(params.organizationId || "").trim()
   const propertyId = String(params.propertyId || "").trim()
+
+  if (!organizationId && params.taskId) {
+    organizationId = String(
+      (await resolveOrganizationIdForTask(String(params.taskId))) || ""
+    ).trim()
+  }
 
   if (!organizationId || !propertyId) {
     return null
@@ -214,7 +240,7 @@ export async function syncTaskChecklistRun(params: {
       })
     }
 
-    await refreshTaskRunPropertyReadiness({ organizationId, propertyId })
+    await refreshTaskRunPropertyReadiness({ organizationId, propertyId, taskId })
     return null
   }
 
@@ -232,7 +258,7 @@ export async function syncTaskChecklistRun(params: {
       })
     }
 
-    await refreshTaskRunPropertyReadiness({ organizationId, propertyId })
+    await refreshTaskRunPropertyReadiness({ organizationId, propertyId, taskId })
     return null
   }
 
@@ -401,7 +427,7 @@ export async function syncTaskChecklistRun(params: {
     },
   })
 
-  await refreshTaskRunPropertyReadiness({ organizationId, propertyId })
+  await refreshTaskRunPropertyReadiness({ organizationId, propertyId, taskId })
   return refreshedRun
 }
 
@@ -409,8 +435,9 @@ export async function syncTaskSupplyRun(params: {
   taskId: string
   propertyId: string
   sendSuppliesChecklist: boolean
+  organizationId?: string | null
 }) {
-  const { taskId, propertyId, sendSuppliesChecklist } = params
+  const { taskId, propertyId, sendSuppliesChecklist, organizationId } = params
 
   const existingRun = await prisma.taskSupplyRun.findUnique({
     where: {
@@ -442,6 +469,7 @@ export async function syncTaskSupplyRun(params: {
       })
     }
 
+    await refreshTaskRunPropertyReadiness({ organizationId, propertyId, taskId })
     return null
   }
 
@@ -456,6 +484,7 @@ export async function syncTaskSupplyRun(params: {
       })
     }
 
+    await refreshTaskRunPropertyReadiness({ organizationId, propertyId, taskId })
     return null
   }
 
@@ -597,7 +626,7 @@ export async function syncTaskSupplyRun(params: {
     }
   }
 
-  return prisma.taskSupplyRun.findUnique({
+  const refreshedRun = await prisma.taskSupplyRun.findUnique({
     where: {
       taskId,
     },
@@ -660,6 +689,9 @@ export async function syncTaskSupplyRun(params: {
       },
     },
   })
+
+  await refreshTaskRunPropertyReadiness({ organizationId, propertyId, taskId })
+  return refreshedRun
 }
 
 export async function syncTaskIssueRun(params: {
@@ -693,7 +725,7 @@ export async function syncTaskIssueRun(params: {
       })
     }
 
-    await refreshTaskRunPropertyReadiness({ organizationId, propertyId })
+    await refreshTaskRunPropertyReadiness({ organizationId, propertyId, taskId })
     return null
   }
 
@@ -711,7 +743,7 @@ export async function syncTaskIssueRun(params: {
       })
     }
 
-    await refreshTaskRunPropertyReadiness({ organizationId, propertyId })
+    await refreshTaskRunPropertyReadiness({ organizationId, propertyId, taskId })
     return null
   }
 
@@ -872,6 +904,6 @@ export async function syncTaskIssueRun(params: {
     },
   })
 
-  await refreshTaskRunPropertyReadiness({ organizationId, propertyId })
+  await refreshTaskRunPropertyReadiness({ organizationId, propertyId, taskId })
   return refreshedRun
 }

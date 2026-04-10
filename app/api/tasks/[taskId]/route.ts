@@ -23,6 +23,7 @@ import {
   type ReadinessConditionInput,
 } from "@/lib/readiness/compute-property-readiness"
 import { computePropertyOperationalStatus } from "@/lib/readiness/property-operational-status"
+import { refreshPropertyReadinessSnapshot } from "@/lib/properties/readiness-snapshot"
 
 type RouteContext = {
   params: Promise<{
@@ -1594,6 +1595,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     })
     await syncTaskSupplyRun({
       taskId,
+      organizationId: existingTask.organizationId ?? "",
       propertyId: existingTask.propertyId,
       sendSuppliesChecklist: finalSendSuppliesChecklist,
     })
@@ -1602,6 +1604,11 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       organizationId: existingTask.organizationId ?? "",
       propertyId: existingTask.propertyId,
       sendIssuesChecklist: finalSendIssuesChecklist,
+    })
+
+    await refreshPropertyReadinessSnapshot({
+      propertyId: existingTask.propertyId,
+      organizationId: existingTask.organizationId,
     })
 
     const payload = await getTaskPayload(taskId, access.auth)

@@ -416,6 +416,7 @@ export async function POST(req: NextRequest) {
 
     await syncTaskSupplyRun({
       taskId: task.id,
+      organizationId,
       propertyId,
       sendSuppliesChecklist,
     })
