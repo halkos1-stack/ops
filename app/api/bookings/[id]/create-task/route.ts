@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
-import { requireApiAppAccessWithDevBypass } from "@/lib/dev-api-access"
-import { canAccessOrganization } from "@/lib/route-access"
+import {
+  requireApiAppAccess,
+  canAccessOrganization,
+} from "@/lib/route-access"
 
 type RouteContext = {
   params: Promise<{
@@ -130,7 +132,7 @@ function getActorName(auth: Record<string, unknown>) {
 }
 
 export async function POST(req: NextRequest, context: RouteContext) {
-  const access = await requireApiAppAccessWithDevBypass(req)
+  const access = await requireApiAppAccess()
   if (!access.ok) return access.response
 
   try {
