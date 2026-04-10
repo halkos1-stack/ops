@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { requireApiAppAccess, canAccessOrganization } from "@/lib/route-access"
-import { refreshPropertyReadiness } from "@/lib/readiness/refresh-property-readiness"
+import { refreshPropertyReadinessSnapshot } from "@/lib/properties/readiness-snapshot"
 import { syncPropertySupplyTemplate } from "@/lib/supplies/property-supply-template-sync"
 import {
   buildCanonicalSupplySnapshot,
@@ -272,7 +272,10 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       propertyId: property.id,
       organizationId: property.organizationId,
     })
-    await refreshPropertyReadiness(property.id)
+    await refreshPropertyReadinessSnapshot({
+      propertyId: property.id,
+      organizationId: property.organizationId,
+    })
 
     const payload = await buildResponse(property.id)
     return NextResponse.json(payload)
@@ -331,7 +334,10 @@ export async function DELETE(_request: NextRequest, context: RouteContext) {
       propertyId: property.id,
       organizationId: property.organizationId,
     })
-    await refreshPropertyReadiness(property.id)
+    await refreshPropertyReadinessSnapshot({
+      propertyId: property.id,
+      organizationId: property.organizationId,
+    })
 
     const payload = await buildResponse(property.id)
     return NextResponse.json(payload)
