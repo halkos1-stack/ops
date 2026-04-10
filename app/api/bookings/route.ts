@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
-import { buildTenantWhere } from "@/lib/route-access"
-import { requireApiAppAccessWithDevBypass } from "@/lib/dev-api-access"
+import {
+  buildTenantWhere,
+  requireApiAppAccess,
+} from "@/lib/route-access"
 import {
   filterCanonicalOperationalTasks,
   getOperationalTaskValidity,
@@ -101,7 +103,7 @@ function deriveTaskCoverageStatus(task?: {
 }
 
 export async function GET(req: NextRequest) {
-  const access = await requireApiAppAccessWithDevBypass(req)
+  const access = await requireApiAppAccess()
   if (!access.ok) return access.response
 
   try {
