@@ -382,14 +382,15 @@ function shapePropertyForOperationalViews(property: FullPropertyRow) {
 
   // ─── ΒΗΜΑ 1: Operational status ───────────────────────────────────────────
   // Canonical tasks μόνο, χωρίς readinessStatus input.
-  const canonicalTasks = filterCanonicalOperationalTasks(
-    allTasks.map((t) => ({
-      ...t,
-      cleaningChecklistRun: (t.checklistRun ?? null) as LooseRecord | null,
-      suppliesChecklistRun: (t.supplyRun ?? null) as LooseRecord | null,
-      issuesChecklistRun: (t.issueRun ?? null) as LooseRecord | null,
-    }))
-  )
+  // filterCanonicalOperationalTasks ελέγχει μόνο source + bookingId.
+  // Δεν κάνουμε intermediate .map() γιατί το spread πάνω σε LooseRecord
+  // χάνει τα ονόματα πεδίων και το TypeScript βλέπει μόνο τα ρητά νέα πεδία.
+  type RawTaskRow = LooseRecord & {
+    source?: unknown
+    bookingId?: unknown
+    booking?: { id?: unknown } | null
+  }
+  const canonicalTasks = filterCanonicalOperationalTasks(allTasks as RawTaskRow[])
 
   const operationalStatusResult = computePropertyOperationalStatus({
     readinessStatus: null,
