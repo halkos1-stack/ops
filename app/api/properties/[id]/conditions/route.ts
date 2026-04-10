@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import { canAccessOrganization, requireApiAppAccess } from "@/lib/route-access"
 import { refreshPropertyReadinessSnapshot } from "@/lib/properties/readiness-snapshot"
 import { getReadinessStatusLabel } from "@/lib/readiness/compute-property-readiness"
 
@@ -232,9 +233,12 @@ function parseOptionalBoolean(value: string | null): boolean | null {
   return null
 }
 
-async function buildCanonicalConditionsPayload(propertyId: string) {
+async function buildCanonicalConditionsPayload(params: {
+  propertyId: string
+  organizationId: string
+}) {
   const property = await prisma.property.findUnique({
-    where: { id: propertyId },
+    where: { id: params.propertyId },
     select: {
       id: true,
       name: true,
@@ -243,7 +247,7 @@ async function buildCanonicalConditionsPayload(propertyId: string) {
     },
   })
 
-  if (!property) {
+  if (!property || property.organizationId !== params.organizationId) {
     return null
   }
 
@@ -266,6 +270,9 @@ async function buildCanonicalConditionsPayload(propertyId: string) {
 }
 
 export async function GET(request: NextRequest, context: RouteContext) {
+  const access = await requireApiAppAccess()
+  if (!access.ok) return access.response
+
   try {
     const { id: propertyId } = await context.params
 
@@ -276,7 +283,32 @@ export async function GET(request: NextRequest, context: RouteContext) {
       )
     }
 
-    const payload = await buildCanonicalConditionsPayload(propertyId)
+    const property = await prisma.property.findUnique({
+      where: { id: propertyId },
+      select: {
+        id: true,
+        organizationId: true,
+      },
+    })
+
+    if (!property) {
+      return NextResponse.json(
+        { error: "Property not found." },
+        { status: 404 }
+      )
+    }
+
+    if (!canAccessOrganization(access.auth, property.organizationId)) {
+      return NextResponse.json(
+        { error: "Δεν έχεις πρόσβαση σε αυτό το ακίνητο." },
+        { status: 403 }
+      )
+    }
+
+    const payload = await buildCanonicalConditionsPayload({
+      propertyId: property.id,
+      organizationId: property.organizationId,
+    })
 
     if (!payload) {
       return NextResponse.json(
@@ -382,6 +414,9 @@ export async function GET(request: NextRequest, context: RouteContext) {
 }
 
 export async function POST(request: NextRequest, context: RouteContext) {
+  const access = await requireApiAppAccess()
+  if (!access.ok) return access.response
+
   try {
     const { id: propertyId } = await context.params
 
@@ -404,6 +439,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
       return NextResponse.json(
         { error: "Property not found." },
         { status: 404 }
+      )
+    }
+
+    if (!canAccessOrganization(access.auth, property.organizationId)) {
+      return NextResponse.json(
+        { error: "Δεν έχεις πρόσβαση σε αυτό το ακίνητο." },
+        { status: 403 }
       )
     }
 
@@ -469,7 +511,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
       },
     })
 
-    const payload = await buildCanonicalConditionsPayload(property.id)
+    const payload = await buildCanonicalConditionsPayload({
+      propertyId: property.id,
+      organizationId: property.organizationId,
+    })
 
     if (!payload) {
       return NextResponse.json(

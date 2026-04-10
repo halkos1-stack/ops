@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import { canAccessOrganization, requireApiAppAccess } from "@/lib/route-access"
 import { refreshPropertyReadinessSnapshot } from "@/lib/properties/readiness-snapshot"
 import {
   getReadinessStatusLabel,
@@ -206,26 +207,20 @@ function toPrismaManagerDecision(
   }
 }
 
-async function refreshPropertyTruth(propertyId: string) {
-  const property = await prisma.property.findUnique({
-    where: { id: propertyId },
-    select: {
-      id: true,
-      organizationId: true,
-    },
-  })
-
-  if (!property) {
-    return null
-  }
-
+async function refreshPropertyTruth(params: {
+  propertyId: string
+  organizationId: string
+}) {
   return refreshPropertyReadinessSnapshot({
-    propertyId: property.id,
-    organizationId: property.organizationId,
+    propertyId: params.propertyId,
+    organizationId: params.organizationId,
   })
 }
 
 export async function GET(_request: NextRequest, context: RouteContext) {
+  const access = await requireApiAppAccess()
+  if (!access.ok) return access.response
+
   try {
     const { conditionId } = await context.params
 
@@ -277,6 +272,13 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       return NextResponse.json(
         { error: "Property condition not found." },
         { status: 404 }
+      )
+    }
+
+    if (!canAccessOrganization(access.auth, condition.organizationId)) {
+      return NextResponse.json(
+        { error: "Δεν έχεις πρόσβαση σε αυτή τη συνθήκη ακινήτου." },
+        { status: 403 }
       )
     }
 
@@ -342,6 +344,9 @@ export async function GET(_request: NextRequest, context: RouteContext) {
 }
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
+  const access = await requireApiAppAccess()
+  if (!access.ok) return access.response
+
   try {
     const { conditionId } = await context.params
 
@@ -358,6 +363,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       },
       select: {
         id: true,
+        organizationId: true,
         propertyId: true,
         status: true,
         blockingStatus: true,
@@ -375,6 +381,13 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       return NextResponse.json(
         { error: "Property condition not found." },
         { status: 404 }
+      )
+    }
+
+    if (!canAccessOrganization(access.auth, existingCondition.organizationId)) {
+      return NextResponse.json(
+        { error: "Δεν έχεις πρόσβαση σε αυτή τη συνθήκη ακινήτου." },
+        { status: 403 }
       )
     }
 
@@ -572,7 +585,10 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       })
     )
 
-    const propertyTruth = await refreshPropertyTruth(updatedCondition.propertyId)
+    const propertyTruth = await refreshPropertyTruth({
+      propertyId: updatedCondition.propertyId,
+      organizationId: updatedCondition.organizationId,
+    })
 
     return NextResponse.json(
       {
