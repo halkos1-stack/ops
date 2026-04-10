@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
-import { requireApiAppAccessWithDevBypass } from "@/lib/dev-api-access"
-import { canAccessOrganization } from "@/lib/route-access"
+import {
+  requireApiAppAccess,
+  canAccessOrganization,
+} from "@/lib/route-access"
 
 type RouteContext = {
   params: Promise<{
@@ -93,8 +95,8 @@ function buildDerivedNeedsMapping(input: {
   return !(hasPropertyId || hasPropertyObject)
 }
 
-export async function GET(req: NextRequest, context: RouteContext) {
-  const access = await requireApiAppAccessWithDevBypass(req)
+export async function GET(_req: NextRequest, context: RouteContext) {
+  const access = await requireApiAppAccess()
   if (!access.ok) return access.response
 
   try {

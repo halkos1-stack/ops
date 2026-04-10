@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { Prisma } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
-import { requireApiAppAccessWithDevBypass } from "@/lib/dev-api-access"
+import {
+  buildTenantWhere,
+  requireApiAppAccess,
+  type RouteAccessContext,
+} from "@/lib/route-access"
 import { filterCanonicalOperationalTasks, getOperationalTaskValidity } from "@/lib/tasks/ops-task-contract"
 import {
   buildPropertyConditionSnapshot,
@@ -24,11 +28,6 @@ type RouteContext = {
   params: Promise<{
     taskId: string
   }>
-}
-
-type AuthContext = {
-  systemRole?: "SUPER_ADMIN" | "USER"
-  organizationId?: string | null
 }
 
 type ExtendedRawPropertyConditionRecord = RawPropertyConditionRecord & {
@@ -119,22 +118,6 @@ type IssueRunRecord = LooseRecord & {
   template?: {
     items?: SortableRunItem[] | null
   } | null
-}
-
-function buildTenantWhere(auth: AuthContext) {
-  if (auth.systemRole === "SUPER_ADMIN") {
-    return {}
-  }
-
-  if (auth.organizationId) {
-    return {
-      organizationId: auth.organizationId,
-    }
-  }
-
-  return {
-    organizationId: "__no_results__",
-  }
 }
 
 function hasOwn(obj: unknown, key: string) {
@@ -422,7 +405,7 @@ async function resolveTaskId(context: RouteContext) {
   return String(params.taskId || "").trim()
 }
 
-async function getTaskPayload(taskId: string, auth: AuthContext) {
+async function getTaskPayload(taskId: string, auth: RouteAccessContext) {
   const tenantWhere = buildTenantWhere(auth)
 
   const task = await prisma.task.findFirst({
@@ -809,8 +792,6 @@ async function getTaskPayload(taskId: string, auth: AuthContext) {
 
   if (!task) return null
 
-  // Οι δύο νέες queries για operational status ξεκινούν ΕΔΩ, παράλληλα
-  // με τις υπόλοιπες. Δεν γίνεται await ακόμα — απλώς δημιουργούνται τα promises.
   const propertyBookingsPromise = task.propertyId
     ? prisma.booking.findMany({
         where: { propertyId: task.propertyId, ...tenantWhere },
@@ -864,7 +845,6 @@ async function getTaskPayload(taskId: string, auth: AuthContext) {
         }[]
       )
 
-  // Αρχικό Promise.all με 6 items — τύποι αναλλοίωτοι από το original
   const [
     issues,
     propertyConditions,
@@ -1088,7 +1068,6 @@ async function getTaskPayload(taskId: string, auth: AuthContext) {
     }),
   ])
 
-  // Await τα δύο operational promises — έτρεχαν ήδη παράλληλα
   const [propertyBookings, propertyAllTasks] = await Promise.all([
     propertyBookingsPromise,
     propertyAllTasksPromise,
@@ -1131,9 +1110,6 @@ async function getTaskPayload(taskId: string, auth: AuthContext) {
     )
   )
 
-  // ─── Readiness: canonical σειρά εκτέλεσης ──────────────────────────────────
-  //
-  // ΒΗΜΑ 1: Operational status ΠΡΩΤΑ από canonical tasks + bookings
   const normalizedPropertyTasks = filterCanonicalOperationalTasks(
     propertyAllTasks.map((t) => ({
       ...t,
@@ -1180,7 +1156,6 @@ async function getTaskPayload(taskId: string, auth: AuthContext) {
     }),
   })
 
-  // ΒΗΜΑ 2: Live readiness ΜΕ operational context
   const readinessConditionInputs: ReadinessConditionInput[] = propertyConditions.map(
     (condition) =>
       mapRawConditionToReadinessInput(
@@ -1306,8 +1281,6 @@ async function getTaskPayload(taskId: string, auth: AuthContext) {
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
     completedAt: task.completedAt,
-    // Το property object επιστρέφεται με live readiness fields —
-    // τα stale DB readiness fields δεν συμπεριλαμβάνονται στο select πλέον.
     property: task.property
       ? {
           id: task.property.id,
@@ -1322,7 +1295,6 @@ async function getTaskPayload(taskId: string, auth: AuthContext) {
           status: task.property.status,
           nextCheckInAt: task.property.nextCheckInAt,
           defaultPartner: task.property.defaultPartner,
-          // live readiness fields — canonical lowercase τιμές
           readinessStatus: readinessResult.status,
           readinessUpdatedAt: readinessResult.computedAt,
           readinessReasonsText: readinessResult.reasons.map((r) => r.message).join("\n"),
@@ -1361,14 +1333,9 @@ async function getTaskPayload(taskId: string, auth: AuthContext) {
         items: issues,
       },
     },
-    // canonical model — μοναδική πηγή αλήθειας για conditions
     propertyConditions: propertyConditionSnapshot.conditions,
-    // legacy Issue model — δευτερεύον, ιστορικό context μόνο
     legacyIssues: issues,
     warnings,
-    // ─── Readiness: single live canonical source ─────────────────────────────
-    // Όλα τα πεδία από computePropertyReadiness με operationalContext.
-    // Κανένα stale DB field δεν χρησιμοποιείται εδώ.
     readiness: {
       status: readinessResult.status,
       statusLabel: getReadinessStatusLabel(readinessResult.status, "el"),
@@ -1392,8 +1359,8 @@ async function getTaskPayload(taskId: string, auth: AuthContext) {
   }
 }
 
-export async function GET(req: NextRequest, context: RouteContext) {
-  const access = await requireApiAppAccessWithDevBypass(req)
+export async function GET(_req: NextRequest, context: RouteContext) {
+  const access = await requireApiAppAccess()
   if (!access.ok) return access.response
 
   try {
@@ -1421,7 +1388,7 @@ export async function GET(req: NextRequest, context: RouteContext) {
 }
 
 export async function PATCH(req: NextRequest, context: RouteContext) {
-  const access = await requireApiAppAccessWithDevBypass(req)
+  const access = await requireApiAppAccess()
   if (!access.ok) return access.response
 
   try {

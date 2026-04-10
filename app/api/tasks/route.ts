@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server"
 import { Prisma } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
-import { requireApiAppAccess, canAccessOrganization } from "@/lib/route-access"
+import {
+  buildTenantWhere,
+  canAccessOrganization,
+  requireApiAppAccess,
+  type RouteAccessContext,
+} from "@/lib/route-access"
 import {
   filterCanonicalOperationalTasks,
 } from "@/lib/tasks/ops-task-contract"
@@ -17,11 +22,6 @@ import {
   taskDetailsInclude,
   shapeTaskForResponse,
 } from "@/lib/tasks/task-response-builder"
-
-type AccessAuth = {
-  systemRole?: "SUPER_ADMIN" | "USER"
-  organizationId?: string | null
-}
 
 function toNullableString(value: unknown) {
   if (value === undefined || value === null) return null
@@ -72,24 +72,8 @@ function endOfDay(value: string) {
   return date
 }
 
-function buildTenantWhere(auth: AccessAuth): Prisma.TaskWhereInput {
-  if (auth.systemRole === "SUPER_ADMIN") {
-    return {}
-  }
-
-  if (auth.organizationId) {
-    return {
-      organizationId: auth.organizationId,
-    }
-  }
-
-  return {
-    organizationId: "__no_results__",
-  }
-}
-
 function buildTaskWhere(
-  auth: AccessAuth,
+  auth: RouteAccessContext,
   req: NextRequest
 ): Prisma.TaskWhereInput {
   const searchParams = req.nextUrl.searchParams

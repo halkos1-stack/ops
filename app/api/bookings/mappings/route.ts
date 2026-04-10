@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
-import { buildTenantWhere } from "@/lib/route-access"
-import { requireApiAppAccessWithDevBypass } from "@/lib/dev-api-access"
+import { buildTenantWhere, requireApiAppAccess } from "@/lib/route-access"
 import { reprocessBookingsForMapping } from "@/lib/bookings/booking-service"
 
 function toNullableString(value: unknown) {
@@ -11,7 +10,7 @@ function toNullableString(value: unknown) {
 }
 
 export async function GET(req: NextRequest) {
-  const access = await requireApiAppAccessWithDevBypass(req)
+  const access = await requireApiAppAccess()
   if (!access.ok) return access.response
 
   try {
@@ -65,7 +64,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const access = await requireApiAppAccessWithDevBypass(req)
+  const access = await requireApiAppAccess()
   if (!access.ok) return access.response
 
   try {

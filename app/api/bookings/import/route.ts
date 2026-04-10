@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { requireApiAppAccessWithDevBypass } from "@/lib/dev-api-access"
+import { requireApiAppAccess } from "@/lib/route-access"
 import {
   normalizeBookingInput,
   normalizeCancelInput,
@@ -10,7 +10,7 @@ import {
 } from "@/lib/bookings/booking-service"
 
 export async function POST(req: NextRequest) {
-  const access = await requireApiAppAccessWithDevBypass(req)
+  const access = await requireApiAppAccess()
   if (!access.ok) return access.response
 
   try {

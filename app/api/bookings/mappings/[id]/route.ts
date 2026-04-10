@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
-import { buildTenantWhere } from "@/lib/route-access"
-import { requireApiAppAccessWithDevBypass } from "@/lib/dev-api-access"
+import { buildTenantWhere, requireApiAppAccess } from "@/lib/route-access"
 import { reprocessBookingsForMapping } from "@/lib/bookings/booking-service"
 
 type RouteContext = {
@@ -16,8 +15,8 @@ function toNullableString(value: unknown) {
   return text === "" ? null : text
 }
 
-export async function GET(req: NextRequest, context: RouteContext) {
-  const access = await requireApiAppAccessWithDevBypass(req)
+export async function GET(_req: NextRequest, context: RouteContext) {
+  const access = await requireApiAppAccess()
   if (!access.ok) return access.response
 
   try {
@@ -59,7 +58,7 @@ export async function GET(req: NextRequest, context: RouteContext) {
 }
 
 export async function PATCH(req: NextRequest, context: RouteContext) {
-  const access = await requireApiAppAccessWithDevBypass(req)
+  const access = await requireApiAppAccess()
   if (!access.ok) return access.response
 
   try {
@@ -114,7 +113,8 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
         propertyId,
         sourcePlatform,
         externalListingId,
-        externalListingName: toNullableString(body.externalListingName) ?? current.externalListingName,
+        externalListingName:
+          toNullableString(body.externalListingName) ?? current.externalListingName,
         notes: toNullableString(body.notes) ?? current.notes,
         status,
       },
@@ -158,8 +158,8 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
   }
 }
 
-export async function DELETE(req: NextRequest, context: RouteContext) {
-  const access = await requireApiAppAccessWithDevBypass(req)
+export async function DELETE(_req: NextRequest, context: RouteContext) {
+  const access = await requireApiAppAccess()
   if (!access.ok) return access.response
 
   try {
