@@ -1,6 +1,24 @@
 import { prisma } from "@/lib/prisma"
+import { refreshPropertyReadinessSnapshot } from "@/lib/properties/readiness-snapshot"
 import { buildCanonicalSupplyWriteData } from "@/lib/supplies/compute-supply-state"
 import { toPrismaSupplyStateMode } from "@/lib/supplies/supply-mode-rules"
+
+async function refreshTaskRunPropertyReadiness(params: {
+  organizationId: string
+  propertyId: string
+}) {
+  const organizationId = String(params.organizationId || "").trim()
+  const propertyId = String(params.propertyId || "").trim()
+
+  if (!organizationId || !propertyId) {
+    return null
+  }
+
+  return refreshPropertyReadinessSnapshot({
+    organizationId,
+    propertyId,
+  })
+}
 
 export async function findPrimaryCleaningTemplate(
   organizationId: string,
@@ -196,6 +214,7 @@ export async function syncTaskChecklistRun(params: {
       })
     }
 
+    await refreshTaskRunPropertyReadiness({ organizationId, propertyId })
     return null
   }
 
@@ -213,6 +232,7 @@ export async function syncTaskChecklistRun(params: {
       })
     }
 
+    await refreshTaskRunPropertyReadiness({ organizationId, propertyId })
     return null
   }
 
@@ -352,7 +372,7 @@ export async function syncTaskChecklistRun(params: {
     }
   }
 
-  return prisma.taskChecklistRun.findUnique({
+  const refreshedRun = await prisma.taskChecklistRun.findUnique({
     where: {
       taskId,
     },
@@ -380,6 +400,9 @@ export async function syncTaskChecklistRun(params: {
       },
     },
   })
+
+  await refreshTaskRunPropertyReadiness({ organizationId, propertyId })
+  return refreshedRun
 }
 
 export async function syncTaskSupplyRun(params: {
@@ -670,6 +693,7 @@ export async function syncTaskIssueRun(params: {
       })
     }
 
+    await refreshTaskRunPropertyReadiness({ organizationId, propertyId })
     return null
   }
 
@@ -687,6 +711,7 @@ export async function syncTaskIssueRun(params: {
       })
     }
 
+    await refreshTaskRunPropertyReadiness({ organizationId, propertyId })
     return null
   }
 
@@ -818,7 +843,7 @@ export async function syncTaskIssueRun(params: {
     }
   }
 
-  return prisma.taskIssueRun.findUnique({
+  const refreshedRun = await prisma.taskIssueRun.findUnique({
     where: {
       taskId,
     },
@@ -846,4 +871,7 @@ export async function syncTaskIssueRun(params: {
       },
     },
   })
+
+  await refreshTaskRunPropertyReadiness({ organizationId, propertyId })
+  return refreshedRun
 }
