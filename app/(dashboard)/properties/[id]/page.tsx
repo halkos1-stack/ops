@@ -1002,16 +1002,8 @@ function buildBookingWindowLabel(task: NonNullable<PropertyDetail["tasks"]>[numb
   return language === "en" ? `${checkIn} to ${checkOut}` : `${checkIn} έως ${checkOut}`
 }
 function buildReadinessReasons(property: PropertyDetail, language: "el" | "en") {
-  const directReasons = String(property.readinessReasonsText || "")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-  if (directReasons.length > 0) return directReasons
-
-  const readinessReasonRows = safeArray(property.readinessSummary?.reasons)
-    .map((row) => (typeof row === "string" ? row.trim() : String(row?.message || "").trim()))
-    .filter(Boolean)
-  if (readinessReasonRows.length > 0) return readinessReasonRows
+  // readinessReasonsText is always stored in English by the backend — skip it entirely
+  // readinessSummary?.reasons may also contain English text — skip it
 
   const conditionReasonRows = safeArray(property.readinessSummary?.conditions?.reasons)
     .map((row) => String(row?.message || "").trim())
@@ -1019,6 +1011,19 @@ function buildReadinessReasons(property: PropertyDetail, language: "el" | "en") 
   if (conditionReasonRows.length > 0) return conditionReasonRows
 
   const reasons: string[] = []
+
+  const status = normalizeCanonicalReadinessStatus(
+    property.readinessSummary?.status ?? property.storedReadinessSummary?.readinessStatus ?? property.readinessStatus
+  )
+
+  if (status === "READY") {
+    reasons.push(
+      language === "en"
+        ? "There are no active property conditions today. The property can be considered ready."
+        : "Δεν υπάρχουν ενεργές συνθήκες ακινήτου σήμερα. Το ακίνητο μπορεί να θεωρηθεί έτοιμο."
+    )
+    return reasons
+  }
 
   if ((property.openBlockingConditionCount || 0) > 0) {
     reasons.push(
@@ -1036,7 +1041,7 @@ function buildReadinessReasons(property: PropertyDetail, language: "el" | "en") 
     )
   }
 
-  if ((property.openConditionCount || 0) > 0) {
+  if ((property.openConditionCount || 0) > 0 && reasons.length === 0) {
     reasons.push(
       language === "en"
         ? `${property.openConditionCount} active property conditions still shape today's readiness.`
@@ -1044,12 +1049,20 @@ function buildReadinessReasons(property: PropertyDetail, language: "el" | "en") 
     )
   }
 
-  if (reasons.length === 0 && property.nextCheckInAt) {
-    reasons.push(language === "en" ? "No blocking items were detected for the next check-in." : "Δεν εντοπίστηκαν στοιχεία που μπλοκάρουν το επόμενο check-in.")
+  if (reasons.length === 0 && status === "UNKNOWN") {
+    reasons.push(
+      language === "en"
+        ? "Readiness data are not yet available for this property."
+        : "Τα δεδομένα ετοιμότητας δεν είναι ακόμη διαθέσιμα για αυτό το ακίνητο."
+    )
   }
 
   if (reasons.length === 0) {
-    reasons.push(language === "en" ? "No readiness details are currently available." : "Δεν υπάρχουν ακόμη διαθέσιμες λεπτομέρειες ετοιμότητας.")
+    reasons.push(
+      language === "en"
+        ? "No blocking items were detected for the next check-in."
+        : "Δεν εντοπίστηκαν στοιχεία που μπλοκάρουν το επόμενο check-in."
+    )
   }
 
   return reasons
@@ -1573,6 +1586,17 @@ export default function PropertyDetailPage() {
         checkIn: "Check-in",
         checkOut: "Check-out",
         stay: "Stay",
+        dayStatusTitle: "Day status",
+        dayStatusSubtitle: "Current operational picture of the property.",
+        nextTaskTitle: "Next task",
+        nextTaskSubtitle: "The most relevant pending task for the property right now.",
+        noNextTask: "There are no pending tasks at this time.",
+        viewAllTasksCta: "See all property tasks",
+        nextCheckOut: "Next check-out",
+        readinessSectionTitle: "Readiness",
+        readinessSectionSubtitle: "Simple operational picture for the next check-in.",
+        allOpenTasksLabel: "All open tasks",
+        allOpenTasksHelper: "All currently open tasks for this property, regardless of date.",
       }
     }
 
@@ -1721,6 +1745,17 @@ export default function PropertyDetailPage() {
       checkIn: "Check-in",
       checkOut: "Check-out",
       stay: "Διαμονή",
+      dayStatusTitle: "Κατάσταση ημέρας",
+      dayStatusSubtitle: "Τρέχουσα επιχειρησιακή εικόνα του ακινήτου.",
+      nextTaskTitle: "Επόμενη εργασία",
+      nextTaskSubtitle: "Η πιο σχετική εκκρεμής εργασία για το ακίνητο αυτή τη στιγμή.",
+      noNextTask: "Δεν υπάρχει εκκρεμής εργασία αυτή τη στιγμή.",
+      viewAllTasksCta: "Δες όλες τις εργασίες ακινήτου",
+      nextCheckOut: "Επόμενο check-out",
+      readinessSectionTitle: "Ετοιμότητα",
+      readinessSectionSubtitle: "Απλή επιχειρησιακή εικόνα για το επόμενο check-in.",
+      allOpenTasksLabel: "Όλες οι ανοιχτές εργασίες",
+      allOpenTasksHelper: "Όλες οι ανοιχτές εργασίες αυτού του ακινήτου, ανεξαρτήτως ημερομηνίας.",
     }
   }, [language])
   const [property, setProperty] = useState<PropertyDetail | null>(null)
@@ -1741,12 +1776,9 @@ export default function PropertyDetailPage() {
   const [calendarGranularity, setCalendarGranularity] = useState<CalendarGranularity>("month")
   const [calendarDate, setCalendarDate] = useState<Date>(startOfDay(new Date()))
 
-  const [openTaskFilter, setOpenTaskFilter] = useState<OpenTaskFilter>("all_open")
   const [supplyFilter, setSupplyFilter] = useState<SupplyFilter>("all")
   const [issueFilter, setIssueFilter] = useState<IssueFilter>("open")
   const [suppliesOpen, setSuppliesOpen] = useState(false)
-  const [dateFrom, setDateFrom] = useState("")
-  const [dateTo, setDateTo] = useState("")
   const todayReference = useMemo(() => startOfDay(new Date()), [])
 
   const loadPage = useCallback(async () => {
@@ -1823,24 +1855,23 @@ export default function PropertyDetailPage() {
     }
   }, [openTasksBase])
 
-  const visibleTasks = useMemo(() => {
-    let rows = [...openTasksBase]
-    rows = rows.filter((task) => isDateInRange(task.scheduledDate, dateFrom || undefined, dateTo || undefined))
+  const nextTask = useMemo(() => {
+    if (!property) return null
 
-    if (openTaskFilter === "alerts") {
-      rows = rows.filter((task) => isTaskAlertActive(task))
-    } else if (openTaskFilter !== "all_open") {
-      rows = rows.filter((task) => {
-        const normalized = normalizeTaskStatus(task.status)
-        if (openTaskFilter === "pending") return normalized === "PENDING" || normalized === "NEW"
-        if (openTaskFilter === "assigned") return normalized === "ASSIGNED" || normalized === "WAITING_ACCEPTANCE"
-        if (openTaskFilter === "accepted") return normalized === "ACCEPTED"
-        if (openTaskFilter === "in_progress") return normalized === "IN_PROGRESS"
-        return false
-      })
+    // Priority 1: the task directly driving the operational status
+    if (property.operationalRelevantTask) {
+      const found = openTasksBase.find((t) => t.id === property.operationalRelevantTask!.id)
+      if (found) return found
     }
 
-    return rows.sort((a, b) => {
+    // Priority 2: pending cleaning task
+    if (property.operationalPendingCleaningTask) {
+      const found = openTasksBase.find((t) => t.id === property.operationalPendingCleaningTask!.id)
+      if (found) return found
+    }
+
+    // Priority 3: first by alert → borderline → scheduled date
+    const sorted = [...openTasksBase].sort((a, b) => {
       const aAlert = isTaskAlertActive(a) ? 1 : 0
       const bAlert = isTaskAlertActive(b) ? 1 : 0
       if (aAlert !== bAlert) return bAlert - aAlert
@@ -1856,7 +1887,8 @@ export default function PropertyDetailPage() {
       if (!bDate) return -1
       return aDate.getTime() - bDate.getTime()
     })
-  }, [openTasksBase, openTaskFilter, dateFrom, dateTo])
+    return sorted[0] ?? null
+  }, [property, openTasksBase])
 
   const openIssues = useMemo(() => {
     return safeArray(property?.issues).filter((issue) => {
@@ -2027,7 +2059,6 @@ export default function PropertyDetailPage() {
     return rows
   */
   const todayReadinessExplanation = readiness.details
-  const todayReadinessReasons = readiness.reasons
 
   const proofSummary = useMemo(() => {
     const buildSummary = (
@@ -2297,10 +2328,13 @@ export default function PropertyDetailPage() {
           {viewMode === "overview" ? (
             <div className="mt-4 flex flex-wrap gap-2">
               <a href="#property-overview" className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100">
-                {language === "en" ? "Overview" : "Επισκοπηση"}
+                {t.dayStatusTitle}
               </a>
-              <a href="#property-open-tasks" className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100">
-                {t.tasksTitle}
+              <a href="#property-next-task" className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100">
+                {t.nextTaskTitle}
+              </a>
+              <a href="#property-readiness" className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100">
+                {t.readinessSectionTitle}
               </a>
               <a href="#property-supplies" className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100">
                 {t.suppliesList}
@@ -2309,7 +2343,7 @@ export default function PropertyDetailPage() {
                 {t.issuesListTitle}
               </a>
               <a href="#property-proof" className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100">
-                {language === "en" ? "Property management" : "Διαχειριση ακινητου"}
+                {language === "en" ? "Property management" : "Διαχείριση ακινήτου"}
               </a>
             </div>
           ) : null}
@@ -2317,47 +2351,43 @@ export default function PropertyDetailPage() {
 
         {viewMode === "overview" ? (
           <>
-            <SectionShell id="property-overview" title={t.readinessTitle} subtitle={operationalDisplay.explanation}>
-              <div className="grid gap-2 md:grid-cols-4">
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
-                  <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    <span>{t.operationalStatus}</span>
-                    <TooltipHint label={language === "en"
-                      ? "The real operational state of the property right now — based on active stay, task execution status, and checklist proof. This is the primary status."
-                      : "Η πραγματική επιχειρησιακή κατάσταση του ακινήτου αυτή τη στιγμή — βάσει ενεργής διαμονής, κατάστασης εκτέλεσης εργασιών και απόδειξης λιστών. Αυτή είναι η κύρια κατάσταση."
-                    } />
-                  </div>
-                  <div className="mt-1.5 flex flex-wrap gap-1.5">
-                    <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${operationalDisplay.tone}`}>{operationalDisplay.label}</span>
-                    {operationalDisplay.alertActive && (
-                      <span className="inline-flex rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 ring-1 ring-red-200">Alert</span>
-                    )}
-                  </div>
-                  <p className="mt-1.5 text-xs leading-relaxed text-slate-500">{operationalDisplay.reason}</p>
+            {/* Section 1: Κατάσταση ημέρας */}
+            <SectionShell id="property-overview" title={t.dayStatusTitle} subtitle={t.dayStatusSubtitle}>
+              <div className="mb-4 flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <span>{t.operationalStatus}</span>
+                  <TooltipHint label={language === "en"
+                    ? "The real operational state of the property right now — based on active stay, task execution status, and checklist proof."
+                    : "Η πραγματική επιχειρησιακή κατάσταση του ακινήτου αυτή τη στιγμή — βάσει ενεργής διαμονής, κατάστασης εκτέλεσης εργασιών και απόδειξης λιστών."
+                  } />
                 </div>
-                <InfoChip label={t.nextCheckIn} value={formatDateTime(property.nextCheckInAt, locale)} hint="Η επόμενη γνωστή άφιξη από τα διαθέσιμα δεδομένα." />
-                <InfoChip label={t.timeLeft} value={formatCountdownToNextCheckIn(property.nextCheckInAt, language)} hint="Υπολογίζεται από τη σημερινή στιγμή μέχρι το επόμενο check-in." />
-                <InfoChip label={t.lastUpdate} value={formatDateTime(property.readinessUpdatedAt || property.updatedAt, locale)} hint="Τελευταία διαθέσιμη ενημέρωση της εικόνας ακινήτου." />
+                <span className="group relative inline-flex">
+                  <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${operationalDisplay.tone}`}>{operationalDisplay.label}</span>
+                  <span className="pointer-events-none absolute bottom-full left-0 z-50 mb-2 w-80 rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-xs leading-relaxed text-slate-700 shadow-xl opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+                    <span className="mb-1 block font-semibold text-slate-900">{operationalDisplay.label}</span>
+                    {operationalDisplay.explanation || operationalDisplay.reason}
+                  </span>
+                </span>
+                {operationalDisplay.alertActive && (
+                  <span className="inline-flex rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 ring-1 ring-red-200">Alert</span>
+                )}
               </div>
 
-              <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-6">
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-6">
                 <InfoChip
-                  label={language === "en" ? "Tasks today" : "Εργασίες σήμερα"}
-                  value={String(todayOperationalCounts.todayOpenTasks)}
-                  hint={language === "en"
-                    ? "Open tasks scheduled for today. If a task is not yet accepted or in progress, it affects the operational status directly."
-                    : "Ανοιχτές εργασίες με σημερινή ημερομηνία. Αν μια εργασία δεν έχει αναληφθεί ή ολοκληρωθεί, επηρεάζει την κατάσταση του ακινήτου."
-                  }
-                  valueClassName={todayOperationalCounts.todayOpenTasks > 0 ? "text-red-700" : "text-slate-900"}
+                  label={t.allOpenTasksLabel}
+                  value={String(openTaskCounts.all_open)}
+                  hint={t.allOpenTasksHelper}
+                  valueClassName={openTaskCounts.all_open > 0 ? "text-amber-700" : "text-slate-900"}
                 />
                 <InfoChip
                   label={language === "en" ? "Active alerts" : "Ενεργά alert"}
-                  value={String(todayOperationalCounts.activeAlerts)}
+                  value={String(openTaskCounts.alerts)}
                   hint={language === "en"
-                    ? "Open tasks where the alert time has passed. Indicates urgency in execution — does not change readiness directly but requires immediate attention."
-                    : "Ανοιχτές εργασίες όπου η ώρα alert έχει περάσει. Σημαίνει επείγον στην εκτέλεση — δεν αλλάζει την ετοιμότητα απευθείας αλλά απαιτεί άμεση προσοχή."
+                    ? "Open tasks where the alert time has passed. Requires immediate attention."
+                    : "Ανοιχτές εργασίες όπου η ώρα alert έχει περάσει. Απαιτείται άμεση προσοχή."
                   }
-                  valueClassName={todayOperationalCounts.activeAlerts > 0 ? "text-red-700" : "text-slate-900"}
+                  valueClassName={openTaskCounts.alerts > 0 ? "text-red-700" : "text-slate-900"}
                 />
                 <InfoChip
                   label={t.bookingsWithoutTask}
@@ -2370,8 +2400,8 @@ export default function PropertyDetailPage() {
                   label={language === "en" ? "Open issues" : "Ανοιχτές βλάβες"}
                   value={String(todayOperationalCounts.openIssues)}
                   hint={language === "en"
-                    ? "Open issues that have not been resolved. If linked to active property conditions, they directly affect readiness."
-                    : "Ανοιχτές βλάβες που δεν έχουν επιλυθεί. Αν συνδέονται με ενεργές συνθήκες ακινήτου, επηρεάζουν άμεσα την ετοιμότητα."
+                    ? "Open issues not yet resolved. If linked to active property conditions, they affect readiness."
+                    : "Ανοιχτές βλάβες που δεν έχουν επιλυθεί. Αν συνδέονται με ενεργές συνθήκες ακινήτου, επηρεάζουν την ετοιμότητα."
                   }
                   valueClassName={todayOperationalCounts.openIssues > 0 ? "text-red-700" : "text-slate-900"}
                 />
@@ -2379,8 +2409,8 @@ export default function PropertyDetailPage() {
                   label={language === "en" ? "Open damages" : "Ανοιχτές ζημιές"}
                   value={String(todayOperationalCounts.openDamages)}
                   hint={language === "en"
-                    ? "Open damage records. Damages linked to active blocking conditions prevent the property from being ready."
-                    : "Ανοιχτές ζημιές. Ζημιές που συνδέονται με ενεργές μπλοκαριστικές συνθήκες εμποδίζουν την ετοιμότητα."
+                    ? "Open damage records. Blocking damages prevent the property from being ready."
+                    : "Ανοιχτές ζημιές. Ζημιές που συνδέονται με μπλοκαριστικές συνθήκες εμποδίζουν την ετοιμότητα."
                   }
                   valueClassName={todayOperationalCounts.openDamages > 0 ? "text-red-700" : "text-slate-900"}
                 />
@@ -2394,168 +2424,139 @@ export default function PropertyDetailPage() {
                   valueClassName={todayOperationalCounts.supplyShortages > 0 ? "text-red-700" : "text-slate-900"}
                 />
               </div>
+            </SectionShell>
 
-              <div className="mt-3">
-                <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-slate-800">
-                  <span>{t.readinessReasons}</span>
-                  <TooltipHint label={language === "en"
-                    ? "These reasons come from active property conditions — the structural readiness picture. They are separate from the execution status shown above."
-                    : "Αυτοί οι λόγοι προκύπτουν από ενεργές συνθήκες ακινήτου — τη δομική εικόνα ετοιμότητας. Είναι διαχωρισμένοι από την κατάσταση εκτέλεσης που φαίνεται παραπάνω."
-                  } />
-                </div>
-                <div className="grid gap-2 md:grid-cols-2">
-                  {todayReadinessReasons.map((reason, index) => (
-                    <div key={`readiness-reason-${index}`} className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700">• {reason}</div>
-                  ))}
+            {/* Section 2: Επόμενη εργασία */}
+            <SectionShell
+              id="property-next-task"
+              title={t.nextTaskTitle}
+              subtitle={t.nextTaskSubtitle}
+              actions={<Link href={`/tasks?propertyId=${property.id}&scope=open`} className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800">{t.viewAllTasksCta}</Link>}
+            >
+              {nextTask ? (() => {
+                const latestAssignment = getLatestAssignment(nextTask)
+                const cleaningState = resolveChecklistUiState({ task: nextTask, run: getCleaningRun(nextTask), enabled: Boolean(nextTask.sendCleaningChecklist) })
+                const suppliesState = resolveChecklistUiState({ task: nextTask, run: getSuppliesRun(nextTask), enabled: Boolean(nextTask.sendSuppliesChecklist) })
+                const issuesState = resolveChecklistUiState({ task: nextTask, run: getIssuesRun(nextTask), enabled: Boolean(nextTask.sendIssuesChecklist) })
+                const normalizedTitle = normalizeTaskTitleText(nextTask.title, language)
+                const taskTone = getTaskCardTone(nextTask)
+
+                return (
+                  <div className={`rounded-2xl border p-4 shadow-sm ${taskTone.card}`}>
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Link href={`/tasks/${nextTask.id}`} className="text-base font-semibold text-slate-900 underline-offset-4 hover:underline">{normalizedTitle}</Link>
+                          <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${badgeClasses(nextTask.status)}`}>{taskStatusLabel(language, nextTask.status)}</span>
+                          <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${getFriendlyTaskConditionTone(nextTask)}`}>{getFriendlyTaskCondition(nextTask, language)}</span>
+                          {isTaskAlertActive(nextTask) ? (
+                            <span className="inline-flex rounded-full bg-red-100 px-2.5 py-1 text-xs font-semibold text-red-700 ring-1 ring-red-200" title={nextTask.alertAt ? `Alert: ${formatDateTime(nextTask.alertAt, locale)}` : undefined}>
+                              {t.alerts}
+                            </span>
+                          ) : null}
+                        </div>
+
+                        <div className="mt-3 grid gap-2 lg:grid-cols-3">
+                          <div className="rounded-xl border border-sky-100 bg-white/90 px-3 py-2.5">
+                            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{t.executionWindow}</div>
+                            <div className="mt-1 text-sm font-medium text-slate-900">{buildExecutionWindowLabel(nextTask, locale, language)}</div>
+                          </div>
+                          <InfoChip label={t.bookingWindow} value={buildBookingWindowLabel(nextTask, locale, language, "—")} />
+                          <InfoChip label={t.currentPartner} value={latestAssignment?.partner?.name || t.noPartnerShort} />
+                        </div>
+
+                        <div className={`mt-3 flex flex-wrap gap-2 border-t pt-3 ${taskTone.accentBorder}`}>
+                          <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium shadow-sm ${cleaningState.tone}`}>
+                            <span className="font-semibold text-slate-700">{t.cleaningList}</span>
+                            <span>{getChecklistStateLabel(language, cleaningState, t.notSent)}</span>
+                          </span>
+                          <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium shadow-sm ${suppliesState.tone}`}>
+                            <span className="font-semibold text-slate-700">{t.suppliesList}</span>
+                            <span>{getChecklistStateLabel(language, suppliesState, t.notSent)}</span>
+                          </span>
+                          <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium shadow-sm ${issuesState.tone}`}>
+                            <span className="font-semibold text-slate-700">{t.issuesList}</span>
+                            <span>{getChecklistStateLabel(language, issuesState, t.notSent)}</span>
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex justify-end lg:pt-0">
+                        <Link href={`/tasks/${nextTask.id}`} className={`inline-flex items-center justify-center rounded-xl border bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm ${taskTone.action}`}>{t.openTaskButton}</Link>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })() : (
+                <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-500">{t.noNextTask}</div>
+              )}
+            </SectionShell>
+
+            {/* Section 3: Ετοιμότητα */}
+            <SectionShell id="property-readiness" title={t.readinessSectionTitle} subtitle={t.readinessSectionSubtitle}>
+              <div className="grid gap-2 md:grid-cols-4">
+                <InfoChip label={t.nextCheckIn} value={formatDateTime(property.nextCheckInAt, locale)} hint={language === "en" ? "Next known arrival from available data." : "Η επόμενη γνωστή άφιξη από τα διαθέσιμα δεδομένα."} />
+                <InfoChip label={t.timeLeft} value={formatCountdownToNextCheckIn(property.nextCheckInAt, language)} hint={language === "en" ? "Calculated from now until the next check-in." : "Υπολογίζεται από τη σημερινή στιγμή μέχρι το επόμενο check-in."} />
+                <InfoChip label={t.lastUpdate} value={formatDateTime(property.readinessUpdatedAt || property.updatedAt, locale)} hint={language === "en" ? "Last available update of the property picture." : "Τελευταία διαθέσιμη ενημέρωση της εικόνας ακινήτου."} />
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{t.readiness}</div>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${readiness.tone}`}>{readiness.label}</span>
+                  </div>
                 </div>
               </div>
 
               <div className="mt-4">
                 <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-800">
                   <span>{t.proofTitle}</span>
-                  <TooltipHint label={language === "en" ? "Readiness proof stays inside the property picture: it shows what was sent for execution and what has returned as proof." : "Η αποδειξη ετοιμοτητας μενει μεσα στην εικονα του ακινητου: δειχνει τι εχει σταλει για εκτελεση και τι εχει επιστρεψει ως αποδειξη."} />
+                  <TooltipHint label={language === "en" ? "Readiness proof stays inside the property picture: it shows what was sent for execution and what has returned as proof." : "Η απόδειξη ετοιμότητας μένει μέσα στην εικόνα του ακινήτου: δείχνει τι έχει σταλεί για εκτέλεση και τι έχει επιστρέψει ως απόδειξη."} />
                 </div>
                 <div className="grid gap-3 xl:grid-cols-3">
                   <div className="rounded-2xl border border-slate-200 bg-white p-4">
                     <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
                       <span>{t.cleaningList}</span>
-                      <TooltipHint label={language === "en" ? "Cleaning proof flow for the currently open tasks." : "Η ροη αποδειξης καθαριοτητας για τις τρεχουσες ανοιχτες εργασιες."} />
+                      <TooltipHint label={language === "en" ? "Cleaning proof flow for the currently open tasks." : "Η ροή απόδειξης καθαριότητας για τις τρέχουσες ανοιχτές εργασίες."} />
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2">
                       <span className={`inline-flex rounded-full px-3 py-1.5 text-xs font-semibold ${proofSummary.cleaning.sentCount > 0 ? "bg-sky-50 text-sky-700 ring-1 ring-sky-200" : "bg-slate-100 text-slate-700 ring-1 ring-slate-200"}`}>{t.sent}: {proofSummary.cleaning.sentCount}/{proofSummary.cleaning.enabledCount}</span>
                       <span className={`inline-flex rounded-full px-3 py-1.5 text-xs font-semibold ${proofSummary.cleaning.submittedCount > 0 ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200" : "bg-slate-100 text-slate-700 ring-1 ring-slate-200"}`}>{t.submitted}: {proofSummary.cleaning.submittedCount}/{proofSummary.cleaning.enabledCount}</span>
                     </div>
                     <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                      <InfoChip label={language === "en" ? "Last sent" : "Τελευταια αποστολη"} value={formatDateTime(proofSummary.cleaning.latestSent, locale)} hint={language === "en" ? "Most recent time a cleaning checklist was sent." : "Η πιο προσφατη στιγμη που σταλθηκε λιστα καθαριοτητας."} />
-                      <InfoChip label={language === "en" ? "Last submitted" : "Τελευταια υποβολη"} value={formatDateTime(proofSummary.cleaning.latestSubmitted, locale)} hint={language === "en" ? "Most recent cleaning proof return." : "Η πιο προσφατη επιστροφη αποδειξης καθαριοτητας."} />
+                      <InfoChip label={language === "en" ? "Last sent" : "Τελευταία αποστολή"} value={formatDateTime(proofSummary.cleaning.latestSent, locale)} hint={language === "en" ? "Most recent time a cleaning checklist was sent." : "Η πιο πρόσφατη στιγμή που στάλθηκε λίστα καθαριότητας."} />
+                      <InfoChip label={language === "en" ? "Last submitted" : "Τελευταία υποβολή"} value={formatDateTime(proofSummary.cleaning.latestSubmitted, locale)} hint={language === "en" ? "Most recent cleaning proof return." : "Η πιο πρόσφατη επιστροφή απόδειξης καθαριότητας."} />
                     </div>
                   </div>
 
                   <div className="rounded-2xl border border-slate-200 bg-white p-4">
                     <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
                       <span>{t.suppliesList}</span>
-                      <TooltipHint label={language === "en" ? "Supplies proof flow for the currently open tasks." : "Η ροη αποδειξης αναλωσιμων για τις τρεχουσες ανοιχτες εργασιες."} />
+                      <TooltipHint label={language === "en" ? "Supplies proof flow for the currently open tasks." : "Η ροή απόδειξης αναλωσίμων για τις τρέχουσες ανοιχτές εργασίες."} />
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2">
                       <span className={`inline-flex rounded-full px-3 py-1.5 text-xs font-semibold ${proofSummary.supplies.sentCount > 0 ? "bg-sky-50 text-sky-700 ring-1 ring-sky-200" : "bg-slate-100 text-slate-700 ring-1 ring-slate-200"}`}>{t.sent}: {proofSummary.supplies.sentCount}/{proofSummary.supplies.enabledCount}</span>
                       <span className={`inline-flex rounded-full px-3 py-1.5 text-xs font-semibold ${proofSummary.supplies.submittedCount > 0 ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200" : "bg-slate-100 text-slate-700 ring-1 ring-slate-200"}`}>{t.submitted}: {proofSummary.supplies.submittedCount}/{proofSummary.supplies.enabledCount}</span>
                     </div>
                     <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                      <InfoChip label={language === "en" ? "Last sent" : "Τελευταια αποστολη"} value={formatDateTime(proofSummary.supplies.latestSent, locale)} hint={language === "en" ? "Most recent time a supplies checklist was sent." : "Η πιο προσφατη στιγμη που σταλθηκε λιστα αναλωσιμων."} />
-                      <InfoChip label={language === "en" ? "Last submitted" : "Τελευταια υποβολη"} value={formatDateTime(proofSummary.supplies.latestSubmitted, locale)} hint={language === "en" ? "Most recent supplies proof return." : "Η πιο προσφατη επιστροφη αποδειξης αναλωσιμων."} />
+                      <InfoChip label={language === "en" ? "Last sent" : "Τελευταία αποστολή"} value={formatDateTime(proofSummary.supplies.latestSent, locale)} hint={language === "en" ? "Most recent time a supplies checklist was sent." : "Η πιο πρόσφατη στιγμή που στάλθηκε λίστα αναλωσίμων."} />
+                      <InfoChip label={language === "en" ? "Last submitted" : "Τελευταία υποβολή"} value={formatDateTime(proofSummary.supplies.latestSubmitted, locale)} hint={language === "en" ? "Most recent supplies proof return." : "Η πιο πρόσφατη επιστροφή απόδειξης αναλωσίμων."} />
                     </div>
                   </div>
 
                   <div className="rounded-2xl border border-slate-200 bg-white p-4">
                     <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
                       <span>{t.issuesList}</span>
-                      <TooltipHint label={language === "en" ? "Issues and damages proof flow for the currently open tasks." : "Η ροη αποδειξης βλαβων και ζημιων για τις τρεχουσες ανοιχτες εργασιες."} />
+                      <TooltipHint label={language === "en" ? "Issues and damages proof flow for the currently open tasks." : "Η ροή απόδειξης βλαβών και ζημιών για τις τρέχουσες ανοιχτές εργασίες."} />
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2">
                       <span className={`inline-flex rounded-full px-3 py-1.5 text-xs font-semibold ${proofSummary.issues.sentCount > 0 ? "bg-sky-50 text-sky-700 ring-1 ring-sky-200" : "bg-slate-100 text-slate-700 ring-1 ring-slate-200"}`}>{t.sent}: {proofSummary.issues.sentCount}/{proofSummary.issues.enabledCount}</span>
                       <span className={`inline-flex rounded-full px-3 py-1.5 text-xs font-semibold ${proofSummary.issues.submittedCount > 0 ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200" : "bg-slate-100 text-slate-700 ring-1 ring-slate-200"}`}>{t.submitted}: {proofSummary.issues.submittedCount}/{proofSummary.issues.enabledCount}</span>
                     </div>
                     <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                      <InfoChip label={language === "en" ? "Last sent" : "Τελευταια αποστολη"} value={formatDateTime(proofSummary.issues.latestSent, locale)} hint={language === "en" ? "Most recent time an issues checklist was sent." : "Η πιο προσφατη στιγμη που σταλθηκε λιστα βλαβων και ζημιων."} />
-                      <InfoChip label={language === "en" ? "Last submitted" : "Τελευταια υποβολη"} value={formatDateTime(proofSummary.issues.latestSubmitted, locale)} hint={language === "en" ? "Most recent issues proof return." : "Η πιο προσφατη επιστροφη αποδειξης για βλαβες ή ζημιες."} />
+                      <InfoChip label={language === "en" ? "Last sent" : "Τελευταία αποστολή"} value={formatDateTime(proofSummary.issues.latestSent, locale)} hint={language === "en" ? "Most recent time an issues checklist was sent." : "Η πιο πρόσφατη στιγμή που στάλθηκε λίστα βλαβών και ζημιών."} />
+                      <InfoChip label={language === "en" ? "Last submitted" : "Τελευταία υποβολή"} value={formatDateTime(proofSummary.issues.latestSubmitted, locale)} hint={language === "en" ? "Most recent issues proof return." : "Η πιο πρόσφατη επιστροφή απόδειξης για βλάβες ή ζημιές."} />
                     </div>
                   </div>
                 </div>
-              </div>
-            </SectionShell>
-
-            <SectionShell
-              id="property-open-tasks"
-              title={t.tasksTitle}
-              subtitle={language === "en" ? "Open tasks are shown separately as the execution layer of the property." : "Οι ανοιχτες εργασιες προβαλλονται ξεχωριστα ως execution layer του ακινητου."}
-              actions={<Link href={`/tasks?propertyId=${property.id}&scope=open`} className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800">{t.openPropertyTasksPage}</Link>}
-            >
-              <p className="mb-4 text-xs text-slate-400">{t.taskExecutionRangeExplanation}</p>
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-                <CounterButton label={t.all} value={openTaskCounts.all_open} active={openTaskFilter === "all_open"} onClick={() => setOpenTaskFilter("all_open")} tone="slate" helper={t.allOpenHelper} />
-                <CounterButton label={t.pending} value={openTaskCounts.pending} active={openTaskFilter === "pending"} onClick={() => setOpenTaskFilter("pending")} tone="amber" helper={t.pendingHelper} />
-                <CounterButton label={t.assigned} value={openTaskCounts.assigned} active={openTaskFilter === "assigned"} onClick={() => setOpenTaskFilter("assigned")} tone="blue" helper={t.assignedHelper} />
-                <CounterButton label={t.accepted} value={openTaskCounts.accepted} active={openTaskFilter === "accepted"} onClick={() => setOpenTaskFilter("accepted")} tone="blue" helper={t.acceptedHelper} />
-                <CounterButton label={t.inProgress} value={openTaskCounts.in_progress} active={openTaskFilter === "in_progress"} onClick={() => setOpenTaskFilter("in_progress")} tone="blue" helper={t.progressHelper} />
-                <CounterButton label={t.alerts} value={openTaskCounts.alerts} active={openTaskFilter === "alerts"} onClick={() => setOpenTaskFilter("alerts")} tone="red" helper={t.alertsHelper} />
-              </div>
-
-              <div className="mt-4 flex flex-wrap items-end gap-3">
-                <label className="min-w-[160px] flex-1 flex flex-col gap-1">
-                  <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">{t.dateFrom}</span>
-                  <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900" />
-                </label>
-                <label className="min-w-[160px] flex-1 flex flex-col gap-1">
-                  <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">{t.dateTo}</span>
-                  <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900" />
-                </label>
-                <button type="button" onClick={() => { setDateFrom(""); setDateTo("") }} className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">{t.clearDates}</button>
-              </div>
-
-              <div className="mt-5 space-y-4">
-                {visibleTasks.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-500">{t.noDateFilterResults}</div>
-                ) : (
-                  visibleTasks.map((task) => {
-                    const latestAssignment = getLatestAssignment(task)
-                    const cleaningState = resolveChecklistUiState({ task, run: getCleaningRun(task), enabled: Boolean(task.sendCleaningChecklist) })
-                    const suppliesState = resolveChecklistUiState({ task, run: getSuppliesRun(task), enabled: Boolean(task.sendSuppliesChecklist) })
-                    const issuesState = resolveChecklistUiState({ task, run: getIssuesRun(task), enabled: Boolean(task.sendIssuesChecklist) })
-                    const normalizedTitle = normalizeTaskTitleText(task.title, language)
-                    const taskTone = getTaskCardTone(task)
-
-                    return (
-                      <div key={task.id} className={`rounded-2xl border p-4 shadow-sm ${taskTone.card}`}>
-                        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <Link href={`/tasks/${task.id}`} className="text-base font-semibold text-slate-900 underline-offset-4 hover:underline">{normalizedTitle}</Link>
-                          <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${badgeClasses(task.status)}`}>{taskStatusLabel(language, task.status)}</span>
-                          <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${getFriendlyTaskConditionTone(task)}`}>{getFriendlyTaskCondition(task, language)}</span>
-                          {isTaskAlertActive(task) ? (
-                            <span
-                              className="inline-flex rounded-full bg-red-100 px-2.5 py-1 text-xs font-semibold text-red-700 ring-1 ring-red-200"
-                              title={task.alertAt ? `Alert: ${formatDateTime(task.alertAt, locale)}` : undefined}
-                            >
-                              {t.alerts}
-                            </span>
-                          ) : null}
-                            </div>
-
-                        <div className="mt-3 grid gap-2 lg:grid-cols-3">
-                          <div className="rounded-xl border border-sky-100 bg-white/90 px-3 py-2.5">
-                            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{t.executionWindow}</div>
-                            <div className="mt-1 text-sm font-medium text-slate-900">{buildExecutionWindowLabel(task, locale, language)}</div>
-                          </div>
-                          <InfoChip label={t.bookingWindow} value={buildBookingWindowLabel(task, locale, language, "—")} />
-                          <InfoChip label={t.currentPartner} value={latestAssignment?.partner?.name || t.noPartnerShort} />
-                        </div>
-
-                            <div className={`mt-3 flex flex-wrap gap-2 border-t pt-3 ${taskTone.accentBorder}`}>
-                              <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium shadow-sm ${cleaningState.tone}`}>
-                                <span className="font-semibold text-slate-700">{t.cleaningList}</span>
-                                <span>{getChecklistStateLabel(language, cleaningState, t.notSent)}</span>
-                              </span>
-                              <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium shadow-sm ${suppliesState.tone}`}>
-                                <span className="font-semibold text-slate-700">{t.suppliesList}</span>
-                                <span>{getChecklistStateLabel(language, suppliesState, t.notSent)}</span>
-                              </span>
-                              <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium shadow-sm ${issuesState.tone}`}>
-                                <span className="font-semibold text-slate-700">{t.issuesList}</span>
-                                <span>{getChecklistStateLabel(language, issuesState, t.notSent)}</span>
-                              </span>
-                            </div>
-
-                          </div>
-
-                          <div className="flex justify-end lg:pt-0">
-                            <Link href={`/tasks/${task.id}`} className={`inline-flex items-center justify-center rounded-xl border bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm ${taskTone.action}`}>{t.openTaskButton}</Link>
-                          </div>
-                        </div>
-                      </div>
-                    )
-                  })
-                )}
               </div>
             </SectionShell>
 
