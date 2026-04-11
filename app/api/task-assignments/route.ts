@@ -49,6 +49,12 @@ function formatDateForGreek(value?: Date | string | null) {
   }).format(date)
 }
 
+function formatTime(value?: string | null) {
+  const text = String(value ?? "").trim()
+  if (!text) return "—"
+  return text.slice(0, 5)
+}
+
 function normalizeSystemTaskTitleForLog(rawTitle: unknown) {
   const title = String(rawTitle ?? "").trim()
   if (!title) return "Task"
@@ -335,6 +341,8 @@ export async function GET(request: NextRequest) {
                 guestName: true,
                 checkInDate: true,
                 checkOutDate: true,
+                checkInTime: true,
+                checkOutTime: true,
                 status: true,
               },
             },
@@ -472,6 +480,8 @@ export async function POST(request: NextRequest) {
         status: true,
         propertyId: true,
         scheduledDate: true,
+        scheduledStartTime: true,
+        scheduledEndTime: true,
         requiresChecklist: true,
         sendCleaningChecklist: true,
         sendSuppliesChecklist: true,
@@ -481,6 +491,17 @@ export async function POST(request: NextRequest) {
             name: true,
             code: true,
             address: true,
+          },
+        },
+        booking: {
+          select: {
+            id: true,
+            guestName: true,
+            checkInDate: true,
+            checkOutDate: true,
+            checkInTime: true,
+            checkOutTime: true,
+            status: true,
           },
         },
       },
@@ -539,21 +560,29 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    if (task.sendCleaningChecklist) {
-      const primaryTemplate = await findPrimaryChecklistTemplate(
-        task.organizationId,
-        task.propertyId
+    if (!task.sendCleaningChecklist) {
+      return NextResponse.json(
+        {
+          error:
+            "Δεν μπορεί να σταλεί ανάθεση αν δεν είναι ενεργή τουλάχιστον η λίστα καθαριότητας για αυτή την εργασία.",
+        },
+        { status: 400 }
       )
+    }
 
-      if (!primaryTemplate) {
-        return NextResponse.json(
-          {
-            error:
-              "Δεν μπορεί να σταλεί λίστα καθαριότητας γιατί το ακίνητο δεν έχει ενεργό κύριο πρότυπο.",
-          },
-          { status: 400 }
-        )
-      }
+    const primaryTemplate = await findPrimaryChecklistTemplate(
+      task.organizationId,
+      task.propertyId
+    )
+
+    if (!primaryTemplate) {
+      return NextResponse.json(
+        {
+          error:
+            "Δεν μπορεί να σταλεί λίστα καθαριότητας γιατί το ακίνητο δεν έχει ενεργό κύριο πρότυπο.",
+        },
+        { status: 400 }
+      )
     }
 
     const existingAssignments = await prisma.taskAssignment.findMany({
@@ -581,24 +610,33 @@ export async function POST(request: NextRequest) {
       },
     })
 
+    const blockingStatuses = [
+      "assigned",
+      "waiting_acceptance",
+      "accepted",
+      "in_progress",
+      "completed",
+    ]
+
     const blockingAssignment = existingAssignments.find((assignment) =>
-      ["accepted", "in_progress", "completed"].includes(
-        String(assignment.status || "").toLowerCase()
-      )
+      blockingStatuses.includes(String(assignment.status || "").toLowerCase())
     )
 
     if (blockingAssignment) {
-      let message = `Η εργασία είναι ήδη ανατεθειμένη στον συνεργάτη ${blockingAssignment.partner?.name || "—"}.`
+      const normalizedBlockingStatus = String(
+        blockingAssignment.status || ""
+      ).toLowerCase()
+      let message = `Η εργασία έχει ήδη σταλεί στον συνεργάτη ${blockingAssignment.partner?.name || "—"}.`
 
-      if (String(blockingAssignment.status).toLowerCase() === "accepted") {
+      if (normalizedBlockingStatus === "accepted") {
         message = `Η εργασία έχει ήδη αποδεχθεί από τον συνεργάτη ${blockingAssignment.partner?.name || "—"} και δεν μπορεί να ανατεθεί ξανά.`
       }
 
-      if (String(blockingAssignment.status).toLowerCase() === "in_progress") {
+      if (normalizedBlockingStatus === "in_progress") {
         message = `Η εργασία εκτελείται ήδη από τον συνεργάτη ${blockingAssignment.partner?.name || "—"} και δεν μπορεί να ανατεθεί ξανά.`
       }
 
-      if (String(blockingAssignment.status).toLowerCase() === "completed") {
+      if (normalizedBlockingStatus === "completed") {
         message = `Η εργασία έχει ήδη ολοκληρωθεί από τον συνεργάτη ${blockingAssignment.partner?.name || "—"} και δεν μπορεί να ανατεθεί ξανά.`
       }
 
@@ -652,14 +690,12 @@ export async function POST(request: NextRequest) {
         },
       })
 
-      if (task.sendCleaningChecklist) {
-        await ensureTaskChecklistRun({
-          taskId: task.id,
-          organizationId: task.organizationId,
-          propertyId: task.propertyId,
-          sendCleaningChecklist: true,
-        })
-      }
+      await ensureTaskChecklistRun({
+        taskId: task.id,
+        organizationId: task.organizationId,
+        propertyId: task.propertyId,
+        sendCleaningChecklist: true,
+      })
 
       if (task.sendSuppliesChecklist) {
         await ensureTaskSupplyRun({
@@ -707,6 +743,8 @@ export async function POST(request: NextRequest) {
                   guestName: true,
                   checkInDate: true,
                   checkOutDate: true,
+                  checkInTime: true,
+                  checkOutTime: true,
                   status: true,
                 },
               },
@@ -799,6 +837,13 @@ export async function POST(request: NextRequest) {
       return assignment
     })
 
+    const bookingLines = task.booking
+      ? [
+          `Checkout: ${formatDateForGreek(task.booking.checkOutDate)} · ${formatTime(task.booking.checkOutTime)}`,
+          `Check-in: ${formatDateForGreek(task.booking.checkInDate)} · ${formatTime(task.booking.checkInTime)}`,
+        ]
+      : []
+
     const mailResult = await sendMailSafe({
       to: partner.email,
       subject: `Νέα ανάθεση εργασίας: ${task.title}`,
@@ -808,7 +853,9 @@ export async function POST(request: NextRequest) {
         `Σου ανατέθηκε νέα εργασία.`,
         `Τίτλος εργασίας: ${task.title}`,
         `Ακίνητο: ${task.property.name}`,
-        `Ημερομηνία: ${formatDateForGreek(task.scheduledDate)}`,
+        `Ημερομηνία εργασίας: ${formatDateForGreek(task.scheduledDate)}`,
+        `Ώρα εργασίας: ${formatTime(task.scheduledStartTime)} - ${formatTime(task.scheduledEndTime)}`,
+        ...(bookingLines.length > 0 ? ["", ...bookingLines] : []),
         ``,
         `Για να δεις την ανάθεση και να απαντήσεις, άνοιξε το portal σου από το παρακάτω link:`,
         portalLink,
@@ -819,7 +866,13 @@ export async function POST(request: NextRequest) {
           <p>Σου ανατέθηκε νέα εργασία.</p>
           <p><strong>Τίτλος εργασίας:</strong> ${task.title}</p>
           <p><strong>Ακίνητο:</strong> ${task.property.name}</p>
-          <p><strong>Ημερομηνία:</strong> ${formatDateForGreek(task.scheduledDate)}</p>
+          <p><strong>Ημερομηνία εργασίας:</strong> ${formatDateForGreek(task.scheduledDate)}</p>
+          <p><strong>Ώρα εργασίας:</strong> ${formatTime(task.scheduledStartTime)} - ${formatTime(task.scheduledEndTime)}</p>
+          ${
+            bookingLines.length > 0
+              ? `<p><strong>${bookingLines[0]}</strong></p><p><strong>${bookingLines[1]}</strong></p>`
+              : ""
+          }
           <p>Για να δεις την ανάθεση, να απαντήσεις και να εκτελέσεις τις ενότητες εργασίας, άνοιξε το portal σου:</p>
           <p>
             <a href="${portalLink}" target="_blank" rel="noreferrer">
