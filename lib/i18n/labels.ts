@@ -41,6 +41,8 @@ function unknownLabel(language: AppLanguage) {
   return language === "en" ? "Unknown value" : "Άγνωστη τιμή"
 }
 
+export type StatusTone = "slate" | "blue" | "amber" | "green" | "red" | "violet"
+
 export function getTaskTypeLabel(language: AppLanguage, value: unknown) {
   const normalized = normalizeTaskType(value)
 
@@ -86,7 +88,7 @@ export function getTaskStatusLabel(language: AppLanguage, value: unknown) {
       : {
           NEW: "Νέα",
           PENDING: "Εκκρεμεί",
-          ASSIGNED: "Ανατέθηκε",
+          ASSIGNED: "Ανατεθειμένη",
           WAITING_ACCEPTANCE: "Αναμονή αποδοχής",
           ACCEPTED: "Αποδεκτή",
           IN_PROGRESS: "Σε εξέλιξη",
@@ -99,6 +101,26 @@ export function getTaskStatusLabel(language: AppLanguage, value: unknown) {
   return labels[normalized]
 }
 
+export function getTaskStatusTone(value: unknown): StatusTone {
+  const normalized = normalizeTaskStatus(value)
+
+  if (normalized === "COMPLETED") return "green"
+  if (normalized === "CANCELLED") return "red"
+  if (normalized === "IN_PROGRESS") return "blue"
+  if (normalized === "ACCEPTED") return "green"
+  if (
+    normalized === "PENDING" ||
+    normalized === "NEW" ||
+    normalized === "ASSIGNED" ||
+    normalized === "WAITING_ACCEPTANCE" ||
+    normalized === "OVERDUE"
+  ) {
+    return "amber"
+  }
+
+  return "slate"
+}
+
 export function getAssignmentStatusLabel(
   language: AppLanguage,
   value: unknown
@@ -109,8 +131,10 @@ export function getAssignmentStatusLabel(
     language === "en"
       ? {
           PENDING: "Pending",
+          ASSIGNED: "Assigned",
           WAITING_ACCEPTANCE: "Waiting acceptance",
           ACCEPTED: "Accepted",
+          IN_PROGRESS: "In progress",
           REJECTED: "Rejected",
           CANCELLED: "Cancelled",
           COMPLETED: "Completed",
@@ -118,8 +142,10 @@ export function getAssignmentStatusLabel(
         }
       : {
           PENDING: "Εκκρεμεί",
+          ASSIGNED: "Ανατεθειμένη",
           WAITING_ACCEPTANCE: "Αναμονή αποδοχής",
           ACCEPTED: "Αποδεκτή",
+          IN_PROGRESS: "Σε εξέλιξη",
           REJECTED: "Απορρίφθηκε",
           CANCELLED: "Ακυρώθηκε",
           COMPLETED: "Ολοκληρώθηκε",
@@ -127,6 +153,24 @@ export function getAssignmentStatusLabel(
         }
 
   return labels[normalized]
+}
+
+export function getAssignmentStatusTone(value: unknown): StatusTone {
+  const normalized = normalizeAssignmentStatus(value)
+
+  if (normalized === "COMPLETED") return "green"
+  if (normalized === "REJECTED" || normalized === "CANCELLED") return "red"
+  if (normalized === "IN_PROGRESS") return "blue"
+  if (normalized === "ACCEPTED") return "green"
+  if (
+    normalized === "PENDING" ||
+    normalized === "ASSIGNED" ||
+    normalized === "WAITING_ACCEPTANCE"
+  ) {
+    return "amber"
+  }
+
+  return "slate"
 }
 
 export function getChecklistStatusLabel(
@@ -622,7 +666,7 @@ export function normalizeOperationalStatusForLabel(value: unknown): NormalizedOp
   if (s === "occupied") return "OCCUPIED"
   if (s === "no_task_coverage") return "NO_TASK_COVERAGE"
   if (s === "task_unaccepted") return "TASK_UNACCEPTED"
-  if (s === "waiting_cleaning") return "TASK_UNACCEPTED" // backward compat
+  if (s === "waiting_cleaning") return "TASK_UNACCEPTED"
   if (s === "task_in_progress") return "TASK_IN_PROGRESS"
   if (s === "awaiting_proof") return "AWAITING_PROOF"
   if (s === "ready") return "READY"

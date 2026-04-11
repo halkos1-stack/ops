@@ -22,8 +22,10 @@ export type NormalizedTaskStatus =
 
 export type NormalizedAssignmentStatus =
   | "PENDING"
+  | "ASSIGNED"
   | "WAITING_ACCEPTANCE"
   | "ACCEPTED"
+  | "IN_PROGRESS"
   | "REJECTED"
   | "CANCELLED"
   | "COMPLETED"
@@ -237,7 +239,9 @@ export function normalizeTaskStatus(value: unknown): NormalizedTaskStatus {
     raw === "ASSIGNED" ||
     loose === "assigned" ||
     loose === "ανατέθηκε" ||
-    loose === "ανατεθηκε"
+    loose === "ανατεθηκε" ||
+    loose === "ανατεθειμένη" ||
+    loose === "ανατεθειμενη"
   ) {
     return "ASSIGNED"
   }
@@ -321,6 +325,17 @@ export function normalizeAssignmentStatus(
   }
 
   if (
+    raw === "ASSIGNED" ||
+    loose === "assigned" ||
+    loose === "ανατέθηκε" ||
+    loose === "ανατεθηκε" ||
+    loose === "ανατεθειμένη" ||
+    loose === "ανατεθειμενη"
+  ) {
+    return "ASSIGNED"
+  }
+
+  if (
     raw === "WAITING_ACCEPTANCE" ||
     loose === "waiting acceptance" ||
     loose === "αναμονή αποδοχής" ||
@@ -336,6 +351,15 @@ export function normalizeAssignmentStatus(
     loose === "αποδεκτη"
   ) {
     return "ACCEPTED"
+  }
+
+  if (
+    raw === "IN_PROGRESS" ||
+    loose === "in progress" ||
+    loose === "σε εξέλιξη" ||
+    loose === "σε εξελιξη"
+  ) {
+    return "IN_PROGRESS"
   }
 
   if (

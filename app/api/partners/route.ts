@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { requireApiAppAccess, canAccessOrganization } from "@/lib/route-access"
+import { createSecureToken } from "@/lib/tokens"
 
 function normalizeString(value: unknown) {
   return String(value ?? "").trim()
@@ -20,6 +21,28 @@ function normalizePartnerStatus(value: unknown) {
 
 function buildPartnerCodeFromNumber(nextNumber: number) {
   return `PRT-${String(nextNumber).padStart(4, "0")}`
+}
+
+function getAppBaseUrl(req: NextRequest) {
+  const envUrl = process.env.NEXT_PUBLIC_APP_URL?.trim()
+  if (envUrl) {
+    return envUrl.replace(/\/+$/, "")
+  }
+
+  const origin = req.headers.get("origin")
+  if (origin) {
+    return origin.replace(/\/+$/, "")
+  }
+
+  const host = req.headers.get("host")
+  const protocol =
+    process.env.NODE_ENV === "development" ? "http" : "https"
+
+  if (host) {
+    return `${protocol}://${host}`
+  }
+
+  return "http://localhost:3000"
 }
 
 type TransactionClient = Omit<typeof prisma, "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends">
@@ -66,6 +89,7 @@ export async function GET(req: NextRequest) {
     const status = searchParams.get("status")
     const specialty = searchParams.get("specialty")
     const organizationIdParam = searchParams.get("organizationId")
+    const appBaseUrl = getAppBaseUrl(req)
 
     let organizationFilter: string | null = null
 
@@ -110,7 +134,58 @@ export async function GET(req: NextRequest) {
       },
     })
 
-    return NextResponse.json(partners)
+    const partnerIds = partners.map((partner) => partner.id)
+    const portalTokens = partnerIds.length
+      ? await prisma.partnerPortalAccessToken.findMany({
+          where: {
+            partnerId: {
+              in: partnerIds,
+            },
+            isActive: true,
+          },
+          orderBy: {
+            createdAt: "desc",
+          },
+          select: {
+            partnerId: true,
+            token: true,
+            expiresAt: true,
+          },
+        })
+      : []
+
+    const latestPortalByPartnerId = new Map<
+      string,
+      {
+        token: string
+        expiresAt: Date | null
+      }
+    >()
+
+    for (const portalToken of portalTokens) {
+      if (!latestPortalByPartnerId.has(portalToken.partnerId)) {
+        latestPortalByPartnerId.set(portalToken.partnerId, {
+          token: portalToken.token,
+          expiresAt: portalToken.expiresAt ?? null,
+        })
+      }
+    }
+
+    return NextResponse.json(
+      partners.map((partner) => {
+        const portalAccess = latestPortalByPartnerId.get(partner.id)
+        const portalUrl = portalAccess
+          ? `${appBaseUrl}/partner/${portalAccess.token}`
+          : null
+
+        return {
+          ...partner,
+          portalToken: portalAccess?.token ?? null,
+          portalUrl,
+          portalTokenExpiresAt: portalAccess?.expiresAt ?? null,
+        }
+      })
+    )
   } catch (error) {
     console.error("Partners GET error:", error)
 
@@ -131,6 +206,7 @@ export async function POST(req: NextRequest) {
 
     const { auth } = access
     const body = await req.json()
+    const appBaseUrl = getAppBaseUrl(req)
 
     let organizationId: string | null = null
 
@@ -200,10 +276,10 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const partner = await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const code = await generateNextPartnerCode(tx as TransactionClient, organizationId!)
 
-      return tx.partner.create({
+      const partner = await tx.partner.create({
         data: {
           organizationId: organizationId!,
           code,
@@ -232,12 +308,35 @@ export async function POST(req: NextRequest) {
           },
         },
       })
+
+      const portalAccess = await tx.partnerPortalAccessToken.create({
+        data: {
+          partnerId: partner.id,
+          token: createSecureToken(32),
+          isActive: true,
+        },
+        select: {
+          token: true,
+          expiresAt: true,
+        },
+      })
+
+      return {
+        partner,
+        portalToken: portalAccess.token,
+        portalTokenExpiresAt: portalAccess.expiresAt ?? null,
+      }
     })
 
     return NextResponse.json(
       {
         success: true,
-        partner,
+        partner: {
+          ...result.partner,
+          portalToken: result.portalToken,
+          portalUrl: `${appBaseUrl}/partner/${result.portalToken}`,
+          portalTokenExpiresAt: result.portalTokenExpiresAt,
+        },
       },
       { status: 201 }
     )
