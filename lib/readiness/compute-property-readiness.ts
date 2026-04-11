@@ -30,18 +30,8 @@ export type ReadinessConditionInput = PropertyConditionRuleInput & {
   mergeKey?: string | null
 }
 
-/**
- * Operational context που μπορεί να override το conditions-only readiness.
- * Όταν υπάρχει turnover εκκρεμότητα, η ετοιμότητα δεν μπορεί να είναι "ready"
- * ακόμα και αν δεν υπάρχουν active conditions.
- */
 export type ReadinessOperationalContext = {
-  /**
-   * Canonical readiness από το operational status module.
-   * Όταν "not_ready" λόγω turnover → override των conditions-based "ready".
-   */
   derivedReadinessStatus: "ready" | "borderline" | "not_ready" | "unknown"
-  /** Human-readable αιτιολόγηση για το operational override */
   operationalReason?: string | null
 }
 
@@ -49,12 +39,6 @@ export type ComputePropertyReadinessInput = {
   now?: Date
   nextCheckInAt?: Date | string | null
   conditions?: ReadinessConditionInput[]
-  /**
-   * Προαιρετικό operational context.
-   * Όταν παρέχεται και `derivedReadinessStatus === "not_ready"`,
-   * το αποτέλεσμα δεν επιστρέφει "ready" ακόμα και αν δεν υπάρχουν active conditions.
-   * Αυτό διασφαλίζει ότι το readiness αντικατοπτρίζει την πραγματική επιχειρησιακή αλήθεια.
-   */
   operationalContext?: ReadinessOperationalContext
 }
 
@@ -248,8 +232,8 @@ function buildReasonForCondition(
   if (condition.readinessImpact === "blocking") {
     return {
       code: "BLOCKING_CONDITION",
-      label: "Active blocking condition",
-      message: `"${condition.displayLabel}" remains active and blocks the property from being ready today.`,
+      label: "Ενεργή μπλοκαριστική συνθήκη",
+      message: `Η συνθήκη "${condition.displayLabel}" παραμένει ενεργή και μπλοκάρει την ετοιμότητα του ακινήτου σήμερα.`,
       conditionId: condition.id,
       conditionType: condition.conditionType,
       blockingStatus: condition.effectiveBlockingStatus,
@@ -261,8 +245,8 @@ function buildReasonForCondition(
   if (condition.effectiveManagerDecision === "allow_with_issue") {
     return {
       code: "ALLOW_WITH_ISSUE",
-      label: "Allowed with unresolved issue",
-      message: `"${condition.displayLabel}" is still active. The manager may allow operations, but the property stays borderline until the condition is explicitly resolved or dismissed.`,
+      label: "Επιτρέπεται με ανοιχτό θέμα",
+      message: `Η συνθήκη "${condition.displayLabel}" είναι ακόμη ενεργή. Ο διαχειριστής μπορεί να επιτρέψει τη λειτουργία, αλλά το ακίνητο παραμένει οριακό μέχρι να δηλωθεί ρητά ως επιλυμένη ή απορριφθείσα.`,
       conditionId: condition.id,
       conditionType: condition.conditionType,
       blockingStatus: condition.effectiveBlockingStatus,
@@ -274,8 +258,8 @@ function buildReasonForCondition(
   if (condition.isMonitoring) {
     return {
       code: "MONITORING_CONDITION",
-      label: "Active monitoring condition",
-      message: `"${condition.displayLabel}" remains under active monitoring. Monitoring is not resolution, so the property is not cleanly ready today.`,
+      label: "Συνθήκη σε παρακολούθηση",
+      message: `Η συνθήκη "${condition.displayLabel}" βρίσκεται ακόμη σε ενεργή παρακολούθηση. Η παρακολούθηση δεν ισοδυναμεί με επίλυση, άρα το ακίνητο δεν θεωρείται καθαρά έτοιμο σήμερα.`,
       conditionId: condition.id,
       conditionType: condition.conditionType,
       blockingStatus: condition.effectiveBlockingStatus,
@@ -286,8 +270,8 @@ function buildReasonForCondition(
 
   return {
     code: "WARNING_CONDITION",
-    label: "Active non-blocking condition",
-    message: `"${condition.displayLabel}" is still active. It does not fully block operations, but it keeps the property in a borderline readiness state until explicit closure.`,
+    label: "Ενεργή μη μπλοκαριστική συνθήκη",
+    message: `Η συνθήκη "${condition.displayLabel}" παραμένει ενεργή. Δεν μπλοκάρει πλήρως τη λειτουργία, αλλά κρατά το ακίνητο σε οριακή κατάσταση μέχρι να κλείσει ρητά.`,
     conditionId: condition.id,
     conditionType: condition.conditionType,
     blockingStatus: condition.effectiveBlockingStatus,
@@ -304,15 +288,15 @@ function buildActionsForCondition(
   if (condition.readinessImpact === "blocking") {
     actions.push({
       code: "RESOLVE_BLOCKING_CONDITIONS",
-      label: "Resolve blocking conditions",
-      message: `Explicitly resolve, dismiss, or remediate "${condition.displayLabel}" before treating the property as ready.`,
+      label: "Επίλυση μπλοκαριστικών συνθηκών",
+      message: `Επίλυσε, απόρριψε ή τεκμηρίωσε ρητά τη συνθήκη "${condition.displayLabel}" πριν θεωρηθεί το ακίνητο έτοιμο.`,
       conditionId: condition.id,
     })
   } else {
     actions.push({
       code: "REVIEW_ACTIVE_WARNINGS",
-      label: "Review active warning conditions",
-      message: `Review "${condition.displayLabel}" and explicitly close it when it is truly resolved. Active warning conditions keep the property borderline.`,
+      label: "Έλεγχος ενεργών προειδοποιήσεων",
+      message: `Έλεγξε τη συνθήκη "${condition.displayLabel}" και κλείσ' την ρητά όταν έχει πραγματικά επιλυθεί. Οι ενεργές προειδοποιήσεις κρατούν το ακίνητο οριακό.`,
       conditionId: condition.id,
     })
   }
@@ -320,8 +304,8 @@ function buildActionsForCondition(
   if (condition.isMonitoring) {
     actions.push({
       code: "MONITOR_ACTIVE_CONDITIONS",
-      label: "Continue monitoring",
-      message: `Continue monitoring "${condition.displayLabel}" until the property manager records a final resolved or dismissed state.`,
+      label: "Συνέχισε την παρακολούθηση",
+      message: `Συνέχισε την παρακολούθηση της συνθήκης "${condition.displayLabel}" μέχρι ο διαχειριστής να καταγράψει τελική επίλυση ή απόρριψη.`,
       conditionId: condition.id,
     })
   }
@@ -329,8 +313,8 @@ function buildActionsForCondition(
   if (!condition.effectiveManagerDecision) {
     actions.push({
       code: "WAIT_FOR_MANAGER_DECISION",
-      label: "Record manager decision",
-      message: `A manager decision is still missing for "${condition.displayLabel}". This does not resolve the condition by itself.`,
+      label: "Καταγραφή απόφασης διαχειριστή",
+      message: `Λείπει ακόμη απόφαση διαχειριστή για τη συνθήκη "${condition.displayLabel}". Αυτό από μόνο του δεν επιλύει τη συνθήκη.`,
       conditionId: condition.id,
     })
   }
@@ -350,27 +334,28 @@ function buildExplainText(params: {
   const operationalOverride =
     params.operationalContext?.derivedReadinessStatus === "not_ready" &&
     status === "ready"
-      ? " However, an operational turnover window is pending — the property cannot be confirmed ready until execution proof is returned."
+      ? " Ωστόσο υπάρχει ανοιχτό επιχειρησιακό παράθυρο turnover και το ακίνητο δεν μπορεί να επιβεβαιωθεί ως έτοιμο μέχρι να επιστραφεί απόδειξη εκτέλεσης."
       : ""
 
   const base =
     status === "ready"
-      ? "The property has no active conditions affecting readiness." + (operationalOverride || " It is available for the next guest.")
+      ? "Το ακίνητο δεν έχει ενεργές συνθήκες που να επηρεάζουν την ετοιμότητα." +
+        (operationalOverride || " Μπορεί να θεωρηθεί έτοιμο για τον επόμενο επισκέπτη.")
       : status === "borderline"
-        ? "The property is borderline because active conditions still exist, but they do not currently block operations outright."
+        ? "Το ακίνητο είναι οριακό επειδή υπάρχουν ακόμη ενεργές συνθήκες, αλλά δεν μπλοκάρουν πλήρως τη λειτουργία του."
         : status === "not_ready"
-          ? "The property is not ready because active blocking conditions still exist."
-          : "The property state cannot be confirmed from the available condition data."
+          ? "Το ακίνητο δεν είναι έτοιμο επειδή υπάρχουν ενεργές μπλοκαριστικές συνθήκες."
+          : "Η κατάσταση του ακινήτου δεν μπορεί να επιβεβαιωθεί από τα διαθέσιμα δεδομένα συνθηκών."
 
   const nextCheckInText = nextCheckInAt
-    ? ` Next check-in: ${nextCheckInAt.toISOString()}.`
-    : " No next check-in is currently linked."
+    ? ` Επόμενο check-in: ${nextCheckInAt.toISOString()}.`
+    : " Δεν υπάρχει αυτή τη στιγμή συνδεδεμένο επόμενο check-in."
 
-  const countsText = ` Active conditions: ${counts.activeConditions}. Blocking: ${counts.blockingConditions}. Warning or monitoring: ${counts.warningConditions}.`
+  const countsText = ` Ενεργές συνθήκες: ${counts.activeConditions}. Μπλοκαριστικές: ${counts.blockingConditions}. Προειδοποιήσεις ή παρακολούθηση: ${counts.warningConditions}.`
 
   const reasonsText =
     reasons.length > 0
-      ? ` Current state: ${reasons
+      ? ` Τρέχουσα εικόνα: ${reasons
           .slice(0, 3)
           .map((item) => item.message)
           .join(" ")}`
@@ -395,7 +380,7 @@ function sortReasons(reasons: ReadinessReason[]): ReadinessReason[] {
     const aPriority = priorityMap[a.code] ?? 999
     const bPriority = priorityMap[b.code] ?? 999
     if (aPriority !== bPriority) return aPriority - bPriority
-    return (a.message || "").localeCompare(b.message || "", "en")
+    return (a.message || "").localeCompare(b.message || "", "el")
   })
 }
 
@@ -413,7 +398,7 @@ function sortActions(actions: ReadinessNextAction[]): ReadinessNextAction[] {
     const aPriority = priorityMap[a.code] ?? 999
     const bPriority = priorityMap[b.code] ?? 999
     if (aPriority !== bPriority) return aPriority - bPriority
-    return (a.message || "").localeCompare(b.message || "", "en")
+    return (a.message || "").localeCompare(b.message || "", "el")
   })
 }
 
@@ -428,18 +413,18 @@ export function computePropertyReadiness(
     const reasons: ReadinessReason[] = [
       {
         code: "UNKNOWN_DATA",
-        label: "Missing canonical condition data",
+        label: "Λείπουν canonical δεδομένα συνθηκών",
         message:
-          "Canonical property conditions are missing, so the system cannot confirm the real property state for today.",
+          "Λείπουν οι canonical συνθήκες ακινήτου, οπότε το σύστημα δεν μπορεί να επιβεβαιώσει την πραγματική κατάσταση του ακινήτου σήμερα.",
       },
     ]
 
     const nextActions: ReadinessNextAction[] = [
       {
         code: "VERIFY_PROPERTY_STATE",
-        label: "Verify property truth",
+        label: "Επιβεβαίωση κατάστασης ακινήτου",
         message:
-          "Load or rebuild the canonical property conditions before using readiness operationally.",
+          "Φόρτωσε ή ξαναχτίσε τις canonical συνθήκες ακινήτου πριν χρησιμοποιήσεις λειτουργικά την ετοιμότητα.",
       },
     ]
 
@@ -475,34 +460,31 @@ export function computePropertyReadiness(
   const nextActions: ReadinessNextAction[] = []
 
   if (activeConditions.length === 0) {
-    // ΚΑΝΟΝΑΣ: Ακόμα και αν δεν υπάρχουν active conditions,
-    // αν το operational context δείχνει turnover pending → "not_ready".
-    // Η απόδειξη ετοιμότητας δεν έχει επιστραφεί ακόμα.
     const operationalPending =
       operationalContext?.derivedReadinessStatus === "not_ready"
 
     if (operationalPending) {
       pushUniqueReason(reasons, {
         code: "OPERATIONAL_PENDING",
-        label: "Operational execution pending",
+        label: "Εκκρεμεί επιχειρησιακή εκτέλεση",
         message:
           operationalContext?.operationalReason ||
-          "The turnover preparation window is open but execution has not been confirmed. The property cannot be treated as ready until proof of completion is returned.",
+          "Το παράθυρο προετοιμασίας turnover είναι ανοιχτό αλλά η εκτέλεση δεν έχει ακόμη επιβεβαιωθεί. Το ακίνητο δεν μπορεί να θεωρηθεί έτοιμο μέχρι να επιστραφεί απόδειξη ολοκλήρωσης.",
       })
 
       pushUniqueAction(nextActions, {
         code: "VERIFY_PROPERTY_STATE",
-        label: "Complete turnover execution",
+        label: "Ολοκλήρωση εκτέλεσης turnover",
         message:
-          "Ensure the assigned task has been accepted and all required checklists have been submitted before treating the property as ready.",
+          "Βεβαιώσου ότι η ανατεθειμένη εργασία έχει γίνει αποδεκτή και ότι έχουν υποβληθεί όλες οι απαιτούμενες λίστες πριν θεωρηθεί το ακίνητο έτοιμο.",
       })
 
       if (!nextCheckInAt) {
         pushUniqueReason(reasons, {
           code: "NO_NEXT_CHECKIN",
-          label: "No next check-in linked",
+          label: "Δεν υπάρχει συνδεδεμένο επόμενο check-in",
           message:
-            "No next check-in is currently linked. The property is still in an open turnover window.",
+            "Δεν υπάρχει αυτή τη στιγμή συνδεδεμένο επόμενο check-in. Το ακίνητο παραμένει σε ανοιχτό παράθυρο turnover.",
         })
       }
 
@@ -532,25 +514,25 @@ export function computePropertyReadiness(
 
     pushUniqueReason(reasons, {
       code: "NO_ACTIVE_CONDITIONS",
-      label: "No active conditions",
+      label: "Δεν υπάρχουν ενεργές συνθήκες",
       message:
-        "There are no active property conditions today. The property can be treated as ready.",
+        "Δεν υπάρχουν ενεργές συνθήκες ακινήτου σήμερα. Το ακίνητο μπορεί να θεωρηθεί έτοιμο.",
     })
 
     if (!nextCheckInAt) {
       pushUniqueReason(reasons, {
         code: "NO_NEXT_CHECKIN",
-        label: "No next check-in linked",
+        label: "Δεν υπάρχει συνδεδεμένο επόμενο check-in",
         message:
-          "No next check-in is currently linked. This does not reduce readiness because no active property conditions exist today.",
+          "Δεν υπάρχει αυτή τη στιγμή συνδεδεμένο επόμενο check-in. Αυτό δεν μειώνει την ετοιμότητα επειδή δεν υπάρχουν ενεργές συνθήκες ακινήτου σήμερα.",
       })
     }
 
     pushUniqueAction(nextActions, {
       code: "NO_ACTION_REQUIRED",
-      label: "No readiness action required",
+      label: "Δεν απαιτείται ενέργεια ετοιμότητας",
       message:
-        "No active property conditions require action before the next operation.",
+        "Δεν υπάρχουν ενεργές συνθήκες ακινήτου που να απαιτούν ενέργεια πριν από την επόμενη λειτουργία.",
     })
 
     const sortedReasons = sortReasons(reasons)
@@ -587,9 +569,9 @@ export function computePropertyReadiness(
   if (!nextCheckInAt) {
     pushUniqueReason(reasons, {
       code: "NO_NEXT_CHECKIN",
-      label: "No next check-in linked",
+      label: "Δεν υπάρχει συνδεδεμένο επόμενο check-in",
       message:
-        "The property still has active conditions today. No next check-in is currently linked, but readiness still follows the real property condition state.",
+        "Το ακίνητο έχει ακόμη ενεργές συνθήκες σήμερα. Δεν υπάρχει αυτή τη στιγμή συνδεδεμένο επόμενο check-in, αλλά η ετοιμότητα ακολουθεί την πραγματική κατάσταση των συνθηκών του ακινήτου.",
     })
   }
 
@@ -649,14 +631,14 @@ export function getReadinessStatusLabel(
 
   switch (status) {
     case "ready":
-      return "Ετοιμο"
+      return "Έτοιμο"
     case "borderline":
-      return "Οριακο"
+      return "Οριακό"
     case "not_ready":
-      return "Μη ετοιμο"
+      return "Μη έτοιμο"
     case "unknown":
     default:
-      return "Αγνωστο"
+      return "Άγνωστο"
   }
 }
 
@@ -696,7 +678,7 @@ export function getConditionDisplayTitle(
 
 export function summarizeReadinessReasons(reasons: ReadinessReason[]): string {
   if (!Array.isArray(reasons) || reasons.length === 0) {
-    return "No readiness reasons recorded."
+    return "Δεν έχουν καταγραφεί λόγοι ετοιμότητας."
   }
 
   return reasons.map((reason) => reason.message || reason.label).join(" ")
