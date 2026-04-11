@@ -1465,6 +1465,15 @@ function tryTranslateGenericActivityMessage(rawMessage: string, language: "el" |
     return buildActivityTaskCreatedFromBookingMessage(language, match[1].trim())
   }
 
+  if (
+    message.match(/^Previous pending assignment was replaced by a newer assignment before acceptance\.?$/i) ||
+    message.match(/^Η προηγούμενη εκκρεμής ανάθεση αντικαταστάθηκε από νεότερη ανάθεση πριν την αποδοχή\.?$/i)
+  ) {
+    return language === "en"
+      ? "Previous pending assignment was replaced by a newer assignment before acceptance."
+      : "Η προηγούμενη εκκρεμής ανάθεση αντικαταστάθηκε από νεότερη ανάθεση πριν την αποδοχή."
+  }
+
   if (language === "el") {
     message = message
       .replace(/^Partner\s+/i, "Ο συνεργάτης ")
@@ -1557,6 +1566,22 @@ function normalizeManagerDecisionLabel(value: unknown, language: "el" | "en") {
 
 function getReadinessLabel(value: unknown, language: "el" | "en") {
   return getReadinessLabelUI(language, value)
+}
+
+function getAssignmentStatusTone(value: unknown): "slate" | "blue" | "amber" | "green" | "red" | "violet" {
+  const normalized = normalizeAssignmentStatus(value)
+  if (normalized === "COMPLETED") return "green"
+  if (normalized === "REJECTED" || normalized === "CANCELLED") return "red"
+  if (normalized === "ACCEPTED" || normalized === "IN_PROGRESS") return "blue"
+  if (normalized === "PENDING" || normalized === "ASSIGNED" || normalized === "WAITING_ACCEPTANCE") return "amber"
+  return "slate"
+}
+
+function getPropertyStatusTone(value: unknown): "slate" | "blue" | "amber" | "green" | "red" | "violet" {
+  const normalized = String(value ?? "").trim().toLowerCase()
+  if (normalized === "active" || normalized === "ενεργό" || normalized === "ενεργο") return "green"
+  if (normalized === "inactive" || normalized === "ανενεργό" || normalized === "ανενεργο") return "slate"
+  return "slate"
 }
 
 function getSeverityTone(value: unknown): "green" | "amber" | "red" | "slate" {
@@ -2268,6 +2293,11 @@ export default function TaskDetailsPage() {
   const [savingAssignment, setSavingAssignment] = useState(false)
   const [savingChecklistEditor, setSavingChecklistEditor] = useState(false)
 
+  const [assignmentPortalUrl, setAssignmentPortalUrl] = useState<string | null>(null)
+  const [assignmentPortalLoading, setAssignmentPortalLoading] = useState(false)
+  const [assignmentPortalError, setAssignmentPortalError] = useState<string | null>(null)
+  const [assignmentPortalCopied, setAssignmentPortalCopied] = useState(false)
+
   async function loadTask() {
     try {
       setLoading(true)
@@ -2316,6 +2346,50 @@ export default function TaskDetailsPage() {
     if (!taskId) return
     void loadTask()
   }, [taskId, language])
+
+  async function handleLoadPortalLink(partnerId: string) {
+    try {
+      setAssignmentPortalLoading(true)
+      setAssignmentPortalError(null)
+      setAssignmentPortalUrl(null)
+      setAssignmentPortalCopied(false)
+
+      const res = await fetch(`/api/partners/${partnerId}/portal-link`, {
+        cache: "no-store",
+      })
+
+      const data = await res.json().catch(() => null)
+
+      if (!res.ok) {
+        throw new Error(data?.error || texts.assignment.portalLinkError)
+      }
+
+      const url = data?.portalAccess?.portalUrl || null
+
+      if (!url) {
+        throw new Error(texts.assignment.portalLinkMissing)
+      }
+
+      setAssignmentPortalUrl(url)
+    } catch (err) {
+      setAssignmentPortalError(
+        err instanceof Error ? err.message : texts.assignment.portalLinkError
+      )
+    } finally {
+      setAssignmentPortalLoading(false)
+    }
+  }
+
+  async function handleCopyPortalLink() {
+    if (!assignmentPortalUrl) return
+    try {
+      await navigator.clipboard.writeText(assignmentPortalUrl)
+      setAssignmentPortalCopied(true)
+      setTimeout(() => setAssignmentPortalCopied(false), 2000)
+    } catch {
+      setAssignmentPortalError(texts.assignment.portalLinkError)
+    }
+  }
 
   const activeAssignment = useMemo(
     () => getActiveAssignment(task?.assignments),
@@ -2847,7 +2921,7 @@ export default function TaskDetailsPage() {
 
               {task.property?.status ? (
                 <BadgeTooltip text={texts.property.sectionHelp}>
-                  <Badge tone="violet">
+                  <Badge tone={getPropertyStatusTone(task.property.status)}>
                     {getPropertyStatusLabel(language, task.property.status)}
                   </Badge>
                 </BadgeTooltip>
@@ -2974,6 +3048,29 @@ export default function TaskDetailsPage() {
                 )}
                 help={texts.schedule.durationHelp}
               />
+
+              {task.booking ? (
+                <>
+                  <FieldCard
+                    label={texts.schedule.bookingCheckOut}
+                    value={
+                      task.booking.checkOutDate
+                        ? `${formatDate(task.booking.checkOutDate, locale, texts.common.dash)}${task.booking.checkOutTime ? ` · ${formatTime(task.booking.checkOutTime, texts.common.dash)}` : ""}`
+                        : texts.common.dash
+                    }
+                    help={texts.schedule.bookingCheckOutHelp}
+                  />
+                  <FieldCard
+                    label={texts.schedule.bookingCheckIn}
+                    value={
+                      task.booking.checkInDate
+                        ? `${formatDate(task.booking.checkInDate, locale, texts.common.dash)}${task.booking.checkInTime ? ` · ${formatTime(task.booking.checkInTime, texts.common.dash)}` : ""}`
+                        : texts.common.dash
+                    }
+                    help={texts.schedule.bookingCheckInHelp}
+                  />
+                </>
+              ) : null}
             </div>
           </div>
 
@@ -2987,11 +3084,20 @@ export default function TaskDetailsPage() {
               <div className="mt-5 space-y-4">
                 <div className="rounded-2xl border border-slate-200 p-4">
                   <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-base font-semibold text-slate-950">
-                      {activeAssignment.partner?.name || texts.common.dash}
-                    </p>
+                    {activeAssignment.partner?.id ? (
+                      <Link
+                        href={`/partners/${activeAssignment.partner.id}`}
+                        className="text-base font-semibold text-blue-700 underline underline-offset-2 hover:text-blue-900"
+                      >
+                        {activeAssignment.partner.name}
+                      </Link>
+                    ) : (
+                      <p className="text-base font-semibold text-slate-950">
+                        {activeAssignment.partner?.name || texts.common.dash}
+                      </p>
+                    )}
                     <HelpDot text={texts.assignment.currentPartnerHelp} />
-                    <Badge tone="blue">
+                    <Badge tone={getAssignmentStatusTone(activeAssignment.status)}>
                       {getAssignmentStatusLabel(language, activeAssignment.status)}
                     </Badge>
                     <HelpDot text={texts.assignment.currentAssignmentStatusHelp} />
@@ -3011,28 +3117,62 @@ export default function TaskDetailsPage() {
                     />
                   </div>
 
-                  {activeAssignment.portalUrl ? (
-                    <div className="mt-4 rounded-2xl bg-slate-50 p-4">
-                      <p className="text-xs font-semibold tracking-wide text-slate-500">
-                        {texts.assignment.partnerPortalLink}
-                      </p>
-                      <a
-                        href={activeAssignment.portalUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="mt-2 inline-flex break-all text-sm font-medium text-slate-900 underline"
-                      >
-                        {activeAssignment.portalUrl}
-                      </a>
-                    </div>
-                  ) : null}
-
                   {activeAssignment.notes ? (
                     <div className="mt-4 rounded-2xl bg-slate-50 p-4">
                       <p className="text-xs font-semibold tracking-wide text-slate-500">
                         {texts.assignment.assignmentNotes}
                       </p>
                       <p className="mt-2 text-sm text-slate-700">{activeAssignment.notes}</p>
+                    </div>
+                  ) : null}
+
+                  {activeAssignment.partner?.id ? (
+                    <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                      <p className="text-xs font-semibold tracking-wide text-slate-500">
+                        {texts.assignment.partnerPortalLink}
+                      </p>
+
+                      {assignmentPortalError ? (
+                        <p className="mt-2 text-sm text-red-600">{assignmentPortalError}</p>
+                      ) : null}
+
+                      {assignmentPortalUrl ? (
+                        <div className="mt-2 space-y-3">
+                          <p className="break-all rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+                            {assignmentPortalUrl}
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={handleCopyPortalLink}
+                              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                            >
+                              {assignmentPortalCopied
+                                ? texts.assignment.portalLinkCopied
+                                : texts.assignment.portalLinkCopy}
+                            </button>
+                            <a
+                              href={assignmentPortalUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+                            >
+                              {texts.assignment.portalLinkOpen}
+                            </a>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={assignmentPortalLoading}
+                          onClick={() => handleLoadPortalLink(activeAssignment.partner!.id)}
+                          className="mt-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {assignmentPortalLoading
+                            ? texts.assignment.loadingPortalLink
+                            : texts.assignment.loadPortalLink}
+                        </button>
+                      )}
                     </div>
                   ) : null}
 

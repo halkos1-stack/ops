@@ -1433,12 +1433,17 @@ export function getTaskDetailsPageTexts(language: AppLanguage) {
         startTime: "Start time",
         endTime: "End time",
         updatedMessage: "Task schedule updated.",
+        bookingCheckIn: "Check-in",
+        bookingCheckInHelp: "The check-in date and time from the linked booking.",
+        bookingCheckOut: "Check-out",
+        bookingCheckOutHelp: "The check-out date and time from the linked booking.",
       },
 
       assignment: {
         sectionTitle: "Assignment",
         sectionHelp:
           "Here you can see which partner has this task, when it was assigned, when it was accepted and the notes for this specific task.",
+        partnerProfileLink: "Partner profile",
         currentPartnerHelp:
           "Ο συνεργάτης που είναι αυτή τη στιγμή συνδεδεμένος με την εργασία.",
         currentAssignmentStatusHelp:
@@ -1452,6 +1457,13 @@ export function getTaskDetailsPageTexts(language: AppLanguage) {
         acceptedAt: "Acceptance",
         acceptedAtHelp: "The time when the partner accepted the task.",
         partnerPortalLink: "Partner link",
+        loadPortalLink: "Load portal link",
+        loadingPortalLink: "Loading...",
+        portalLinkCopy: "Copy link",
+        portalLinkCopied: "Copied!",
+        portalLinkOpen: "Open portal",
+        portalLinkError: "Failed to load portal link.",
+        portalLinkMissing: "No active portal link found for this partner.",
         assignmentNotes: "Assignment notes",
         modalTitle: "Edit assignment",
         modalDescription: "Set or change the task partner.",
@@ -1704,12 +1716,17 @@ export function getTaskDetailsPageTexts(language: AppLanguage) {
       startTime: "Ώρα έναρξης",
       endTime: "Ώρα λήξης",
       updatedMessage: "Τα στοιχεία προγραμματισμού ενημερώθηκαν.",
+      bookingCheckIn: "Check-in",
+      bookingCheckInHelp: "Η ημερομηνία και ώρα check-in από τη συνδεδεμένη κράτηση.",
+      bookingCheckOut: "Check-out",
+      bookingCheckOutHelp: "Η ημερομηνία και ώρα check-out από τη συνδεδεμένη κράτηση.",
     },
 
     assignment: {
       sectionTitle: "Ανάθεση",
       sectionHelp:
         "Εδώ βλέπετε τον συνεργάτη που έχει τη συγκεκριμένη εργασία, πότε έγινε η ανάθεση, πότε έγινε η αποδοχή και τις σημειώσεις της συγκεκριμένης εργασίας.",
+      partnerProfileLink: "Προφίλ συνεργάτη",
       currentPartnerHelp:
         "Ο συνεργάτης που είναι αυτή τη στιγμή συνδεδεμένος με την εργασία.",
       currentAssignmentStatusHelp:
@@ -1723,6 +1740,13 @@ export function getTaskDetailsPageTexts(language: AppLanguage) {
       acceptedAt: "Αποδοχή",
       acceptedAtHelp: "Η στιγμή που ο συνεργάτης αποδέχθηκε την εργασία.",
       partnerPortalLink: "Link συνεργάτη",
+      loadPortalLink: "Φόρτωση portal link",
+      loadingPortalLink: "Φόρτωση...",
+      portalLinkCopy: "Αντιγραφή link",
+      portalLinkCopied: "Αντιγράφηκε!",
+      portalLinkOpen: "Άνοιγμα portal",
+      portalLinkError: "Αποτυχία φόρτωσης portal link.",
+      portalLinkMissing: "Δεν βρέθηκε ενεργό portal link για αυτόν τον συνεργάτη.",
       assignmentNotes: "Σημειώσεις ανάθεσης",
       modalTitle: "Επεξεργασία ανάθεσης",
       modalDescription: "Ορίστε ή αλλάξτε τον συνεργάτη της εργασίας.",
