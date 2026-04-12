@@ -91,8 +91,30 @@ export type PropertyPageDayStatusResult = {
   } | null
 }
 
-export type ComputePropertyPageDayStatusInput = {
-  now?: Date
+export type PropertyPageCanonicalInput = {
+  operationalStatus: string | null | undefined
+  operationalReason?: { el: string; en: string } | null
+  operationalExplanation?: { el: string; en: string } | null
+  operationalRelevantTask?: {
+    id: string
+    title: string
+    status: string | null
+    scheduledDate?: string | Date | null
+    latestAssignmentStatus?: string | null
+  } | null
+  operationalActiveBooking?: {
+    id: string
+    guestName?: string | null
+    checkInDate?: string | Date | null
+    checkOutDate?: string | Date | null
+  } | null
+  operationalAlertActive?: boolean | null
+  operationalAlertTask?: {
+    id: string
+    title: string
+    alertAt: string | Date
+  } | null
+  readinessStatus?: string | null | undefined
   bookings: PropertyPageDayStatusBooking[]
   tasks: PropertyPageDayStatusTask[]
   issues: PropertyPageDayStatusIssue[]
@@ -117,58 +139,39 @@ function safeArray<T>(value: T[] | null | undefined): T[] {
   return Array.isArray(value) ? value : []
 }
 
+function normalizeOperationalStatus(value: unknown):
+  | "occupied"
+  | "no_task_coverage"
+  | "task_unaccepted"
+  | "task_in_progress"
+  | "awaiting_proof"
+  | "ready"
+  | "borderline"
+  | "not_ready"
+  | "unknown" {
+  const normalized = normalizeText(value)
+  if (normalized === "occupied") return "occupied"
+  if (normalized === "no_task_coverage") return "no_task_coverage"
+  if (normalized === "task_unaccepted" || normalized === "waiting_cleaning") return "task_unaccepted"
+  if (normalized === "task_in_progress") return "task_in_progress"
+  if (normalized === "awaiting_proof") return "awaiting_proof"
+  if (normalized === "ready") return "ready"
+  if (normalized === "borderline" || normalized === "needs_attention") return "borderline"
+  if (normalized === "not_ready") return "not_ready"
+  return "unknown"
+}
+
+function normalizeReadinessStatus(value: unknown): "ready" | "borderline" | "not_ready" | "unknown" {
+  const normalized = normalizeText(value)
+  if (normalized === "ready") return "ready"
+  if (normalized === "borderline" || normalized === "needs_attention") return "borderline"
+  if (normalized === "not_ready") return "not_ready"
+  return "unknown"
+}
+
 function isCancelledBooking(status: unknown): boolean {
   const normalized = normalizeText(status)
   return normalized === "cancelled" || normalized === "canceled"
-}
-
-function isActiveStay(booking: PropertyPageDayStatusBooking, now: Date): boolean {
-  if (isCancelledBooking(booking.status)) return false
-
-  const checkIn = toDateOrNull(booking.checkInDate)
-  const checkOut = toDateOrNull(booking.checkOutDate)
-
-  if (!checkIn || !checkOut) return false
-
-  return now >= checkIn && now < checkOut
-}
-
-function isOpenTaskStatus(status: unknown): boolean {
-  const normalized = normalizeText(status)
-  return [
-    "new",
-    "pending",
-    "assigned",
-    "waiting_acceptance",
-    "accepted",
-    "in_progress",
-  ].includes(normalized)
-}
-
-function isCompletedTaskStatus(status: unknown): boolean {
-  return normalizeText(status) === "completed"
-}
-
-function isRejectedAssignmentStatus(status: unknown): boolean {
-  return normalizeText(status) === "rejected"
-}
-
-function isAcceptedAssignmentStatus(status: unknown): boolean {
-  const normalized = normalizeText(status)
-  return normalized === "accepted" || normalized === "in_progress" || normalized === "completed"
-}
-
-function isWaitingAcceptanceAssignmentStatus(status: unknown): boolean {
-  const normalized = normalizeText(status)
-  return normalized === "assigned" || normalized === "pending" || normalized === "waiting_acceptance"
-}
-
-function isManualTask(task: PropertyPageDayStatusTask): boolean {
-  return normalizeText(task.source) === "manual"
-}
-
-function isBookingTask(task: PropertyPageDayStatusTask): boolean {
-  return normalizeText(task.source) === "booking" || Boolean(task.bookingId)
 }
 
 function isOpenIssue(status: unknown): boolean {
@@ -183,25 +186,16 @@ function isDamageIssue(issueType: unknown): boolean {
 
 function isCriticalSupplyShortage(supply: PropertyPageDayStatusSupply): boolean {
   const state = normalizeText(supply.derivedState)
-  return Boolean(supply.isCritical) && (state === "missing" || state === "empty" || state === "low")
+  return Boolean(supply.isCritical) && ["missing", "empty", "low"].includes(state)
 }
 
-function getAlertTask(tasks: PropertyPageDayStatusTask[], now: Date) {
-  for (const task of tasks) {
-    if (!isOpenTaskStatus(task.status)) continue
-    if (!task.alertEnabled) continue
-    const alertAt = toDateOrNull(task.alertAt)
-    if (!alertAt) continue
-    if (alertAt <= now) {
-      return {
-        id: task.id,
-        title: task.title,
-        alertAt,
-      }
-    }
-  }
+function isOpenTaskStatus(status: unknown): boolean {
+  const normalized = normalizeText(status)
+  return ["new", "pending", "assigned", "waiting_acceptance", "accepted", "in_progress"].includes(normalized)
+}
 
-  return null
+function isManualTask(task: PropertyPageDayStatusTask): boolean {
+  return normalizeText(task.source) === "manual"
 }
 
 function getLatestFutureBooking(bookings: PropertyPageDayStatusBooking[], now: Date) {
@@ -232,30 +226,62 @@ function getLatestPastCheckout(bookings: PropertyPageDayStatusBooking[], now: Da
     })[0] ?? null
 }
 
-function getRelevantBookingTask(
-  tasks: PropertyPageDayStatusTask[],
-  booking: PropertyPageDayStatusBooking | null
-): PropertyPageDayStatusTask | null {
-  if (!booking) return null
+function getActiveBookingFromCanonical(
+  input: PropertyPageCanonicalInput,
+  bookings: PropertyPageDayStatusBooking[]
+): PropertyPageDayStatusBooking | null {
+  const active = input.operationalActiveBooking
+  if (!active) return null
 
-  const relevant = tasks
-    .filter((task) => {
-      if (!isOpenTaskStatus(task.status) && !isCompletedTaskStatus(task.status)) return false
-      if (!isBookingTask(task)) return false
-      if (!task.bookingId) return false
-      return task.bookingId === booking.id
-    })
+  const matched = bookings.find((booking) => booking.id === active.id)
+  if (matched) return matched
+
+  return {
+    id: active.id,
+    guestName: active.guestName ?? null,
+    checkInDate: active.checkInDate ?? null,
+    checkOutDate: active.checkOutDate ?? null,
+    status: null,
+  }
+}
+
+function getOpenVisibleTaskDuringStay(tasks: PropertyPageDayStatusTask[]): PropertyPageDayStatusTask | null {
+  return [...tasks]
+    .filter((task) => isOpenTaskStatus(task.status))
     .sort((a, b) => {
       const aDate = toDateOrNull(a.scheduledDate)?.getTime() ?? Number.MAX_SAFE_INTEGER
       const bDate = toDateOrNull(b.scheduledDate)?.getTime() ?? Number.MAX_SAFE_INTEGER
       return aDate - bDate
-    })
-
-  return relevant[0] ?? null
+    })[0] ?? null
 }
 
-function getOpenManualTask(tasks: PropertyPageDayStatusTask[]): PropertyPageDayStatusTask | null {
+function getManualOpenTask(tasks: PropertyPageDayStatusTask[]): PropertyPageDayStatusTask | null {
   return tasks.find((task) => isManualTask(task) && isOpenTaskStatus(task.status)) ?? null
+}
+
+function getPrimaryTaskFromCanonical(
+  input: PropertyPageCanonicalInput,
+  tasks: PropertyPageDayStatusTask[]
+): PropertyPageDayStatusTask | null {
+  const operational = normalizeOperationalStatus(input.operationalStatus)
+
+  if (operational === "occupied") {
+    return getOpenVisibleTaskDuringStay(tasks)
+  }
+
+  const relevant = input.operationalRelevantTask
+  if (!relevant) return null
+
+  const matched = tasks.find((task) => task.id === relevant.id)
+  if (matched) return matched
+
+  return {
+    id: relevant.id,
+    title: relevant.title,
+    status: relevant.status ?? null,
+    scheduledDate: relevant.scheduledDate ?? null,
+    latestAssignmentStatus: relevant.latestAssignmentStatus ?? null,
+  }
 }
 
 function buildLabels(status: PropertyPageDayStatus) {
@@ -276,7 +302,17 @@ function buildLabels(status: PropertyPageDayStatus) {
   return labels[status]
 }
 
-function buildReasons(status: PropertyPageDayStatus) {
+function buildReasons(status: PropertyPageDayStatus, input: PropertyPageCanonicalInput) {
+  const canonicalReason = input.operationalReason ?? null
+
+  if (canonicalReason) {
+    if (status === "HAS_GUESTS") return canonicalReason
+    if (status === "PENDING_BOOKING_TASK_CREATION") return canonicalReason
+    if (status === "WAITING_ACCEPTANCE") return canonicalReason
+    if (status === "IN_PROGRESS") return canonicalReason
+    if (status === "READY") return canonicalReason
+  }
+
   const reasons: Record<PropertyPageDayStatus, { el: string; en: string }> = {
     HAS_GUESTS: {
       el: "Υπάρχει ενεργή διαμονή αυτή τη στιγμή.",
@@ -299,12 +335,12 @@ function buildReasons(status: PropertyPageDayStatus) {
       en: "The task was not accepted by the partner and needs reassignment or another action.",
     },
     IN_PROGRESS: {
-      el: "Η εργασία βρίσκεται σε εκτέλεση.",
-      en: "The task is being executed.",
+      el: "Η εργασία βρίσκεται σε εκτέλεση ή εκκρεμεί η απαιτούμενη απόδειξη εκτέλεσης.",
+      en: "The task is being executed or required execution proof is still pending.",
     },
     EXECUTED: {
-      el: "Η εργασία έχει ολοκληρωθεί και το σύστημα περιμένει την τελική αξιολόγηση των blockers.",
-      en: "The task has completed and the system is evaluating blockers.",
+      el: "Η εργασία έχει ολοκληρωθεί και η σελίδα δείχνει πλέον τους πραγματικούς blockers που εμποδίζουν το ακίνητο να θεωρηθεί έτοιμο.",
+      en: "The task has completed and the page now shows the real blockers preventing readiness.",
     },
     READY: {
       el: "Δεν υπάρχουν ενεργά εμπόδια που να μπλοκάρουν το ακίνητο.",
@@ -315,34 +351,30 @@ function buildReasons(status: PropertyPageDayStatus) {
   return reasons[status]
 }
 
-function buildBlockers(params: {
-  primaryTask: PropertyPageDayStatusTask | null
-  issues: PropertyPageDayStatusIssue[]
-  supplies: PropertyPageDayStatusSupply[]
-  blockingConditionCount?: number | null
-}): PropertyPageDayStatusBlocker[] {
+function buildBlockers(
+  input: PropertyPageCanonicalInput,
+  normalizedStatus: PropertyPageDayStatus
+): PropertyPageDayStatusBlocker[] {
   const blockers: PropertyPageDayStatusBlocker[] = []
+  const operational = normalizeOperationalStatus(input.operationalStatus)
+  const readiness = normalizeReadinessStatus(input.readinessStatus)
+  const relevantTask = input.operationalRelevantTask
 
-  if (params.primaryTask) {
-    const assignmentStatus = normalizeText(params.primaryTask.latestAssignmentStatus)
-    const taskStatus = normalizeText(params.primaryTask.status)
-
-    if (assignmentStatus === "rejected") {
-      blockers.push({
-        type: "TASK_REJECTED",
-        message: "Η εργασία δεν έγινε αποδεκτή από τον συνεργάτη.",
-      })
-    }
-
-    if (!isCompletedTaskStatus(taskStatus) && taskStatus !== "in_progress" && taskStatus !== "accepted") {
-      blockers.push({
-        type: "TASK_NOT_EXECUTED",
-        message: "Η σχετική εργασία δεν έχει εκτελεστεί ακόμη.",
-      })
-    }
+  if (operational === "no_task_coverage") {
+    blockers.push({
+      type: "TASK_NOT_EXECUTED",
+      message: "Δεν έχει δημιουργηθεί ακόμη η εργασία του παραθύρου από την κράτηση.",
+    })
   }
 
-  const openIssues = params.issues.filter((issue) => isOpenIssue(issue.status))
+  if (normalizedStatus === "REJECTED") {
+    blockers.push({
+      type: "TASK_REJECTED",
+      message: "Η εργασία δεν έγινε αποδεκτή από τον συνεργάτη.",
+    })
+  }
+
+  const openIssues = safeArray(input.issues).filter((issue) => isOpenIssue(issue.status))
 
   if (openIssues.some((issue) => isDamageIssue(issue.issueType))) {
     blockers.push({
@@ -358,265 +390,105 @@ function buildBlockers(params: {
     })
   }
 
-  if (params.supplies.some((supply) => isCriticalSupplyShortage(supply))) {
+  if (safeArray(input.supplies).some((supply) => isCriticalSupplyShortage(supply))) {
     blockers.push({
       type: "CRITICAL_SUPPLY_SHORTAGE",
       message: "Υπάρχει σοβαρή έλλειψη αναλωσίμων.",
     })
   }
 
-  if (Number(params.blockingConditionCount || 0) > 0) {
+  if (Number(input.blockingConditionCount || 0) > 0) {
     blockers.push({
       type: "OTHER_BLOCKING_CONDITION",
       message: "Υπάρχουν ενεργές συνθήκες που μπλοκάρουν το ακίνητο.",
     })
   }
 
+  if (
+    blockers.length === 0 &&
+    readiness !== "ready" &&
+    normalizedStatus === "EXECUTED" &&
+    normalizeText(relevantTask?.status) === "completed"
+  ) {
+    blockers.push({
+      type: "OTHER_BLOCKING_CONDITION",
+      message: "Υπάρχει ενεργό εμπόδιο που δεν επιτρέπει στο ακίνητο να φανεί έτοιμο.",
+    })
+  }
+
   return blockers
 }
 
-export function computePropertyPageDayStatus(
-  input: ComputePropertyPageDayStatusInput
+function mapCanonicalToPageStatus(input: PropertyPageCanonicalInput): PropertyPageDayStatus {
+  const operational = normalizeOperationalStatus(input.operationalStatus)
+  const readiness = normalizeReadinessStatus(input.readinessStatus)
+  const relevantTask = input.operationalRelevantTask
+  const assignmentStatus = normalizeText(relevantTask?.latestAssignmentStatus)
+  const taskStatus = normalizeText(relevantTask?.status)
+
+  if (operational === "occupied") return "HAS_GUESTS"
+  if (operational === "no_task_coverage") return "PENDING_BOOKING_TASK_CREATION"
+
+  if (operational === "task_unaccepted") {
+    if (assignmentStatus === "rejected") return "REJECTED"
+    return "WAITING_ACCEPTANCE"
+  }
+
+  if (operational === "task_in_progress") {
+    if (taskStatus === "accepted" && assignmentStatus === "accepted") return "ACCEPTED"
+    return "IN_PROGRESS"
+  }
+
+  if (operational === "awaiting_proof") {
+    return "IN_PROGRESS"
+  }
+
+  if (operational === "ready" && readiness === "ready") {
+    return "READY"
+  }
+
+  if (readiness === "ready") {
+    return "READY"
+  }
+
+  return "EXECUTED"
+}
+
+export function buildPropertyPageDayStatusFromCanonical(
+  input: PropertyPageCanonicalInput
 ): PropertyPageDayStatusResult {
-  const now = input.now instanceof Date ? input.now : new Date()
+  const now = new Date()
   const bookings = safeArray(input.bookings)
   const tasks = safeArray(input.tasks)
-  const issues = safeArray(input.issues)
-  const supplies = safeArray(input.supplies)
-
-  const activeStayBooking = bookings.find((booking) => isActiveStay(booking, now)) ?? null
+  const activeStayBooking = getActiveBookingFromCanonical(input, bookings)
   const nextCheckOutBooking = activeStayBooking
   const nextCheckInBooking = getLatestFutureBooking(bookings, now)
-  const latestPastCheckout = getLatestPastCheckout(bookings, now)
-  const turnoverSourceBooking = latestPastCheckout
-  const primaryTask = getRelevantBookingTask(tasks, turnoverSourceBooking)
-  const manualOpenTask = getOpenManualTask(tasks)
-  const alertTask = getAlertTask(tasks, now)
+  const turnoverSourceBooking = activeStayBooking ? null : getLatestPastCheckout(bookings, now)
+  const primaryTask = getPrimaryTaskFromCanonical(input, tasks)
+  const manualOpenTask = getManualOpenTask(tasks)
+  const status = mapCanonicalToPageStatus(input)
+  const blockers = buildBlockers(input, status)
 
-  if (activeStayBooking) {
-    const status: PropertyPageDayStatus = "HAS_GUESTS"
-    return {
-      status,
-      label: buildLabels(status),
-      reason: buildReasons(status),
-      hasGuests: true,
-      activeStayBooking,
-      nextCheckOutBooking,
-      nextCheckInBooking,
-      turnoverSourceBooking: null,
-      primaryTask,
-      manualOpenTask,
-      blockers: [],
-      showReady: false,
-      alertActive: Boolean(alertTask),
-      alertTask,
-    }
-  }
-
-  if (turnoverSourceBooking && !primaryTask) {
-    const status: PropertyPageDayStatus = "PENDING_BOOKING_TASK_CREATION"
-    return {
-      status,
-      label: buildLabels(status),
-      reason: buildReasons(status),
-      hasGuests: false,
-      activeStayBooking: null,
-      nextCheckOutBooking: null,
-      nextCheckInBooking,
-      turnoverSourceBooking,
-      primaryTask: null,
-      manualOpenTask,
-      blockers: [
-        {
-          type: "TASK_NOT_EXECUTED",
-          message: "Δεν έχει δημιουργηθεί ακόμη η εργασία του παραθύρου από την κράτηση.",
-        },
-      ],
-      showReady: false,
-      alertActive: Boolean(alertTask),
-      alertTask,
-    }
-  }
-
-  if (primaryTask) {
-    const assignmentStatus = normalizeText(primaryTask.latestAssignmentStatus)
-    const taskStatus = normalizeText(primaryTask.status)
-
-    if (isRejectedAssignmentStatus(assignmentStatus)) {
-      const status: PropertyPageDayStatus = "REJECTED"
-      return {
-        status,
-        label: buildLabels(status),
-        reason: buildReasons(status),
-        hasGuests: false,
-        activeStayBooking: null,
-        nextCheckOutBooking: null,
-        nextCheckInBooking,
-        turnoverSourceBooking,
-        primaryTask,
-        manualOpenTask,
-        blockers: [
-          {
-            type: "TASK_REJECTED",
-            message: "Η εργασία δεν έγινε αποδεκτή από τον συνεργάτη.",
-          },
-        ],
-        showReady: false,
-        alertActive: Boolean(alertTask),
-        alertTask,
-      }
-    }
-
-    if (isWaitingAcceptanceAssignmentStatus(assignmentStatus) || taskStatus === "assigned" || taskStatus === "waiting_acceptance") {
-      const status: PropertyPageDayStatus = "WAITING_ACCEPTANCE"
-      return {
-        status,
-        label: buildLabels(status),
-        reason: buildReasons(status),
-        hasGuests: false,
-        activeStayBooking: null,
-        nextCheckOutBooking: null,
-        nextCheckInBooking,
-        turnoverSourceBooking,
-        primaryTask,
-        manualOpenTask,
-        blockers: [],
-        showReady: false,
-        alertActive: Boolean(alertTask),
-        alertTask,
-      }
-    }
-
-    if (isAcceptedAssignmentStatus(assignmentStatus) && taskStatus !== "in_progress" && taskStatus !== "completed") {
-      const status: PropertyPageDayStatus = "ACCEPTED"
-      return {
-        status,
-        label: buildLabels(status),
-        reason: buildReasons(status),
-        hasGuests: false,
-        activeStayBooking: null,
-        nextCheckOutBooking: null,
-        nextCheckInBooking,
-        turnoverSourceBooking,
-        primaryTask,
-        manualOpenTask,
-        blockers: [],
-        showReady: false,
-        alertActive: Boolean(alertTask),
-        alertTask,
-      }
-    }
-
-    if (taskStatus === "in_progress") {
-      const status: PropertyPageDayStatus = "IN_PROGRESS"
-      return {
-        status,
-        label: buildLabels(status),
-        reason: buildReasons(status),
-        hasGuests: false,
-        activeStayBooking: null,
-        nextCheckOutBooking: null,
-        nextCheckInBooking,
-        turnoverSourceBooking,
-        primaryTask,
-        manualOpenTask,
-        blockers: [],
-        showReady: false,
-        alertActive: Boolean(alertTask),
-        alertTask,
-      }
-    }
-
-    if (taskStatus === "completed") {
-      const blockers = buildBlockers({
-        primaryTask,
-        issues,
-        supplies,
-        blockingConditionCount: input.blockingConditionCount,
-      })
-
-      if (blockers.length === 0) {
-        const status: PropertyPageDayStatus = "READY"
-        return {
-          status,
-          label: buildLabels(status),
-          reason: buildReasons(status),
-          hasGuests: false,
-          activeStayBooking: null,
-          nextCheckOutBooking: null,
-          nextCheckInBooking,
-          turnoverSourceBooking,
-          primaryTask,
-          manualOpenTask,
-          blockers: [],
-          showReady: true,
-          alertActive: Boolean(alertTask),
-          alertTask,
-        }
-      }
-
-      const status: PropertyPageDayStatus = "EXECUTED"
-      return {
-        status,
-        label: buildLabels(status),
-        reason: buildReasons(status),
-        hasGuests: false,
-        activeStayBooking: null,
-        nextCheckOutBooking: null,
-        nextCheckInBooking,
-        turnoverSourceBooking,
-        primaryTask,
-        manualOpenTask,
-        blockers,
-        showReady: false,
-        alertActive: Boolean(alertTask),
-        alertTask,
-      }
-    }
-  }
-
-  const blockers = buildBlockers({
-    primaryTask,
-    issues,
-    supplies,
-    blockingConditionCount: input.blockingConditionCount,
-  })
-
-  if (blockers.length === 0) {
-    const status: PropertyPageDayStatus = "READY"
-    return {
-      status,
-      label: buildLabels(status),
-      reason: buildReasons(status),
-      hasGuests: false,
-      activeStayBooking: null,
-      nextCheckOutBooking: null,
-      nextCheckInBooking,
-      turnoverSourceBooking,
-      primaryTask,
-      manualOpenTask,
-      blockers: [],
-      showReady: true,
-      alertActive: Boolean(alertTask),
-      alertTask,
-    }
-  }
-
-  const status: PropertyPageDayStatus = "EXECUTED"
   return {
     status,
     label: buildLabels(status),
-    reason: buildReasons(status),
-    hasGuests: false,
-    activeStayBooking: null,
-    nextCheckOutBooking: null,
+    reason: buildReasons(status, input),
+    hasGuests: status === "HAS_GUESTS",
+    activeStayBooking,
+    nextCheckOutBooking,
     nextCheckInBooking,
     turnoverSourceBooking,
     primaryTask,
     manualOpenTask,
     blockers,
-    showReady: false,
-    alertActive: Boolean(alertTask),
-    alertTask,
+    showReady: status === "READY",
+    alertActive: Boolean(input.operationalAlertActive || input.operationalAlertTask),
+    alertTask: input.operationalAlertTask
+      ? {
+          id: input.operationalAlertTask.id,
+          title: input.operationalAlertTask.title,
+          alertAt: toDateOrNull(input.operationalAlertTask.alertAt) || new Date(),
+        }
+      : null,
   }
 }

@@ -7,8 +7,9 @@ import { useAppLanguage } from "@/components/i18n/LanguageProvider"
 import { getPropertyStatusLabel, getPropertyTypeLabel, getTaskStatusLabel } from "@/lib/i18n/labels"
 import PropertyDayView from "./PropertyDayView"
 import {
-  computePropertyPageDayStatus,
+  buildPropertyPageDayStatusFromCanonical,
   type PropertyPageDayStatusIssue,
+  type PropertyPageDayStatusResult,
   type PropertyPageDayStatusSupply,
   type PropertyPageDayStatusTask,
 } from "@/lib/properties/property-day-status"
@@ -94,7 +95,29 @@ type PropertyDetail = {
   status?: string | null
   updatedAt?: string | null
   openBlockingConditionCount?: number | null
+  operationalStatus?: string | null
+  operationalStatusReason?: { el: string; en: string } | null
+  operationalStatusExplanation?: { el: string; en: string } | null
   operationalAlertActive?: boolean | null
+  operationalAlertTask?: {
+    id: string
+    title: string
+    alertAt?: string | null
+  } | null
+  operationalActiveBooking?: {
+    id: string
+    guestName?: string | null
+    checkInDate?: string | null
+    checkOutDate?: string | null
+  } | null
+  operationalRelevantTask?: {
+    id: string
+    title: string
+    status?: string | null
+    scheduledDate?: string | null
+    latestAssignmentStatus?: string | null
+  } | null
+  readinessStatus?: string | null
   bookings?: PropertyBookingLite[]
   tasks?: PropertyTaskLite[]
   issues?: PropertyIssueLite[]
@@ -164,7 +187,10 @@ function mapIssueToDayStatusIssue(issue: PropertyIssueLite): PropertyPageDayStat
   }
 }
 
-function mapSupplyToDayStatusSupply(supply: PropertySupplyLite, language: "el" | "en"): PropertyPageDayStatusSupply {
+function mapSupplyToDayStatusSupply(
+  supply: PropertySupplyLite,
+  language: "el" | "en"
+): PropertyPageDayStatusSupply {
   return {
     id: supply.id,
     displayName: getSupplyDisplayName(supply, language),
@@ -425,21 +451,35 @@ export default function PropertyDetailPageRefactor() {
   const issues = useMemo(() => safeArray(property?.issues), [property])
   const supplies = useMemo(() => safeArray(property?.propertySupplies), [property])
 
-  const dayStatus = useMemo(() => {
-    return computePropertyPageDayStatus({
+  const dayStatus: PropertyPageDayStatusResult | null = useMemo(() => {
+    if (!property) return null
+
+    return buildPropertyPageDayStatusFromCanonical({
+      operationalStatus: property.operationalStatus,
+      operationalReason: property.operationalStatusReason ?? null,
+      operationalExplanation: property.operationalStatusExplanation ?? null,
+      operationalRelevantTask: property.operationalRelevantTask ?? null,
+      operationalActiveBooking: property.operationalActiveBooking ?? null,
+      operationalAlertActive: property.operationalAlertActive ?? false,
+      operationalAlertTask: property.operationalAlertTask ?? null,
+      readinessStatus: property.readinessStatus,
       bookings,
       tasks: tasks.map(mapTaskToDayStatusTask),
       issues: issues.map(mapIssueToDayStatusIssue),
       supplies: supplies.map((item) => mapSupplyToDayStatusSupply(item, language)),
-      blockingConditionCount: property?.openBlockingConditionCount || 0,
+      blockingConditionCount: property.openBlockingConditionCount || 0,
     })
-  }, [bookings, tasks, issues, supplies, property?.openBlockingConditionCount, language])
+  }, [property, bookings, tasks, issues, supplies, language])
 
   const damages = useMemo(() => issues.filter((issue) => isDamageIssue(issue)), [issues])
   const technicalIssues = useMemo(() => issues.filter((issue) => !isDamageIssue(issue)), [issues])
 
   if (loading) {
-    return <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"><div className="text-sm text-slate-500">Φόρτωση ακινήτου...</div></div>
+    return (
+      <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="text-sm text-slate-500">Φόρτωση ακινήτου...</div>
+      </div>
+    )
   }
 
   if (error || !property) {
@@ -490,7 +530,7 @@ export default function PropertyDetailPageRefactor() {
         </div>
       </section>
 
-      {tab === "day" ? (
+      {tab === "day" && dayStatus ? (
         <PropertyDayView
           propertyId={property.id}
           propertyName={property.name}
