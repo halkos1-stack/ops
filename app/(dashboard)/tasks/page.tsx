@@ -4,24 +4,24 @@ import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useAppLanguage } from "@/components/i18n/LanguageProvider"
-import { isTaskAlertActive } from "@/components/tasks/task-ui"
+import { TaskCard } from "@/components/tasks/TaskCard"
+import {
+  buildCanonicalTaskInfoItems,
+  getAssignmentStatusBadgeClasses,
+  getTaskStatusBadgeClasses,
+  getTaskSurfaceTone,
+  isTaskAlertActive,
+} from "@/components/tasks/task-ui"
 import {
   getAssignmentStatusLabel,
   getChecklistStatusLabel,
-  getPriorityLabel,
   getTaskStatusLabel,
-  getTaskTypeLabel,
 } from "@/lib/i18n/labels"
 import {
   normalizeChecklistStatus,
-  normalizePriority,
   normalizeTaskStatus,
   normalizeTaskTitleText,
 } from "@/lib/i18n/normalizers"
-import {
-  getReadinessBadgeClasses,
-  getReadinessLabel,
-} from "@/lib/readiness/readiness-ui"
 
 type ScopeFilter = "all" | "open"
 
@@ -61,6 +61,12 @@ type TaskRow = {
     id: string
     code: string
     name: string
+    nextCheckInAt?: string | null
+  } | null
+  booking?: {
+    id: string
+    checkOutDate?: string | null
+    checkInDate?: string | null
   } | null
   assignments?: Array<{
     id: string
@@ -100,6 +106,7 @@ type TaskRow = {
   sendSuppliesChecklist?: boolean
   propertyReadiness?: {
     status: string | null
+    nextCheckInAt?: string | null
   } | null
 }
 
@@ -139,23 +146,11 @@ function getTasksPageTexts(language: "el" | "en") {
       activePropertyFilter: "Active property filter",
       noTasks: "No tasks found",
       noTasksSubtitle: "Try changing the filters.",
-      task: "Task",
-      date: "Date",
-      checklists: "Checklists",
-      actions: "Actions",
-      propertyColumn: "Property",
-      partnerColumn: "Partner",
-      statusColumn: "Status",
-      typeColumn: "Type",
-      priorityColumn: "Priority",
       viewTask: "View task",
       viewProperty: "View property",
-      cleaning: "Cleaning",
-      supplies: "Supplies",
       none: "—",
       openScopeChip: "Open tasks",
       allScopeChip: "All tasks",
-      detailsInsideTask: "Details are available inside the task page.",
       stateAllTitle: "All tasks view",
       stateAllDescription:
         "This view includes the full task history across all statuses.",
@@ -170,8 +165,7 @@ function getTasksPageTexts(language: "el" | "en") {
       statePropertyNext: "Review property workload",
       tableTitle: "Task list",
       tableSubtitle:
-        "Open each task for full operational detail, assignment, checklists and history.",
-      dateTimeNotAvailable: "Not available",
+        "Unified task display across operational list and dashboard views.",
       nextStepLabel: "Next step:",
       countsTitle: "Operational volume",
       totalTasks: "Total tasks",
@@ -193,6 +187,16 @@ function getTasksPageTexts(language: "el" | "en") {
       checklistPending: "Pending",
       checklistSubmitted: "Submitted",
       checklistCompleted: "Completed",
+      checklistCleaning: "Cleaning",
+      checklistSupplies: "Supplies",
+      statusTooltip:
+        "The current status of the task in the OPS lifecycle.",
+      assignmentTooltip:
+        "The current assignment status of the latest partner assignment.",
+      alertTooltip:
+        "An active alert means this task needs immediate operational attention.",
+      stateTooltip:
+        "This panel explains the current state and the next operational step.",
     }
   }
 
@@ -220,23 +224,11 @@ function getTasksPageTexts(language: "el" | "en") {
     activePropertyFilter: "Ενεργό φίλτρο ακινήτου",
     noTasks: "Δεν βρέθηκαν εργασίες",
     noTasksSubtitle: "Δοκίμασε να αλλάξεις τα φίλτρα.",
-    task: "Εργασία",
-    date: "Ημερομηνία",
-    checklists: "Λίστες",
-    actions: "Ενέργειες",
-    propertyColumn: "Ακίνητο",
-    partnerColumn: "Συνεργάτης",
-    statusColumn: "Κατάσταση",
-    typeColumn: "Τύπος",
-    priorityColumn: "Προτεραιότητα",
     viewTask: "Προβολή εργασίας",
     viewProperty: "Προβολή ακινήτου",
-    cleaning: "Καθαριότητα",
-    supplies: "Αναλώσιμα",
     none: "—",
     openScopeChip: "Ανοικτές εργασίες",
     allScopeChip: "Όλες οι εργασίες",
-    detailsInsideTask: "Οι λεπτομέρειες εμφανίζονται μέσα στη σελίδα της εργασίας.",
     stateAllTitle: "Προβολή όλων των εργασιών",
     stateAllDescription:
       "Η προβολή περιλαμβάνει όλο το ιστορικό εργασιών, ανεξάρτητα από κατάσταση.",
@@ -251,8 +243,7 @@ function getTasksPageTexts(language: "el" | "en") {
     statePropertyNext: "Έλεγχος φόρτου ακινήτου",
     tableTitle: "Λίστα εργασιών",
     tableSubtitle:
-      "Άνοιξε κάθε εργασία για πλήρη λειτουργική εικόνα, ανάθεση, λίστες και ιστορικό.",
-    dateTimeNotAvailable: "Μη διαθέσιμο",
+      "Ενιαία προβολή εργασιών σε λειτουργική λίστα και πίνακα ελέγχου.",
     nextStepLabel: "Επόμενο βήμα:",
     countsTitle: "Λειτουργικός όγκος",
     totalTasks: "Σύνολο εργασιών",
@@ -267,13 +258,23 @@ function getTasksPageTexts(language: "el" | "en") {
     taskWaitingAcceptance: "Αναμονή αποδοχής",
     taskAccepted: "Αποδεκτή",
     taskInProgress: "Σε εξέλιξη",
-    taskCompleted: "Ολοκληρωμένη",
-    taskCancelled: "Ακυρωμένη",
+    taskCompleted: "Ολοκληρώθηκε",
+    taskCancelled: "Ακυρώθηκε",
     taskUnknown: "Άγνωστη",
     checklistNotSent: "Δεν στάλθηκε",
     checklistPending: "Εκκρεμεί",
     checklistSubmitted: "Υποβλήθηκε",
     checklistCompleted: "Ολοκληρώθηκε",
+    checklistCleaning: "Καθαριότητα",
+    checklistSupplies: "Αναλώσιμα",
+    statusTooltip:
+      "Η τρέχουσα κατάσταση της εργασίας στον κύκλο ζωής του OPS.",
+    assignmentTooltip:
+      "Η κατάσταση της τελευταίας ανάθεσης προς συνεργάτη.",
+    alertTooltip:
+      "Το ενεργό alert δείχνει ότι η εργασία χρειάζεται άμεση λειτουργική προσοχή.",
+    stateTooltip:
+      "Αυτό το πλαίσιο εξηγεί την τρέχουσα κατάσταση και το επόμενο βήμα.",
   }
 }
 
@@ -299,20 +300,6 @@ function formatDate(value: string | null | undefined, locale: string) {
   }).format(date)
 }
 
-function formatTimeRange(
-  start?: string | null,
-  end?: string | null,
-  fallback = "—"
-) {
-  const cleanStart = start?.trim()
-  const cleanEnd = end?.trim()
-
-  if (cleanStart && cleanEnd) return `${cleanStart} - ${cleanEnd}`
-  if (cleanStart) return cleanStart
-  if (cleanEnd) return cleanEnd
-  return fallback
-}
-
 function isOpenTaskStatus(status: string | null | undefined) {
   const normalized = normalizeTaskStatus(status)
   return [
@@ -323,55 +310,6 @@ function isOpenTaskStatus(status: string | null | undefined) {
     "ACCEPTED",
     "IN_PROGRESS",
   ].includes(normalized)
-}
-
-function badgeClassByTaskStatus(status: string | null | undefined) {
-  const normalized = normalizeTaskStatus(status)
-
-  if (normalized === "COMPLETED") {
-    return "rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200"
-  }
-
-  if (normalized === "IN_PROGRESS") {
-    return "rounded-full bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-700 ring-1 ring-sky-200"
-  }
-
-  if (normalized === "ACCEPTED") {
-    return "rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700 ring-1 ring-blue-200"
-  }
-
-  if (
-    normalized === "PENDING" ||
-    normalized === "NEW" ||
-    normalized === "ASSIGNED" ||
-    normalized === "WAITING_ACCEPTANCE"
-  ) {
-    return "rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 ring-1 ring-amber-200"
-  }
-
-  if (normalized === "CANCELLED") {
-    return "rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200"
-  }
-
-  return "rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200"
-}
-
-function badgeClassByPriority(priority: string | null | undefined) {
-  const normalized = normalizePriority(priority)
-
-  if (normalized === "URGENT") {
-    return "rounded-full bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 ring-1 ring-red-200"
-  }
-
-  if (normalized === "HIGH") {
-    return "rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 ring-1 ring-amber-200"
-  }
-
-  if (normalized === "NORMAL") {
-    return "rounded-full bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-700 ring-1 ring-sky-200"
-  }
-
-  return "rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200"
 }
 
 function getLatestAssignment(task: TaskRow) {
@@ -395,10 +333,8 @@ function getChecklistShortState(
     completed: normalized === "COMPLETED",
   })
 }
-function getChecklistTone(
-  status?: string | null,
-  completedAt?: string | null
-): TaskStateTone {
+
+function getChecklistBadgeClass(status?: string | null, completedAt?: string | null) {
   const normalized = normalizeChecklistStatus(status, {
     enabled: true,
     submitted: Boolean(completedAt),
@@ -406,14 +342,14 @@ function getChecklistTone(
   })
 
   if (normalized === "SUBMITTED" || normalized === "COMPLETED") {
-    return "success"
+    return "border border-emerald-200 bg-emerald-50 text-emerald-700"
   }
 
   if (normalized === "PENDING") {
-    return "warning"
+    return "border border-amber-200 bg-amber-50 text-amber-700"
   }
 
-  return "neutral"
+  return "border border-slate-200 bg-slate-100 text-slate-700"
 }
 
 function getStatePanelClassName(tone: TaskStateTone) {
@@ -460,9 +396,9 @@ function getTaskRowStateBlock(
       title: texts.taskCancelled,
       description:
         language === "en"
-          ? "This task has been cancelled and remains only for history."
-          : "Η εργασία αυτή έχει ακυρωθεί και παραμένει μόνο για ιστορικό.",
-      nextStep: language === "en" ? "Review task" : "Έλεγχος εργασίας",
+          ? "This task is cancelled and remains visible only for history and review."
+          : "Η εργασία έχει ακυρωθεί και παραμένει ορατή μόνο για ιστορικό και έλεγχο.",
+      nextStep: language === "en" ? "Open task" : "Άνοιγμα εργασίας",
     }
   }
 
@@ -472,9 +408,10 @@ function getTaskRowStateBlock(
       title: texts.taskCompleted,
       description:
         language === "en"
-          ? "This task has already been completed."
-          : "Η εργασία αυτή έχει ήδη ολοκληρωθεί.",
-      nextStep: language === "en" ? "Review result" : "Έλεγχος αποτελέσματος",
+          ? "The task has been completed and its operational result is already recorded."
+          : "Η εργασία έχει ολοκληρωθεί και το λειτουργικό της αποτέλεσμα έχει ήδη καταγραφεί.",
+      nextStep:
+        language === "en" ? "Review result" : "Έλεγχος αποτελέσματος",
     }
   }
 
@@ -484,8 +421,8 @@ function getTaskRowStateBlock(
       title: texts.taskNeedsAssignment,
       description:
         language === "en"
-          ? "The task exists but no current partner assignment has been set."
-          : "Η εργασία υπάρχει αλλά δεν έχει οριστεί τρέχουσα ανάθεση σε συνεργάτη.",
+          ? "The task exists but no current partner assignment has been defined yet."
+          : "Η εργασία υπάρχει αλλά δεν έχει οριστεί ακόμη τρέχουσα ανάθεση σε συνεργάτη.",
       nextStep: language === "en" ? "Assign partner" : "Ανάθεση συνεργάτη",
     }
   }
@@ -496,8 +433,8 @@ function getTaskRowStateBlock(
       title: texts.taskWaitingAcceptance,
       description:
         language === "en"
-          ? "The task is assigned and waiting for partner response."
-          : "Η εργασία είναι ανατεθειμένη και περιμένει απάντηση από τον συνεργάτη.",
+          ? "The task is assigned and currently waiting for partner response."
+          : "Η εργασία είναι ανατεθειμένη και αυτή τη στιγμή περιμένει απάντηση από τον συνεργάτη.",
       helper: latestAssignment.partner?.name || undefined,
       nextStep:
         language === "en" ? "Monitor acceptance" : "Παρακολούθηση αποδοχής",
@@ -510,8 +447,8 @@ function getTaskRowStateBlock(
       title: texts.taskAccepted,
       description:
         language === "en"
-          ? "The partner has accepted the task and it is ready for execution."
-          : "Ο συνεργάτης έχει αποδεχτεί την εργασία και είναι έτοιμη για εκτέλεση.",
+          ? "The task has been accepted and is ready for execution."
+          : "Η εργασία έχει αποδεχτεί και είναι έτοιμη για εκτέλεση.",
       helper: latestAssignment.partner?.name || undefined,
       nextStep:
         language === "en" ? "Track execution" : "Παρακολούθηση εκτέλεσης",
@@ -524,23 +461,11 @@ function getTaskRowStateBlock(
       title: texts.taskInProgress,
       description:
         language === "en"
-          ? "The task is in progress and needs operational follow-up."
-          : "Η εργασία είναι σε εξέλιξη και χρειάζεται λειτουργική παρακολούθηση.",
+          ? "The task is currently in progress and needs operational follow-up."
+          : "Η εργασία βρίσκεται σε εξέλιξη και χρειάζεται λειτουργική παρακολούθηση.",
       helper: latestAssignment.partner?.name || undefined,
       nextStep:
-        language === "en" ? "Review checklist status" : "Έλεγχος λιστών",
-    }
-  }
-
-  if (normalized === "PENDING" || normalized === "NEW") {
-    return {
-      tone: "neutral",
-      title: texts.taskNeedsAssignment,
-      description:
-        language === "en"
-          ? "The task is new and still waiting for operational setup."
-          : "Η εργασία είναι νέα και περιμένει ακόμη λειτουργική οργάνωση.",
-      nextStep: language === "en" ? "Open task" : "Άνοιγμα εργασίας",
+        language === "en" ? "Review execution" : "Έλεγχος εκτέλεσης",
     }
   }
 
@@ -549,8 +474,8 @@ function getTaskRowStateBlock(
     title: texts.taskUnknown,
     description:
       language === "en"
-        ? "Review the task details for its current operational state."
-        : "Έλεγξε τις λεπτομέρειες της εργασίας για την τρέχουσα λειτουργική της εικόνα.",
+        ? "Review the task details for the latest operational state."
+        : "Έλεγξε τις λεπτομέρειες της εργασίας για την πιο πρόσφατη λειτουργική κατάσταση.",
     nextStep: language === "en" ? "Open task" : "Άνοιγμα εργασίας",
   }
 }
@@ -615,7 +540,6 @@ export default function TasksPage() {
   const [tasks, setTasks] = useState<TaskRow[]>([])
   const [properties, setProperties] = useState<PropertyOption[]>([])
   const [partners, setPartners] = useState<PartnerOption[]>([])
-
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -638,7 +562,6 @@ export default function TasksPage() {
 
   function updateUrl(next: { propertyId?: string; scope?: ScopeFilter }) {
     const params = new URLSearchParams(searchParams.toString())
-
     const nextPropertyId =
       next.propertyId !== undefined ? next.propertyId : propertyFilter
     const nextScope = next.scope !== undefined ? next.scope : scopeFilter
@@ -736,10 +659,7 @@ export default function TasksPage() {
       (task) => normalizeTaskStatus(task.status) === "CANCELLED"
     )
     const withoutPartnerRows = tasks.filter((task) => !getLatestAssignment(task))
-    const attentionRows = tasks.filter((task) => {
-      const normalized = normalizeTaskStatus(task.status)
-      return normalized === "PENDING" || normalized === "WAITING_ACCEPTANCE"
-    })
+    const attentionRows = tasks.filter((task) => isTaskAlertActive(task))
 
     return {
       all: tasks.length,
@@ -750,7 +670,8 @@ export default function TasksPage() {
       attention: attentionRows.length,
     }
   }, [tasks])
-    const filteredTasks = useMemo(() => {
+
+  const filteredTasks = useMemo(() => {
     let rows = [...tasks]
 
     if (propertyFilter) {
@@ -782,17 +703,11 @@ export default function TasksPage() {
     }
 
     if (counterFilter === "attention") {
-      rows = rows.filter((task) => {
-        const normalized = normalizeTaskStatus(task.status)
-        return normalized === "PENDING" || normalized === "WAITING_ACCEPTANCE"
-      })
+      rows = rows.filter((task) => isTaskAlertActive(task))
     }
 
     if (partnerFilter) {
-      rows = rows.filter((task) => {
-        const latestAssignment = getLatestAssignment(task)
-        return latestAssignment?.partner?.id === partnerFilter
-      })
+      rows = rows.filter((task) => getLatestAssignment(task)?.partner?.id === partnerFilter)
     }
 
     if (statusFilter) {
@@ -820,6 +735,10 @@ export default function TasksPage() {
     }
 
     rows.sort((a, b) => {
+      const aAlert = isTaskAlertActive(a) ? 1 : 0
+      const bAlert = isTaskAlertActive(b) ? 1 : 0
+      if (aAlert !== bAlert) return bAlert - aAlert
+
       const aDate = a.scheduledDate ? new Date(a.scheduledDate).getTime() : 0
       const bDate = b.scheduledDate ? new Date(b.scheduledDate).getTime() : 0
       return bDate - aDate
@@ -917,8 +836,7 @@ export default function TasksPage() {
 
               {propertyNameByFilter ? (
                 <span className="inline-flex rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 ring-1 ring-blue-200">
-                  {texts.activePropertyFilter}: {propertyNameByFilter.name} ·{" "}
-                  {propertyNameByFilter.code}
+                  {texts.activePropertyFilter}: {propertyNameByFilter.name} · {propertyNameByFilter.code}
                 </span>
               ) : null}
             </div>
@@ -928,36 +846,25 @@ export default function TasksPage() {
             <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
               {texts.filteredResults}
             </div>
-            <div className="mt-1 text-3xl font-bold text-slate-950">
-              {filteredTasks.length}
-            </div>
+            <div className="mt-1 text-3xl font-bold text-slate-950">{filteredTasks.length}</div>
             <div className="text-xs text-slate-500">{texts.returnedByFilters}</div>
           </div>
         </div>
       </section>
 
-      <section className={getStatePanelClassName(pageStateBlock.tone)}>
+      <section className={getStatePanelClassName(pageStateBlock.tone)} title={texts.stateTooltip}>
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
-            <div className={getStateTitleClassName(pageStateBlock.tone)}>
-              {pageStateBlock.title}
-            </div>
-
-            <div className={getStateTextClassName(pageStateBlock.tone)}>
-              {pageStateBlock.description}
-            </div>
-
+            <div className={getStateTitleClassName(pageStateBlock.tone)}>{pageStateBlock.title}</div>
+            <div className={getStateTextClassName(pageStateBlock.tone)}>{pageStateBlock.description}</div>
             {pageStateBlock.helper ? (
-              <div className={getStateTextClassName(pageStateBlock.tone)}>
-                {pageStateBlock.helper}
-              </div>
+              <div className={getStateTextClassName(pageStateBlock.tone)}>{pageStateBlock.helper}</div>
             ) : null}
           </div>
 
           {pageStateBlock.nextStep ? (
             <div className="shrink-0 rounded-2xl border border-black/10 bg-white/70 px-3 py-2 text-sm font-medium text-slate-900">
-              {texts.nextStepLabel}{" "}
-              <span className="font-semibold">{pageStateBlock.nextStep}</span>
+              {texts.nextStepLabel} <span className="font-semibold">{pageStateBlock.nextStep}</span>
             </div>
           ) : null}
         </div>
@@ -969,48 +876,12 @@ export default function TasksPage() {
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-          <CounterButton
-            label={texts.totalTasks}
-            value={counters.all}
-            active={counterFilter === "all"}
-            onClick={() => setCounterFilter("all")}
-            tone="slate"
-          />
-          <CounterButton
-            label={texts.openTasks}
-            value={counters.open}
-            active={counterFilter === "open"}
-            onClick={() => setCounterFilter("open")}
-            tone="blue"
-          />
-          <CounterButton
-            label={texts.completedTasks}
-            value={counters.completed}
-            active={counterFilter === "completed"}
-            onClick={() => setCounterFilter("completed")}
-            tone="emerald"
-          />
-          <CounterButton
-            label={texts.cancelledTasks}
-            value={counters.cancelled}
-            active={counterFilter === "cancelled"}
-            onClick={() => setCounterFilter("cancelled")}
-            tone="red"
-          />
-          <CounterButton
-            label={texts.tasksWithoutPartner}
-            value={counters.without_partner}
-            active={counterFilter === "without_partner"}
-            onClick={() => setCounterFilter("without_partner")}
-            tone="amber"
-          />
-          <CounterButton
-            label={texts.tasksWithAlerts}
-            value={counters.attention}
-            active={counterFilter === "attention"}
-            onClick={() => setCounterFilter("attention")}
-            tone="amber"
-          />
+          <CounterButton label={texts.totalTasks} value={counters.all} active={counterFilter === "all"} onClick={() => setCounterFilter("all")} tone="slate" />
+          <CounterButton label={texts.openTasks} value={counters.open} active={counterFilter === "open"} onClick={() => setCounterFilter("open")} tone="blue" />
+          <CounterButton label={texts.completedTasks} value={counters.completed} active={counterFilter === "completed"} onClick={() => setCounterFilter("completed")} tone="emerald" />
+          <CounterButton label={texts.cancelledTasks} value={counters.cancelled} active={counterFilter === "cancelled"} onClick={() => setCounterFilter("cancelled")} tone="red" />
+          <CounterButton label={texts.tasksWithoutPartner} value={counters.without_partner} active={counterFilter === "without_partner"} onClick={() => setCounterFilter("without_partner")} tone="amber" />
+          <CounterButton label={texts.tasksWithAlerts} value={counters.attention} active={counterFilter === "attention"} onClick={() => setCounterFilter("attention")} tone="amber" />
         </div>
       </section>
 
@@ -1022,143 +893,73 @@ export default function TasksPage() {
 
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <div>
-            <label className="mb-2 block text-sm font-medium text-slate-700">
-              {texts.property}
-            </label>
-            <select
-              value={propertyFilter}
-              onChange={(e) => {
-                const nextValue = e.target.value
-                setPropertyFilter(nextValue)
-                updateUrl({ propertyId: nextValue })
-              }}
-              className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-slate-900"
-            >
+            <label className="mb-2 block text-sm font-medium text-slate-700">{texts.property}</label>
+            <select value={propertyFilter} onChange={(e) => { const nextValue = e.target.value; setPropertyFilter(nextValue); updateUrl({ propertyId: nextValue }) }} className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-slate-900">
               <option value="">{texts.allProperties}</option>
               {properties.map((property) => (
-                <option key={property.id} value={property.id}>
-                  {property.name} · {property.code}
-                </option>
+                <option key={property.id} value={property.id}>{property.name} · {property.code}</option>
               ))}
             </select>
           </div>
 
           <div>
-            <label className="mb-2 block text-sm font-medium text-slate-700">
-              {texts.viewScope}
-            </label>
-            <select
-              value={scopeFilter}
-              onChange={(e) => {
-                const nextValue = e.target.value === "open" ? "open" : "all"
-                setScopeFilter(nextValue)
-                updateUrl({ scope: nextValue })
-              }}
-              className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-slate-900"
-            >
+            <label className="mb-2 block text-sm font-medium text-slate-700">{texts.viewScope}</label>
+            <select value={scopeFilter} onChange={(e) => { const nextValue = e.target.value === "open" ? "open" : "all"; setScopeFilter(nextValue); updateUrl({ scope: nextValue }) }} className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-slate-900">
               <option value="all">{texts.allTasks}</option>
               <option value="open">{texts.openTasksOnly}</option>
             </select>
           </div>
 
           <div>
-            <label className="mb-2 block text-sm font-medium text-slate-700">
-              {texts.partner}
-            </label>
-            <select
-              value={partnerFilter}
-              onChange={(e) => setPartnerFilter(e.target.value)}
-              className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-slate-900"
-            >
+            <label className="mb-2 block text-sm font-medium text-slate-700">{texts.partner}</label>
+            <select value={partnerFilter} onChange={(e) => setPartnerFilter(e.target.value)} className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-slate-900">
               <option value="">{texts.allPartners}</option>
               {partners.map((partner) => (
-                <option key={partner.id} value={partner.id}>
-                  {partner.name}
-                </option>
+                <option key={partner.id} value={partner.id}>{partner.name}</option>
               ))}
             </select>
           </div>
 
           <div>
-            <label className="mb-2 block text-sm font-medium text-slate-700">
-              {texts.category}
-            </label>
-            <select
-              value={taskTypeFilter}
-              onChange={(e) => setTaskTypeFilter(e.target.value)}
-              className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-slate-900"
-            >
+            <label className="mb-2 block text-sm font-medium text-slate-700">{texts.category}</label>
+            <select value={taskTypeFilter} onChange={(e) => setTaskTypeFilter(e.target.value)} className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-slate-900">
               <option value="">{texts.allCategories}</option>
               {taskTypeOptions.map((value) => (
-                <option key={value} value={value}>
-                  {getTaskTypeLabel(language, value)}
-                </option>
+                <option key={value} value={value}>{value}</option>
               ))}
             </select>
           </div>
 
           <div>
-            <label className="mb-2 block text-sm font-medium text-slate-700">
-              {texts.status}
-            </label>
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-slate-900"
-            >
+            <label className="mb-2 block text-sm font-medium text-slate-700">{texts.status}</label>
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-slate-900">
               <option value="">{texts.allStatuses}</option>
-              <option value="PENDING">{getTaskStatusLabel(language, "PENDING")}</option>
-              <option value="ASSIGNED">{getTaskStatusLabel(language, "ASSIGNED")}</option>
-              <option value="WAITING_ACCEPTANCE">
-                {getTaskStatusLabel(language, "WAITING_ACCEPTANCE")}
-              </option>
-              <option value="ACCEPTED">{getTaskStatusLabel(language, "ACCEPTED")}</option>
-              <option value="IN_PROGRESS">{getTaskStatusLabel(language, "IN_PROGRESS")}</option>
-              <option value="COMPLETED">{getTaskStatusLabel(language, "COMPLETED")}</option>
-              <option value="CANCELLED">{getTaskStatusLabel(language, "CANCELLED")}</option>
+              {[
+                "PENDING",
+                "ASSIGNED",
+                "WAITING_ACCEPTANCE",
+                "ACCEPTED",
+                "IN_PROGRESS",
+                "COMPLETED",
+                "CANCELLED",
+              ].map((status) => (
+                <option key={status} value={status}>{getTaskStatusLabel(language, status)}</option>
+              ))}
             </select>
           </div>
 
           <div>
-            <label className="mb-2 block text-sm font-medium text-slate-700">
-              {texts.fromDate}
-            </label>
-            <input
-              type="date"
-              value={fromDate}
-              onChange={(e) => setFromDate(e.target.value)}
-              className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-slate-900"
-            />
+            <label className="mb-2 block text-sm font-medium text-slate-700">{texts.fromDate}</label>
+            <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-slate-900" />
           </div>
 
           <div>
-            <label className="mb-2 block text-sm font-medium text-slate-700">
-              {texts.toDate}
-            </label>
-            <input
-              type="date"
-              value={toDate}
-              onChange={(e) => setToDate(e.target.value)}
-              className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-slate-900"
-            />
+            <label className="mb-2 block text-sm font-medium text-slate-700">{texts.toDate}</label>
+            <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-slate-900" />
           </div>
 
           <div className="flex items-end">
-            <button
-              type="button"
-              onClick={() => {
-                setPropertyFilter("")
-                setScopeFilter("all")
-                setCounterFilter("all")
-                setPartnerFilter("")
-                setStatusFilter("")
-                setTaskTypeFilter("")
-                setFromDate("")
-                setToDate("")
-                updateUrl({ propertyId: "", scope: "all" })
-              }}
-              className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
+            <button type="button" onClick={() => { setPropertyFilter(""); setScopeFilter("all"); setCounterFilter("all"); setPartnerFilter(""); setStatusFilter(""); setTaskTypeFilter(""); setFromDate(""); setToDate(""); updateUrl({ propertyId: "", scope: "all" }) }} className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50">
               {texts.clearFilters}
             </button>
           </div>
@@ -1183,254 +984,113 @@ export default function TasksPage() {
             {filteredTasks.map((task) => {
               const latestAssignment = getLatestAssignment(task)
               const taskTitle = normalizeTaskTitleText(task.title, language)
-              const taskStatus = getTaskStatusLabel(language, task.status)
-              const taskType = getTaskTypeLabel(language, task.taskType)
-              const priority = getPriorityLabel(language, task.priority)
-
-              const cleaningRun =
-                task.cleaningChecklistRun ||
-                (task.sendCleaningChecklist ? task.checklistRun : null)
-
-              const suppliesRun = task.suppliesChecklistRun
-
-              const showCleaning = Boolean(task.sendCleaningChecklist || cleaningRun)
-              const showSupplies = Boolean(task.sendSuppliesChecklist || suppliesRun)
-
+              const taskStatusLabel = getTaskStatusLabel(language, task.status)
               const taskState = getTaskRowStateBlock(task, language)
               const alertActive = isTaskAlertActive(task)
+              const tone = getTaskSurfaceTone(task)
+
+              const cleaningRun = task.cleaningChecklistRun || (task.sendCleaningChecklist ? task.checklistRun : null)
+              const suppliesRun = task.suppliesChecklistRun
+
+              const checklistItems = [
+                {
+                  id: `cleaning-${task.id}`,
+                  label: `${texts.checklistCleaning} ${task.sendCleaningChecklist || cleaningRun ? getChecklistShortState(language, cleaningRun?.status || "pending", cleaningRun?.completedAt || null) : texts.checklistNotSent}`,
+                  className: getChecklistBadgeClass(cleaningRun?.status || null, cleaningRun?.completedAt || null),
+                  tooltip: language === "en" ? "Cleaning checklist state for this task." : "Κατάσταση λίστας καθαριότητας για αυτή την εργασία.",
+                },
+                {
+                  id: `supplies-${task.id}`,
+                  label: `${texts.checklistSupplies} ${task.sendSuppliesChecklist || suppliesRun ? getChecklistShortState(language, suppliesRun?.status || "pending", suppliesRun?.completedAt || null) : texts.checklistNotSent}`,
+                  className: getChecklistBadgeClass(suppliesRun?.status || null, suppliesRun?.completedAt || null),
+                  tooltip: language === "en" ? "Supplies checklist state for this task." : "Κατάσταση λίστας αναλωσίμων για αυτή την εργασία.",
+                },
+              ]
+
+              const badges = [
+                {
+                  id: `task-status-${task.id}`,
+                  label: taskStatusLabel,
+                  className: getTaskStatusBadgeClasses(task.status),
+                  tooltip: texts.statusTooltip,
+                },
+              ] as Array<{ id: string; label: string; className: string; tooltip?: string }>
+
+              const assignmentStatus = latestAssignment?.status || null
+              if (
+                assignmentStatus &&
+                normalizeTaskStatus(assignmentStatus) !== normalizeTaskStatus(task.status)
+              ) {
+                badges.push({
+                  id: `assignment-status-${task.id}`,
+                  label: getAssignmentStatusLabel(language, assignmentStatus),
+                  className: getAssignmentStatusBadgeClasses(assignmentStatus),
+                  tooltip: texts.assignmentTooltip,
+                })
+              }
+
+              if (alertActive) {
+                badges.push({
+                  id: `alert-${task.id}`,
+                  label: texts.tasksWithAlerts,
+                  className: tone.alertBadge,
+                  tooltip: texts.alertTooltip,
+                })
+              }
+
+              const subtitle = task.property?.name
+                ? task.property.code
+                  ? `${task.property.name} · ${task.property.code}`
+                  : task.property.name
+                : undefined
+
+              const infoItems = buildCanonicalTaskInfoItems({
+                language,
+                locale,
+                scheduledDate: task.scheduledDate || null,
+                scheduledStartTime: task.scheduledStartTime || null,
+                scheduledEndTime: task.scheduledEndTime || null,
+                checkOutDate: task.booking?.checkOutDate || null,
+                nextCheckInAt:
+                  task.propertyReadiness?.nextCheckInAt || task.property?.nextCheckInAt || null,
+                partnerName: latestAssignment?.partner?.name || null,
+              })
 
               return (
-                <article
+                <TaskCard
                   key={task.id}
-                  className={`rounded-3xl border p-4 ${
-                    alertActive
-                      ? "border-red-200 bg-red-50/70"
-                      : "border-slate-200 bg-white"
-                  }`}
-                >
-                  <div className="space-y-4">
-                    <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <div className="text-lg font-semibold text-slate-950">
-                            {taskTitle}
-                          </div>
-
-                          <span className={badgeClassByTaskStatus(task.status)}>
-                            {taskStatus}
-                          </span>
-
-                          <span className={badgeClassByPriority(task.priority)}>
-                            {priority}
-                          </span>
-
-                          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200">
-                            {taskType}
-                          </span>
-
-                          {alertActive ? (
-                            <span className="rounded-full border border-red-200 bg-red-100 px-2.5 py-1 text-xs font-semibold text-red-700">
-                              {texts.tasksWithAlerts}
-                            </span>
-                          ) : null}
-                        </div>
-
-                        <div className="mt-2 flex flex-wrap items-center gap-2">
-                          <span className="text-sm text-slate-500">
-                            {task.property?.name || texts.none}
-                            {task.property?.code ? ` · ${task.property.code}` : ""}
-                          </span>
-                          {task.propertyReadiness?.status ? (
-                            <span
-                              className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${getReadinessBadgeClasses(task.propertyReadiness.status)}`}
-                            >
-                              {getReadinessLabel(language, task.propertyReadiness.status)}
-                            </span>
-                          ) : null}
-                        </div>
-                      </div>
-
-                      <div className="flex flex-wrap gap-2">
-                        <Link
-                          href={`/tasks/${task.id}`}
-                          className={`inline-flex items-center justify-center rounded-2xl border px-4 py-2.5 text-sm font-medium ${
-                            alertActive
-                              ? "border-red-200 bg-white text-red-700 hover:bg-red-50"
-                              : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
-                          }`}
-                        >
-                          {texts.viewTask}
-                        </Link>
-
-                        {task.property?.id ? (
-                          <Link
-                            href={`/properties/${task.property.id}`}
-                            className="inline-flex items-center justify-center rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
-                          >
-                            {texts.viewProperty}
-                          </Link>
-                        ) : null}
-                      </div>
-                    </div>
-
-                    <div className={getStatePanelClassName(taskState.tone)}>
-                      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                        <div className="min-w-0">
-                          <div className={getStateTitleClassName(taskState.tone)}>
-                            {taskState.title}
-                          </div>
-
-                          <div className={getStateTextClassName(taskState.tone)}>
-                            {taskState.description}
-                          </div>
-
-                          {taskState.helper ? (
-                            <div className={getStateTextClassName(taskState.tone)}>
-                              {taskState.helper}
-                            </div>
-                          ) : null}
-                        </div>
-
-                        {taskState.nextStep ? (
-                          <div className="shrink-0 rounded-2xl border border-black/10 bg-white/70 px-3 py-2 text-sm font-medium text-slate-900">
-                            {texts.nextStepLabel}{" "}
-                            <span className="font-semibold">{taskState.nextStep}</span>
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
-
-                    <div className="grid gap-4 xl:grid-cols-[1.1fr_1fr_1fr]">
-                      <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
-                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                          {texts.propertyColumn}
-                        </div>
-
-                        <div className="mt-3">
-                          <div className="text-sm font-semibold text-slate-950">
-                            {task.property?.name || texts.none}
-                          </div>
-                          <div className="mt-1 text-sm text-slate-500">
-                            {task.property?.code || texts.none}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="rounded-3xl border border-slate-200 bg-white p-4">
-                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                          {texts.partnerColumn}
-                        </div>
-
-                        <div className="mt-3">
-                          <div className="text-sm font-semibold text-slate-950">
-                            {latestAssignment?.partner?.name || texts.none}
-                          </div>
-
-                          {latestAssignment ? (
-                            <div className="mt-2">
-                              <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700 ring-1 ring-slate-200">
-                                {getAssignmentStatusLabel(language, latestAssignment.status)}
-                              </span>
-                            </div>
-                          ) : (
-                            <div className="mt-1 text-sm text-slate-500">{texts.none}</div>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="rounded-3xl border border-slate-200 bg-white p-4">
-                        <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                          {texts.date}
-                        </div>
-
-                        <div className="mt-3">
-                          <div className="text-sm font-semibold text-slate-950">
-                            {formatDate(task.scheduledDate, locale)}
-                          </div>
-                          <div className="mt-1 text-sm text-slate-500">
-                            {formatTimeRange(
-                              task.scheduledStartTime,
-                              task.scheduledEndTime,
-                              texts.dateTimeNotAvailable
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
-                      <div className="mb-3 flex items-center justify-between gap-3">
-                        <div className="text-sm font-semibold text-slate-950">
-                          {texts.checklists}
-                        </div>
-                      </div>
-
-                      <div className="grid gap-3 md:grid-cols-2">
-                        <div className="rounded-2xl border border-slate-200 bg-white p-3">
-                          <div className="flex items-center justify-between gap-3">
-                            <span className="text-sm font-medium text-slate-900">
-                              {texts.cleaning}
-                            </span>
-                            <span
-                              className={
-                                getChecklistTone(
-                                  cleaningRun?.status || null,
-                                  cleaningRun?.completedAt || null
-                                ) === "success"
-                                  ? "rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200"
-                                  : getChecklistTone(
-                                        cleaningRun?.status || null,
-                                        cleaningRun?.completedAt || null
-                                      ) === "warning"
-                                    ? "rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 ring-1 ring-amber-200"
-                                    : "rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200"
-                              }
-                            >
-                              {showCleaning
-                                ? getChecklistShortState(
-                                    language,
-                                    cleaningRun?.status || "pending",
-                                    cleaningRun?.completedAt || null
-                                  )
-                                : texts.checklistNotSent}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="rounded-2xl border border-slate-200 bg-white p-3">
-                          <div className="flex items-center justify-between gap-3">
-                            <span className="text-sm font-medium text-slate-900">
-                              {texts.supplies}
-                            </span>
-                            <span
-                              className={
-                                getChecklistTone(
-                                  suppliesRun?.status || null,
-                                  suppliesRun?.completedAt || null
-                                ) === "success"
-                                  ? "rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200"
-                                  : getChecklistTone(
-                                        suppliesRun?.status || null,
-                                        suppliesRun?.completedAt || null
-                                      ) === "warning"
-                                    ? "rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 ring-1 ring-amber-200"
-                                    : "rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200"
-                              }
-                            >
-                              {showSupplies
-                                ? getChecklistShortState(
-                                    language,
-                                    suppliesRun?.status || "pending",
-                                    suppliesRun?.completedAt || null
-                                  )
-                                : texts.checklistNotSent}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </article>
+                  className={tone.card}
+                  title={taskTitle}
+                  titleHref={`/tasks/${task.id}`}
+                  subtitle={subtitle}
+                  badges={badges}
+                  infoItems={infoItems}
+                  checklistItems={checklistItems}
+                  statePanel={{
+                    className: getStatePanelClassName(taskState.tone),
+                    titleClassName: getStateTitleClassName(taskState.tone),
+                    textClassName: getStateTextClassName(taskState.tone),
+                    title: taskState.title,
+                    description: taskState.description,
+                    helper: taskState.helper,
+                    nextStepLabel: texts.nextStepLabel,
+                    nextStepValue: taskState.nextStep,
+                  }}
+                  primaryAction={{
+                    href: `/tasks/${task.id}`,
+                    label: texts.viewTask,
+                    className: tone.primaryAction,
+                  }}
+                  secondaryAction={
+                    task.property?.id
+                      ? {
+                          href: `/properties/${task.property.id}`,
+                          label: texts.viewProperty,
+                          className: tone.secondaryAction,
+                        }
+                      : undefined
+                  }
+                />
               )
             })}
           </div>
