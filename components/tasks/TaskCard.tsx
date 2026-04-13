@@ -3,13 +3,17 @@
 import Link from "next/link"
 
 type TaskCardBadge = {
+  id?: string
   label: string
   className: string
+  tooltip?: string
 }
 
 type TaskCardInfoItem = {
+  id?: string
   label: string
   value: string
+  tooltip?: string
 }
 
 type TaskCardStatePanel = {
@@ -44,6 +48,36 @@ type TaskCardProps = {
   }
 }
 
+function getStableItemKey(
+  explicitId: string | undefined,
+  parts: Array<string | undefined>,
+  index: number
+) {
+  const cleanId = explicitId?.trim()
+  if (cleanId) return cleanId
+
+  const fallback = parts
+    .map((part) => String(part || "").trim())
+    .filter(Boolean)
+    .join("-")
+
+  return fallback ? `${fallback}-${index}` : `task-card-item-${index}`
+}
+
+function dedupeBadges(items: TaskCardBadge[]) {
+  const seen = new Set<string>()
+
+  return items.filter((item) => {
+    const signature = `${String(item.label || "").trim()}|${String(item.className || "").trim()}`
+
+    if (!signature) return true
+    if (seen.has(signature)) return false
+
+    seen.add(signature)
+    return true
+  })
+}
+
 export function TaskCard({
   className = "",
   title,
@@ -58,6 +92,9 @@ export function TaskCard({
 }: TaskCardProps) {
   const infoGridClass =
     infoItems.length >= 3 ? "lg:grid-cols-3" : "md:grid-cols-2"
+
+  const visibleBadges = dedupeBadges(badges)
+  const visibleChecklistItems = dedupeBadges(checklistItems)
 
   return (
     <article className={`rounded-3xl border p-4 shadow-sm ${className}`.trim()}>
@@ -76,10 +113,11 @@ export function TaskCard({
                 <div className="text-base font-semibold text-slate-950">{title}</div>
               )}
 
-              {badges.map((badge) => (
+              {visibleBadges.map((badge, index) => (
                 <span
-                  key={`${badge.label}-${badge.className}`}
-                  className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${badge.className}`.trim()}
+                  key={getStableItemKey(badge.id, [badge.label, badge.className], index)}
+                  title={badge.tooltip}
+                  className={`inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-xs font-semibold ${badge.className}`.trim()}
                 >
                   {badge.label}
                 </span>
@@ -130,10 +168,11 @@ export function TaskCard({
         ) : null}
 
         <div className={`grid gap-3 ${infoGridClass}`}>
-          {infoItems.map((item) => (
+          {infoItems.map((item, index) => (
             <div
-              key={`${item.label}-${item.value}`}
+              key={getStableItemKey(item.id, [item.label, item.value], index)}
               className="rounded-2xl border border-slate-200 bg-white p-3"
+              title={item.tooltip}
             >
               <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                 {item.label}
@@ -143,11 +182,12 @@ export function TaskCard({
           ))}
         </div>
 
-        {checklistItems.length > 0 ? (
+        {visibleChecklistItems.length > 0 ? (
           <div className="flex flex-wrap gap-2 border-t border-slate-200 pt-3">
-            {checklistItems.map((item) => (
+            {visibleChecklistItems.map((item, index) => (
               <span
-                key={`${item.label}-${item.className}`}
+                key={getStableItemKey(item.id, [item.label, item.className], index)}
+                title={item.tooltip}
                 className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium shadow-sm ${item.className}`.trim()}
               >
                 {item.label}
