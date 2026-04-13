@@ -15,6 +15,8 @@ export type CanonicalTaskInfoItem = {
   tooltip: string
 }
 
+type DateLike = string | Date | null | undefined
+
 function normalizeTaskStatus(status: string | null | undefined) {
   return String(status || "").trim().toLowerCase()
 }
@@ -23,15 +25,63 @@ function normalizeAssignmentStatus(status: string | null | undefined) {
   return String(status || "").trim().toLowerCase()
 }
 
-function normalizeDateValue(value?: string | Date | null) {
+function normalizeTimeValue(value?: string | null) {
+  const text = String(value || "").trim()
+  if (!text) return null
+
+  const normalized = text.slice(0, 5)
+  return /^([01]\d|2[0-3]):([0-5]\d)$/.test(normalized) ? normalized : null
+}
+
+function buildDateFromDateOnly(value: string) {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!match) return null
+
+  const year = Number(match[1])
+  const month = Number(match[2]) - 1
+  const day = Number(match[3])
+  const date = new Date(year, month, day)
+
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+function normalizeDateValue(value?: DateLike) {
   if (!value) return null
-  const date = value instanceof Date ? value : new Date(value)
-  if (Number.isNaN(date.getTime())) return null
-  return date
+
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value
+  }
+
+  const text = String(value).trim()
+  if (!text) return null
+
+  const dateOnly = buildDateFromDateOnly(text)
+  if (dateOnly) return dateOnly
+
+  const date = new Date(text)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+function extractDateAndTimeParts(value?: DateLike) {
+  const date = normalizeDateValue(value)
+  if (!date) {
+    return {
+      date: null as Date | null,
+      time: null as string | null,
+    }
+  }
+
+  const hours = String(date.getHours()).padStart(2, "0")
+  const minutes = String(date.getMinutes()).padStart(2, "0")
+
+  return {
+    date,
+    time: `${hours}:${minutes}`,
+  }
 }
 
 function formatDateValue(
-  value: string | Date | null | undefined,
+  value: DateLike,
   locale: string,
   emptyText = "—"
 ) {
@@ -50,13 +100,28 @@ function formatTimeRange(
   end?: string | null,
   emptyText = "—"
 ) {
-  const cleanStart = String(start || "").trim()
-  const cleanEnd = String(end || "").trim()
+  const cleanStart = normalizeTimeValue(start)
+  const cleanEnd = normalizeTimeValue(end)
 
   if (cleanStart && cleanEnd) return `${cleanStart} - ${cleanEnd}`
   if (cleanStart) return cleanStart
   if (cleanEnd) return cleanEnd
   return emptyText
+}
+
+function formatDateTimeValue(input: {
+  date?: DateLike
+  time?: string | null
+  locale: string
+  emptyText?: string
+}) {
+  const emptyText = input.emptyText ?? "—"
+  const dateText = formatDateValue(input.date, input.locale, "")
+  const timeText = normalizeTimeValue(input.time)
+
+  if (!dateText && !timeText) return emptyText
+  if (dateText && timeText) return `${dateText} · ${timeText}`
+  return dateText || timeText || emptyText
 }
 
 function getCanonicalTaskTexts(language: CanonicalTaskCardLanguage) {
@@ -139,7 +204,7 @@ export function getTaskSurfaceTone(task: TaskAlertShape) {
       "border-slate-300 bg-white text-slate-700 hover:bg-slate-50",
     alertBadge:
       "border border-slate-200 bg-slate-100 text-slate-700",
-  }
+    }
 }
 
 export function getTaskStatusBadgeClasses(status: string | null | undefined) {
@@ -182,7 +247,11 @@ export function getAssignmentStatusBadgeClasses(
     return "border border-sky-200 bg-sky-50 text-sky-700"
   }
 
-  if (normalized === "assigned" || normalized === "waiting_acceptance" || normalized === "pending") {
+  if (
+    normalized === "assigned" ||
+    normalized === "waiting_acceptance" ||
+    normalized === "pending"
+  ) {
     return "border border-amber-200 bg-amber-50 text-amber-700"
   }
 
@@ -196,34 +265,42 @@ export function getAssignmentStatusBadgeClasses(
 export function buildCanonicalTaskInfoItems(input: {
   language: CanonicalTaskCardLanguage
   locale: string
-  scheduledDate?: string | Date | null
+  scheduledDate?: DateLike
   scheduledStartTime?: string | null
   scheduledEndTime?: string | null
-  checkOutDate?: string | Date | null
-  nextCheckInAt?: string | Date | null
+  checkOutDate?: DateLike
+  checkOutTime?: string | null
+  nextCheckInDate?: DateLike
+  nextCheckInTime?: string | null
+  nextCheckInAt?: DateLike
   partnerName?: string | null
 }): CanonicalTaskInfoItem[] {
   const texts = getCanonicalTaskTexts(input.language)
 
-  const checkOutText = formatDateValue(
-    input.checkOutDate,
-    input.locale,
-    ""
-  )
-  const nextCheckInText = formatDateValue(
-    input.nextCheckInAt,
-    input.locale,
-    ""
-  )
+  const nextCheckInParts = extractDateAndTimeParts(input.nextCheckInAt)
+
+  const bookingStartText = formatDateTimeValue({
+    date: input.checkOutDate,
+    time: input.checkOutTime,
+    locale: input.locale,
+    emptyText: "",
+  })
+
+  const bookingEndText = formatDateTimeValue({
+    date: input.nextCheckInDate ?? nextCheckInParts.date,
+    time: input.nextCheckInTime ?? nextCheckInParts.time,
+    locale: input.locale,
+    emptyText: "",
+  })
 
   let bookingWindowValue = texts.noWindow
 
-  if (checkOutText && nextCheckInText) {
-    bookingWindowValue = `${checkOutText} → ${nextCheckInText}`
-  } else if (checkOutText) {
-    bookingWindowValue = `${checkOutText} → ${texts.openEndedWindow}`
-  } else if (nextCheckInText) {
-    bookingWindowValue = nextCheckInText
+  if (bookingStartText && bookingEndText) {
+    bookingWindowValue = `${bookingStartText} → ${bookingEndText}`
+  } else if (bookingStartText) {
+    bookingWindowValue = `${bookingStartText} → ${texts.openEndedWindow}`
+  } else if (bookingEndText) {
+    bookingWindowValue = bookingEndText
   }
 
   const executionDateText = formatDateValue(
