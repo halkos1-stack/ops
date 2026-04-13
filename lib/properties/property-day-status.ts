@@ -169,6 +169,16 @@ function normalizeReadinessStatus(value: unknown): "ready" | "borderline" | "not
   return "unknown"
 }
 
+function isTurnoverOperationalStatus(value: unknown): boolean {
+  const normalized = normalizeOperationalStatus(value)
+  return (
+    normalized === "no_task_coverage" ||
+    normalized === "task_unaccepted" ||
+    normalized === "task_in_progress" ||
+    normalized === "awaiting_proof"
+  )
+}
+
 function isCancelledBooking(status: unknown): boolean {
   const normalized = normalizeText(status)
   return normalized === "cancelled" || normalized === "canceled"
@@ -463,7 +473,10 @@ export function buildPropertyPageDayStatusFromCanonical(
   const activeStayBooking = getActiveBookingFromCanonical(input, bookings)
   const nextCheckOutBooking = activeStayBooking
   const nextCheckInBooking = getLatestFutureBooking(bookings, now)
-  const turnoverSourceBooking = activeStayBooking ? null : getLatestPastCheckout(bookings, now)
+  const turnoverSourceBooking =
+    activeStayBooking || !isTurnoverOperationalStatus(input.operationalStatus)
+      ? null
+      : getLatestPastCheckout(bookings, now)
   const primaryTask = getPrimaryTaskFromCanonical(input, tasks)
   const manualOpenTask = getManualOpenTask(tasks)
   const status = mapCanonicalToPageStatus(input)
