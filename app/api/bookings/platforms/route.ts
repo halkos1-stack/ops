@@ -57,7 +57,7 @@ async function createUniquePropertyCode(organizationId: string, sourcePlatform: 
     }
   }
 
-  throw new Error("╬Φ╬╡╬╜ ╬χ╧Ε╬▒╬╜ ╬┤╧Ζ╬╜╬▒╧Ε╬χ ╬╖ ╬┤╬╖╬╝╬╣╬┐╧Ζ╧Β╬│╬ψ╬▒ ╬╝╬┐╬╜╬▒╬┤╬╣╬║╬┐╧Ξ ╬║╧Κ╬┤╬╣╬║╬┐╧Ξ ╬▒╬║╬╣╬╜╬χ╧Ε╬┐╧Ζ.")
+  throw new Error("Δεν ήταν δυνατή η δημιουργία μοναδικού κωδικού ακινήτου.")
 }
 
 async function buildListingGroups(organizationId: string, auth: Parameters<typeof buildTenantWhere>[0]) {
@@ -212,17 +212,17 @@ async function createPropertyAndMapping(params: {
       organizationId: params.organizationId,
       code: propertyCode,
       name,
-      address: normalizeText(params.externalPropertyAddress) || "╬Χ╬╣╧Δ╬▒╬│╧Κ╬│╬χ ╬▒╧Α╧Ν ╧Α╬╗╬▒╧Ε╧Η╧Ν╧Β╬╝╬▒",
+      address: normalizeText(params.externalPropertyAddress) || "Εισαγωγή από πλατφόρμα",
       city: normalizeText(params.externalPropertyCity) || "-",
       region: normalizeText(params.externalPropertyRegion) || "-",
       postalCode: normalizeText(params.externalPropertyPostalCode) || "-",
-      country: normalizeText(params.externalPropertyCountry) || "╬Χ╬╗╬╗╬υ╬┤╬▒",
+      country: normalizeText(params.externalPropertyCountry) || "Ελλάδα",
       type: "apartment",
       status: "active",
       bedrooms: 0,
       bathrooms: 0,
       maxGuests: 0,
-      notes: `╬Σ╧Ζ╧Ε╧Ν╬╝╬▒╧Ε╬╖ ╬┤╬╖╬╝╬╣╬┐╧Ζ╧Β╬│╬ψ╬▒ ╬▒╧Α╧Ν listing ╧Α╬╗╬▒╧Ε╧Η╧Ν╧Β╬╝╬▒╧Γ ${params.sourcePlatform}`,
+      notes: `Αυτόματη δημιουργία από listing πλατφόρμας ${params.sourcePlatform}`,
     },
     select: {
       id: true,
@@ -243,7 +243,7 @@ async function createPropertyAndMapping(params: {
       propertyId: property.id,
       externalListingName: normalizeText(params.externalListingName),
       status: "ACTIVE",
-      notes: "╬Σ╧Ζ╧Ε╧Ν╬╝╬▒╧Ε╬╖ ╬▒╬╜╧Ε╬╣╧Δ╧Ε╬┐╬ψ╧Θ╬╣╧Δ╬╖ ╬▒╧Α╧Ν ╧Ε╬╖ ╧Δ╬╡╬╗╬ψ╬┤╬▒ ╧Α╬╗╬▒╧Ε╧Η╬┐╧Β╬╝╧Ο╬╜.",
+      notes: "Αυτόματη αντιστοίχιση από τη σελίδα πλατφορμών.",
     },
     create: {
       organizationId: params.organizationId,
@@ -252,7 +252,7 @@ async function createPropertyAndMapping(params: {
       externalListingId: params.externalListingId,
       externalListingName: normalizeText(params.externalListingName),
       status: "ACTIVE",
-      notes: "╬Σ╧Ζ╧Ε╧Ν╬╝╬▒╧Ε╬╖ ╬▒╬╜╧Ε╬╣╧Δ╧Ε╬┐╬ψ╧Θ╬╣╧Δ╬╖ ╬▒╧Α╧Ν ╧Ε╬╖ ╧Δ╬╡╬╗╬ψ╬┤╬▒ ╧Α╬╗╬▒╧Ε╧Η╬┐╧Β╬╝╧Ο╬╜.",
+      notes: "Αυτόματη αντιστοίχιση από τη σελίδα πλατφορμών.",
     },
   })
 
@@ -290,7 +290,7 @@ async function createPropertyAndMapping(params: {
         eventType: "MATCH",
         sourcePlatform: params.sourcePlatform,
         resultStatus: "READY_FOR_ACTION",
-        message: `╬Σ╧Ζ╧Ε╧Ν╬╝╬▒╧Ε╬╖ ╬┤╬╖╬╝╬╣╬┐╧Ζ╧Β╬│╬ψ╬▒ ╬▒╬║╬╣╬╜╬χ╧Ε╬┐╧Ζ ╬║╬▒╬╣ ╬▒╬╜╧Ε╬╣╧Δ╧Ε╬┐╬ψ╧Θ╬╣╧Δ╬╖ listing ${params.externalListingId}`,
+        message: `Αυτόματη δημιουργία ακινήτου και αντιστοίχιση listing ${params.externalListingId}`,
         payload: {
           propertyId: property.id,
           propertyCode: property.code,
@@ -313,7 +313,7 @@ export async function GET() {
 
     if (!organizationId) {
       return NextResponse.json(
-        { error: "╬Φ╬╡╬╜ ╬▓╧Β╬φ╬╕╬╖╬║╬╡ organizationId." },
+        { error: "Δεν βρέθηκε organizationId." },
         { status: 400 }
       )
     }
@@ -335,7 +335,7 @@ export async function GET() {
     console.error("GET /api/bookings/platforms error:", error)
 
     return NextResponse.json(
-      { error: "╬Σ╧Α╬┐╧Ε╧Ζ╧Θ╬ψ╬▒ ╧Η╧Ν╧Β╧Ε╧Κ╧Δ╬╖╧Γ ╧Α╬╗╬▒╧Ε╧Η╬┐╧Β╬╝╧Ο╬╜ ╬║╬▒╬╣ listings." },
+      { error: "Αποτυχία φόρτωσης πλατφορμών και listings." },
       { status: 500 }
     )
   }
@@ -350,7 +350,7 @@ export async function POST(req: NextRequest) {
 
     if (!organizationId) {
       return NextResponse.json(
-        { error: "╬Φ╬╡╬╜ ╬▓╧Β╬φ╬╕╬╖╬║╬╡ organizationId." },
+        { error: "Δεν βρέθηκε organizationId." },
         { status: 400 }
       )
     }
@@ -364,7 +364,7 @@ export async function POST(req: NextRequest) {
 
       if (!sourcePlatform || !externalListingId) {
         return NextResponse.json(
-          { error: "╬Σ╧Α╬▒╬╣╧Ε╬┐╧Ξ╬╜╧Ε╬▒╬╣ sourcePlatform ╬║╬▒╬╣ externalListingId." },
+          { error: "Απαιτούνται sourcePlatform και externalListingId." },
           { status: 400 }
         )
       }
@@ -418,7 +418,7 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json(
-      { error: "╬ε╬╖ ╬φ╬│╬║╧Ζ╧Β╬╖ ╬╡╬╜╬φ╧Β╬│╬╡╬╣╬▒." },
+      { error: "Μη έγκυρη ενέργεια." },
       { status: 400 }
     )
   } catch (error) {
@@ -427,7 +427,7 @@ export async function POST(req: NextRequest) {
     const message =
       error instanceof Error
         ? error.message
-        : "╬Σ╧Α╬┐╧Ε╧Ζ╧Θ╬ψ╬▒ ╬╡╬╜╬╖╬╝╬φ╧Β╧Κ╧Δ╬╖╧Γ ╧Α╬╗╬▒╧Ε╧Η╬┐╧Β╬╝╧Ο╬╜ ╬║╬▒╬╣ imported listings."
+        : "Αποτυχία ενημέρωσης πλατφορμών και imported listings."
 
     return NextResponse.json({ error: message }, { status: 500 })
   }
