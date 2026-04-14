@@ -3,17 +3,17 @@
 ## Σκοπός του αρχείου
 
 Το παρόν αρχείο είναι ο λειτουργικός και τεχνικός χάρτης του OPS.
-Υπάρχει για να δίνει σε άνθρωπο ή εργαλείο τεχνητής νοημοσύνης γρήγορη και σωστή εικόνα του συστήματος χωρίς να χαθεί ο πυρήνας αρχιτεκτονικής.
+Υπάρχει για να δίνει γρήγορη και σωστή εικόνα της πραγματικής αρχιτεκτονικής κατεύθυνσης του συστήματος.
 
-Το OPS δεν πρέπει να αντιμετωπίζεται ως γενικό σύστημα “property management”.
-Ο πυρήνας του είναι:
+Η κεντρική κατεύθυνση του OPS δεν είναι πλέον ένα readiness-first verdict engine.
+Η κεντρική κατεύθυνση είναι:
 
-- το ακίνητο ως κέντρο επιχειρησιακής αλήθειας
-- η readiness λογική πριν το επόμενο check-in
-- η ελεγχόμενη ροή από κράτηση σε εργασία
-- η εκτέλεση μέσω συνεργάτη
-- οι λίστες καθαριότητας / αναλωσίμων
-- η απόδειξη κατάστασης και όχι απλή δήλωση
+- το ακίνητο ως επιχειρησιακή οντότητα
+- το ημερολόγιο ακινήτου ως κύρια προβολή της αλήθειας
+- ο διαχειριστής ως φορέας απόφασης
+- η εργασία ως execution layer
+- οι κρατήσεις ως input layer
+- η συνεχής προβολή της πραγματικής κατάστασης του ακινήτου
 
 ---
 
@@ -21,11 +21,11 @@
 
 Το OPS είναι πολυοργανωσιακό SaaS λειτουργικής διαχείρισης ακινήτων.
 
-Η τρέχουσα εικόνα του συστήματος οργανώνεται γύρω από τα εξής επίπεδα:
+Η συνολική εικόνα του συστήματος οργανώνεται γύρω από τα εξής επίπεδα:
 
 1. SaaS / Οργανισμός / Πρόσβαση
 2. Επιχειρησιακά δεδομένα ακινήτου
-3. Readiness πυρήνας
+3. Property calendar truth model
 4. API / επιχειρησιακές ροές
 5. Διεπαφή διαχειριστή
 6. Portal συνεργάτη
@@ -41,21 +41,41 @@
 - κρατήσεις
 - εργασίες
 - συνεργάτες
-- λίστες εκτέλεσης
 - αναλώσιμα
-- ζητήματα / ζημιές / βλάβες
-- readiness snapshot
+- ζημιές
+- βλάβες
+- θέματα / conditions
 - ιστορικό ενεργειών
+- execution δεδομένα από portal ή διαχειριστή
 
-### Η εργασία είναι execution layer, όχι η απόλυτη αλήθεια
+### Το ημερολόγιο ακινήτου είναι η κύρια προβολή της αλήθειας
+
+Η βασική επιχειρησιακή εικόνα του ακινήτου πρέπει να συγκεντρώνεται στο ημερολόγιο ακινήτου.
+
+Το ημερολόγιο πρέπει να δείχνει, χωρίς να κρύβει την αλήθεια:
+
+- τι κράτηση υπάρχει
+- τι εργασία υπάρχει
+- τι λείπει από τα αναλώσιμα
+- ποια βλάβη ή ζημιά είναι ανοιχτή
+- ποιο θέμα χρειάζεται παρακολούθηση
+- ποια ημέρα απαιτεί απόφαση ή ενέργεια
+
+### Ο διαχειριστής αποφασίζει
+
+Το σύστημα δεν πρέπει να μετατρέπει μόνο του αυτή την εικόνα σε τελική επιχειρησιακή απόφαση τύπου readiness verdict.
+
+Ο διαχειριστής:
+
+- βλέπει την κατάσταση
+- δημιουργεί εργασία όταν χρειάζεται
+- αποφασίζει αν μια κατάσταση είναι αποδεκτή, παρακολουθήσιμη ή κρίσιμη
+- αποφασίζει το επιχειρησιακό αποτέλεσμα
+
+### Η εργασία είναι execution layer
 
 Η εργασία εκφράζει εκτέλεση.
-Δεν είναι η τελική πηγή αλήθειας του ακινήτου.
-
-### Το readiness πρέπει να προκύπτει από backend κανόνες
-
-Το readiness δεν πρέπει να ορίζεται από την οθόνη.
-Το UI πρέπει να απεικονίζει την readiness αλήθεια που παράγεται από backend λογική.
+Δεν είναι η απόλυτη πηγή αλήθειας του ακινήτου.
 
 ---
 
@@ -66,24 +86,11 @@
 ### Ρόλος
 Ορίζει ποιος είναι ο χρήστης, σε ποιον οργανισμό ανήκει και τι επιτρέπεται να δει ή να αλλάξει.
 
-### Βασικές έννοιες
-- User
-- Organization
-- Membership
-- SystemRole
-- OrganizationRole
-- Session auth
-- Tenant access
-
 ### Κρίσιμα αρχεία
 - `prisma/schema.prisma`
 - `lib/auth.ts`
 - `lib/auth-options.ts`
 - `lib/route-access.ts`
-
-### Παρατηρήσεις
-Αυτό το επίπεδο είναι πυρήνας.
-Αλλαγές εδώ επηρεάζουν όλο το σύστημα.
 
 ---
 
@@ -96,7 +103,6 @@
 - Property
 - Booking
 - BookingPropertyMapping
-- BookingSyncEvent
 - Partner
 - PartnerPortalAccessToken
 - Task
@@ -104,160 +110,122 @@
 - Issue
 - SupplyItem
 - PropertySupply
-- SupplyConsumption
-- PropertyChecklistTemplate
-- PropertyChecklistTemplateItem
-- TaskChecklistRun
-- TaskChecklistAnswer
-- TaskSupplyRun
-- TaskSupplyAnswer
 - Event
 - ActivityLog
 - Settings
-- PropertySupplyQRCode
-- PropertySupplyQRScan
 
-### Κρίσιμο αρχείο
-- `prisma/schema.prisma`
-
-### Παρατηρήσεις
+### Παρατήρηση
 Αυτό είναι το επιχειρησιακό σώμα του OPS.
-Εδώ βρίσκεται μεγάλο μέρος της εμπορικής αξίας του προϊόντος.
 
 ---
 
-## Επίπεδο Γ — Readiness πυρήνας
+## Επίπεδο Γ — Property calendar truth model
 
 ### Ρόλος
-Παράγει backend readiness εικόνα του ακινήτου.
+Συγκεντρώνει και προβάλλει την πραγματική κατάσταση του ακινήτου στο χρόνο.
 
-### Τι υπολογίζει
-- πλήθος ανοιχτών εργασιών
-- πλήθος ανοιχτών θεμάτων
-- ενεργά alert
-- κρίσιμα blockers αναλωσίμων
-- επόμενο check-in
-- χρονική πίεση επόμενου check-in
+### Τι πρέπει να δείχνει
+- occupancy / booking movement
+- open or scheduled tasks
+- active alerts
+- supply shortages
+- open issues / damages / conditions
+- ημέρες που απαιτούν προσοχή ή απόφαση
+
+### Κεντρική αρχή
+Δεν παράγει τελικό verdict ετοιμότητας.
+Παράγει προβολή της κατάστασης του ακινήτου.
 
 ### Κρίσιμο αρχείο
-- `lib/properties/readiness-snapshot.ts`
-
-### Επιθυμητή αρχή
-Το readiness πρέπει να καταλήξει να είναι μία και μοναδική backend αλήθεια.
-
-### Τρέχουσα κατάσταση
-Υπάρχει readiness snapshot backend λογική, αλλά υπάρχει και readiness παράγωγη λογική μέσα στο UI.
-Αυτό πρέπει να ενοποιηθεί.
+- `lib/properties/property-calendar.ts`
 
 ---
 
 ## Επίπεδο Δ — API / επιχειρησιακές ροές
 
 ### Ρόλος
-Μετατρέπει τον πυρήνα σε λειτουργικές ροές.
+Μετατρέπει τον πυρήνα σε λειτουργικές ροές για τον διαχειριστή και τον συνεργάτη.
 
 ### Κύρια routes
 - `app/api/properties/route.ts`
 - `app/api/properties/[id]/route.ts`
 - `app/api/tasks/route.ts`
+- `app/api/tasks/[taskId]/route.ts`
 - `app/api/bookings/route.ts`
 
 ### Βασικές λειτουργίες
 - δημιουργία / φόρτωση / ενημέρωση ακινήτων
 - δημιουργία / φόρτωση εργασιών
-- validations λιστών
-- συγχρονισμός cleaning runs
-- συγχρονισμός supplies runs
-- επεξεργασία κρατήσεων
-- υπολογισμός operational windows
-- readiness snapshot refresh μετά από δημιουργία property
-
-### Παρατηρήσεις
-Τα route files σήμερα περιέχουν αρκετή επιχειρησιακή λογική.
-Μακροπρόθεσμα αυτή η λογική πρέπει να σπάσει σε καθαρότερα domain/service αρχεία.
+- προβολή και αντιστοίχιση κρατήσεων
+- execution flows συνεργατών
+- επιστροφή execution δεδομένων
+- προβολή operational calendar data
 
 ---
 
 ## Επίπεδο Ε — Διεπαφή διαχειριστή
 
 ### Ρόλος
-Δίνει στον διαχειριστή πρακτική εικόνα ελέγχου.
+Δίνει στον διαχειριστή την επιχειρησιακή εικόνα και τα εργαλεία απόφασης.
 
-### Κύριες οθόνες που έχουν επιβεβαιωθεί
+### Κύριες οθόνες
 - `app/(dashboard)/properties/page.tsx`
 - `app/(dashboard)/properties/[id]/page.tsx`
+- `app/(dashboard)/tasks/[taskId]/page.tsx`
 
-### Τι κάνουν
-- property listing
-- φίλτρα
-- readiness κάρτες
-- operational counters
-- προβολή επόμενου check-in
-- property control center
-- λίστες ανοιχτών εργασιών
-- αναλώσιμα
-- θέματα
-- default partner
-- modals διαχείρισης
-
-### Παρατηρήσεις
-Οι οθόνες είναι λειτουργικά ώριμες αλλά αρκετά βαριές.
-Δεν πρέπει να μετατραπούν σε δεύτερο business engine.
+### Τι πρέπει να κάνουν
+- να δείχνουν το ημερολόγιο ακινήτου
+- να δείχνουν κρατήσεις, εργασίες, αναλώσιμα, ζημιές, βλάβες, θέματα
+- να επιτρέπουν στον διαχειριστή να δημιουργεί εργασία οποτεδήποτε
+- να μην υποκαθιστούν την επιχειρησιακή απόφαση με ένα readiness αποτέλεσμα
 
 ---
 
 ## Επίπεδο ΣΤ — Portal συνεργάτη
 
 ### Ρόλος
-Δίνει στον συνεργάτη πρόσβαση εκτέλεσης χωρίς κλασικό login, με token-based portal.
+Δίνει στον συνεργάτη πρόσβαση εκτέλεσης χωρίς κλασικό login.
 
-### Κύρια επιβεβαιωμένη οθόνη
-- `app/partner/[token]/page.tsx`
-
-### Τι περιλαμβάνει
-- dashboard συνεργάτη
-- στατιστικά αναθέσεων
-- urgent items
-- γλωσσική εναλλαγή
-- σύνδεση με schedule / calendar / history
-
-### Παρατηρήσεις
-Το partner portal είναι πραγματική ενότητα προϊόντος και όχι βοηθητικό demo layer.
+### Κύρια επιβεβαιωμένη κατεύθυνση
+- token-based πρόσβαση
+- απάντηση σε ανάθεση
+- εκτέλεση των ενοτήτων που έχουν σταλεί
+- επιστροφή execution δεδομένων προς το σύστημα
 
 ---
 
 ## 4. Πυρήνας λειτουργικών ροών
 
 ## Ροή 1 — Χρήστης και πρόσβαση
-User → Session → Role → Organization → App Access
+User -> Session -> Role -> Organization -> App Access
 
 ## Ροή 2 — Property hub
-Organization → Property → Bookings / Tasks / Issues / Supplies / Readiness
+Organization -> Property -> Bookings / Tasks / Issues / Supplies / Conditions / Calendar truth
 
-## Ροή 3 — Booking operational flow
-Booking → Property mapping → Operational window → Task coverage
+## Ροή 3 — Booking flow
+Booking input -> Property mapping -> Calendar projection -> Manager decision
 
-## Ροή 4 — Execution flow
-Task → Assignment → Partner → Checklist / Supplies run → Completion signal
+## Ροή 4 — Task flow
+Manager decision -> Task creation -> Assignment -> Partner execution -> Returned data
 
-## Ροή 5 — Readiness flow
-Tasks + Issues + Alerts + Critical Supplies + Next Check-in → Readiness snapshot → Property readiness fields
+## Ροή 5 — Calendar truth flow
+Bookings + Tasks + Supplies + Issues + Conditions -> Property calendar projection -> Manager action
 
 ---
 
 ## 5. Ποια αρχεία θεωρούνται πυρήνας
 
-Τα παρακάτω θεωρούνται ΚΡΙΣΙΜΑ ΑΡΧΕΙΑ ΠΥΡΗΝΑ.
-Δεν αλλάζουν “γρήγορα” χωρίς προηγούμενο έλεγχο και σχεδιασμό.
+Τα παρακάτω θεωρούνται κρίσιμα αρχεία πυρήνα:
 
 - `prisma/schema.prisma`
 - `lib/auth.ts`
 - `lib/auth-options.ts`
 - `lib/route-access.ts`
-- `lib/properties/readiness-snapshot.ts`
+- `lib/properties/property-calendar.ts`
 - `app/api/properties/route.ts`
 - `app/api/properties/[id]/route.ts`
 - `app/api/tasks/route.ts`
+- `app/api/tasks/[taskId]/route.ts`
 - `app/api/bookings/route.ts`
 
 ### Κανόνας
@@ -265,108 +233,80 @@ Tasks + Issues + Alerts + Critical Supplies + Next Check-in → Readiness snapsh
 1. έλεγχος
 2. σχεδιασμός
 3. ένα αρχείο τη φορά
-4. πλήρες αρχείο, όχι αποσπασματικά patches ως default
+4. πλήρες αρχείο και όχι πρόχειρα αποσπασματικά patches ως default
 
 ---
 
-## 6. Ποια αρχεία θεωρούνται κυρίως διεπαφή
+## 6. Μεταβατικά σημεία / αρχιτεκτονικό χρέος
 
-Αυτά είναι αρχεία με μεγαλύτερο βάρος παρουσίασης και διαχείρισης οθόνης:
+Τα παρακάτω σημεία θεωρούνται ενεργό μεταβατικό χρέος:
 
-- `app/(dashboard)/properties/page.tsx`
-- `app/(dashboard)/properties/[id]/page.tsx`
-- `app/partner/[token]/page.tsx`
-
-### Κανόνας
-Εδώ επιτρέπονται πιο συχνές αλλαγές UI, αλλά:
-- όχι νέο business logic μόνο στην οθόνη
-- όχι δεύτερη readiness λογική
-- όχι αλλαγές που παρακάμπτουν τον backend πυρήνα
+1. legacy readiness γλώσσα και labels παραμένουν σε τμήματα του repo
+2. μέρος του UI εξακολουθεί να κουβαλά readiness ορολογία
+3. το property calendar model χρειάζεται πλήρη καθαρισμό από readiness semantics
+4. ορισμένα route files παραμένουν βαριά και κρατούν domain logic
+5. η τεκμηρίωση πρέπει να μένει αυστηρά ευθυγραμμισμένη με τη νέα calendar-truth λογική
 
 ---
 
-## 7. Μεταβατικά σημεία / αρχιτεκτονικό χρέος
-
-Τα παρακάτω σημεία θεωρούνται ενεργό τεχνικό χρέος ή μεταβατική αρχιτεκτονική:
-
-1. `app/api/tasks/route.ts` χρησιμοποιεί ακόμα mock auth pattern
-2. readiness λογική υπάρχει και στον backend και στο UI
-3. οι property pages είναι πολύ μεγάλες και κρατούν υπερβολική λογική
-4. το route layer κουβαλά αρκετή domain λογική
-5. το repo δεν έχει ακόμα πλήρες README και system-level τεκμηρίωση
-
----
-
-## 8. Κανόνες ασφαλούς αλλαγής
+## 7. Κανόνες ασφαλούς αλλαγής
 
 ## Επιτρέπονται εύκολα
 - labels
 - μικρές βελτιώσεις UI
 - layout αλλαγές
 - presentation helpers
-- μικρές μεταφραστικές βελτιώσεις
+- τεκμηρίωση
 
 ## Θέλουν προσοχή
 - property routes
 - booking routes
 - task routes
-- readiness calculation
-- portal responses
+- property calendar model
+- partner portal responses
 
 ## Θέλουν αυστηρό έλεγχο
 - schema
 - auth
 - route-access
-- readiness core rules
-- σχέσεις Property / Booking / Task / Issue / Supply
+- σχέσεις Property / Booking / Task / Issue / Supply / Condition
+- λογική που επηρεάζει την προβολή της αλήθειας του ακινήτου
 
 ---
 
-## 9. Κατεύθυνση εξέλιξης
+## 8. Κατεύθυνση εξέλιξης
 
 Η σωστή στρατηγική εξέλιξης του OPS είναι:
 
-1. ενοποίηση auth / access παντού
-2. ενοποίηση readiness ως μοναδική backend αλήθεια
-3. μεταφορά domain logic έξω από route files
-4. διάσπαση βαριών pages σε μικρότερα κομμάτια
-5. σταθερή τεκμηρίωση πυρήνα και ανοιχτών θεμάτων
+1. πλήρης ενοποίηση property calendar truth model
+2. αφαίρεση readiness-first γλώσσας από τον ενεργό πυρήνα
+3. ενιαία προβολή bookings / tasks / supplies / issues / conditions από το ημερολόγιο ακινήτου
+4. δυνατότητα δημιουργίας εργασίας οποτεδήποτε από τον διαχειριστή
+5. μεταφορά domain logic έξω από route files όπου χρειάζεται
+6. καθαρή και ενημερωμένη τεκμηρίωση του πυρήνα
 
 ---
 
-## 10. Κανόνας συνεργασίας με AI / Codex
+## 9. Κανόνας συνεργασίας με AI / εργαλεία
 
 Όποιο εργαλείο δουλεύει πάνω στο OPS πρέπει να σέβεται τα εξής:
 
-- το property παραμένει το operational hub
-- το readiness δεν ορίζεται από το UI
-- οι αλλαγές σε πυρήνα γίνονται ένα αρχείο τη φορά
-- οι μεγάλες αρχιτεκτονικές αλλαγές δεν μπαίνουν σιωπηλά
-- τα routes δεν πρέπει να γεμίζουν όλο και περισσότερο business logic
-- οι mock / dev παρακάμψεις δεν πρέπει να επιβιώνουν σε production-critical paths
+- το ημερολόγιο ακινήτου είναι η κύρια προβολή της αλήθειας
+- ο διαχειριστής παραμένει ο φορέας απόφασης
+- οι εργασίες είναι execution layer
+- οι κρατήσεις είναι input layer
+- η αλήθεια του ακινήτου παραμένει αναλυωτη και ορατή
+- μεγάλες αρχιτεκτονικές αλλαγές δεν μπαίνουν σιωπηλά
 
 ---
 
-## 11. Πρακτική χρήση αυτού του αρχείου
-
-Χρησιμοποίησε αυτό το αρχείο όταν θέλεις να απαντήσεις σε ερωτήσεις όπως:
-
-- ποιος είναι ο πυρήνας του συστήματος;
-- ποια αρχεία είναι επικίνδυνα να αλλάξουν;
-- ποια είναι UI και ποια είναι core;
-- πού πρέπει να μπει το readiness logic;
-- ποια είναι η ασφαλής σειρά βελτιώσεων;
-- πώς να κρίνουμε αν μια αλλαγή χαλάει την αρχιτεκτονική του OPS;
-
----
-
-## 12. Κανόνας ενημέρωσης
+## 10. Κανόνας ενημέρωσης
 
 Το παρόν αρχείο πρέπει να ενημερώνεται όταν αλλάζει ένα από τα παρακάτω:
 
-- ο πυρήνας readiness
+- η κύρια λογική του property calendar
 - τα κύρια auth / access αρχεία
 - η βασική δομή routes
 - το μοντέλο δεδομένων του schema
 - η αρχιτεκτονική του partner portal
-- η βασική ροή property → booking → task → execution
+- η ροή property -> booking -> task -> execution
