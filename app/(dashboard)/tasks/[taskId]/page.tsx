@@ -1424,6 +1424,26 @@ export default function TaskDetailsPage() {
       }
 
       setPageMessage(language === "en" ? "The assignment was saved successfully." : "Η ανάθεση αποθηκεύτηκε επιτυχώς.")
+      const assignmentEmailSent = Boolean(json?.assignmentEmailSent)
+      const assignmentEmailSendReason = String(json?.assignmentEmailSendReason || "").trim()
+
+      setPageMessage(
+        assignmentEmailSent
+          ? language === "en"
+            ? "The assignment was saved successfully and the email was sent."
+            : "Η ανάθεση αποθηκεύτηκε και το email στάλθηκε επιτυχώς."
+          : assignmentEmailSendReason === "PARTNER_EMAIL_MISSING"
+            ? language === "en"
+              ? "The assignment was saved, but the partner has no email address."
+              : "Η ανάθεση αποθηκεύτηκε, αλλά ο συνεργάτης δεν έχει email."
+            : assignmentEmailSendReason === "SMTP_NOT_CONFIGURED"
+              ? language === "en"
+                ? "The assignment was saved, but email sending is not configured."
+                : "Η ανάθεση αποθηκεύτηκε, αλλά το σύστημα email δεν είναι ρυθμισμένο."
+              : language === "en"
+                ? "The assignment was saved, but the email could not be sent."
+                : "Η ανάθεση αποθηκεύτηκε, αλλά το email δεν στάλθηκε."
+      )
       setOpenAssignmentModal(false)
       await loadTask()
     } catch (err) {

@@ -9,17 +9,23 @@ import {
   getPropertyTypeLabel,
 } from "@/lib/i18n/labels"
 import {
-  getReadinessBadgeClasses,
-  getReadinessLabel as getReadinessLabelUI,
-  normalizeReadinessForUI,
-} from "@/lib/readiness/readiness-ui"
-import {
   normalizeBookingStatus,
   normalizeIssueStatus,
   normalizePropertyStatus,
   normalizeTaskStatus,
 } from "@/lib/i18n/normalizers"
 import { getPropertiesPageTexts } from "@/lib/i18n/translations"
+import {
+  getReadinessBadgeClasses,
+  getReadinessLabel as getReadinessLabelUI,
+  getOperationalStatusBadgeClasses,
+  getOperationalStatusLabel,
+  normalizeReadinessForUI,
+} from "@/lib/readiness/readiness-ui"
+import {
+  buildPropertyCalendarDaySnapshot,
+  type PropertyCalendarDaySnapshot,
+} from "@/lib/properties/property-calendar"
 
 // ─── Τοπικοί τύποι ────────────────────────────────────────────────────────────
 
@@ -38,6 +44,16 @@ type PropertySupplyListItem = {
   /** Canonical derived state — παρέχεται ήδη από shapePropertyForOperationalViews στο API. */
   derivedState?: string | null
   fillLevel?: string | null
+  stateMode?: string | null
+  currentStock?: number | null
+  mediumThreshold?: number | null
+  fullThreshold?: number | null
+  minimumThreshold?: number | null
+  reorderThreshold?: number | null
+  warningThreshold?: number | null
+  targetLevel?: number | null
+  targetStock?: number | null
+  trackingMode?: string | null
   /** Παράγεται από το API (shapePropertyForOperationalViews). Χρησιμοποιείται απευθείας. */
   isShortage?: boolean | null
   isCritical?: boolean
@@ -58,20 +74,53 @@ type PropertySupplyListItem = {
 
 type PropertyIssueListItem = {
   id: string
+  title?: string | null
   status: string
   severity?: string | null
   issueType?: string | null
   requiresImmediateAction?: boolean
+  affectsHosting?: boolean | null
+  createdAt?: string | null
+  updatedAt?: string | null
+  resolvedAt?: string | null
+  dismissedAt?: string | null
+}
+
+type PropertyConditionListItem = {
+  id: string
+  title?: string | null
+  status?: string | null
+  blockingStatus?: string | null
+  severity?: string | null
+  createdAt?: string | null
+  updatedAt?: string | null
+  resolvedAt?: string | null
+  dismissedAt?: string | null
 }
 
 type PropertyTaskListItem = {
   id: string
+  title: string
   status: string
   priority?: string | null
   taskType?: string | null
   scheduledDate?: string | null
+  scheduledStartTime?: string | null
+  scheduledEndTime?: string | null
+  dueDate?: string | null
+  completedAt?: string | null
   alertEnabled?: boolean
   alertAt?: string | null
+}
+
+type PropertyBookingListItem = {
+  id: string
+  status: string
+  guestName?: string | null
+  checkInDate: string
+  checkOutDate: string
+  checkInTime?: string | null
+  checkOutTime?: string | null
 }
 
 type PropertyListItem = {
@@ -106,16 +155,11 @@ type PropertyListItem = {
     specialty: string
     status: string
   } | null
-  bookings?: Array<{
-    id: string
-    status: string
-    checkInDate: string
-    checkOutDate: string
-    checkInTime?: string | null
-  }>
+  bookings?: PropertyBookingListItem[]
   tasks?: PropertyTaskListItem[]
   /** Legacy Issue model — χρησιμοποιείται μόνο για operational counters, όχι ως readiness truth. */
   issues?: PropertyIssueListItem[]
+  conditions?: PropertyConditionListItem[]
   propertySupplies?: PropertySupplyListItem[]
 }
 
@@ -137,11 +181,33 @@ type CreatePropertyFormState = {
 
 type MetricFilter =
   | "all"
-  | "active"
-  | "inactive"
-  | "ready"
-  | "borderline"
-  | "not_ready"
+  | "bookings"
+  | "tasks"
+  | "alerts"
+  | "shortages"
+  | "issues"
+
+type PropertyTodaySection = {
+  property: PropertyListItem
+  snapshot: PropertyCalendarDaySnapshot | null
+  location: string
+  nextBooking: (PropertyBookingListItem & { checkInAt: Date | null }) | null
+  counts: {
+    bookings: number
+    tasks: number
+    alerts: number
+    shortages: number
+    issues: number
+  }
+}
+
+type MetricCard = {
+  key: Exclude<MetricFilter, "all">
+  label: string
+  helper: string
+  value: number
+  valueClassName: string
+}
 
 type PropertyOperationalCounts = {
   todayOpenTasks: number
@@ -515,6 +581,356 @@ const initialCreateForm: CreatePropertyFormState = {
   notes: "",
 }
 
+function localizeText(language: "el" | "en", el: string, en: string) {
+  return language === "en" ? en : el
+}
+
+function formatDisplayDateTime(
+  value: string | Date | null | undefined,
+  locale: string,
+  options?: Intl.DateTimeFormatOptions
+) {
+  const date =
+    value instanceof Date
+      ? value
+      : normalizeDate(value)
+  if (!date) return "—"
+
+  return new Intl.DateTimeFormat(locale, {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    ...options,
+  }).format(date)
+}
+
+function formatDisplayDate(value: string | Date | null | undefined, locale: string) {
+  const date =
+    value instanceof Date
+      ? value
+      : normalizeDate(value)
+  if (!date) return "—"
+
+  return new Intl.DateTimeFormat(locale, {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(date)
+}
+
+function formatTimeDisplay(value?: string | null) {
+  const text = String(value || "").trim()
+  if (!text) return null
+  const match = text.match(/^(\d{2}:\d{2})/)
+  return match ? match[1] : null
+}
+
+function formatTaskTimeRange(
+  language: "el" | "en",
+  start?: string | null,
+  end?: string | null
+) {
+  const from = formatTimeDisplay(start)
+  const to = formatTimeDisplay(end)
+  if (from && to) return `${from} - ${to}`
+  if (from) return localizeText(language, `Από ${from}`, `From ${from}`)
+  if (to) return localizeText(language, `Έως ${to}`, `Until ${to}`)
+  return localizeText(language, "Δεν έχει οριστεί ώρα", "No time set")
+}
+
+function formatCountText(
+  count: number,
+  language: "el" | "en",
+  singularEl: string,
+  pluralEl: string,
+  singularEn: string,
+  pluralEn: string
+) {
+  const label =
+    language === "en"
+      ? count === 1
+        ? singularEn
+        : pluralEn
+      : count === 1
+        ? singularEl
+        : pluralEl
+
+  return `${count} ${label}`
+}
+
+function getTodayMissingSuppliesCount(snapshot: PropertyCalendarDaySnapshot | null) {
+  if (!snapshot) return 0
+  return snapshot.supplies.segments.find((segment) => segment.state === "missing")?.count ?? 0
+}
+
+function buildPropertyTodaySection(property: PropertyListItem, today: Date): PropertyTodaySection {
+  const snapshot = buildPropertyCalendarDaySnapshot({
+    date: today,
+    bookings: safeArray(property.bookings).map((booking) => ({
+      id: booking.id,
+      status: booking.status,
+      guestName: booking.guestName ?? null,
+      checkInDate: booking.checkInDate,
+      checkOutDate: booking.checkOutDate,
+      checkInTime: booking.checkInTime ?? null,
+      checkOutTime: booking.checkOutTime ?? null,
+    })),
+    tasks: safeArray(property.tasks).map((task) => ({
+      id: task.id,
+      title: task.title || "",
+      status: task.status,
+      scheduledDate: task.scheduledDate ?? null,
+      scheduledStartTime: task.scheduledStartTime ?? null,
+      scheduledEndTime: task.scheduledEndTime ?? null,
+      dueDate: task.dueDate ?? null,
+      completedAt: task.completedAt ?? null,
+      alertEnabled: Boolean(task.alertEnabled),
+      alertAt: task.alertAt ?? null,
+    })),
+    issues: safeArray(property.issues).map((issue) => ({
+      id: issue.id,
+      title: issue.title || "",
+      status: issue.status,
+      severity: issue.severity ?? null,
+      createdAt: issue.createdAt ?? null,
+      updatedAt: issue.updatedAt ?? null,
+      resolvedAt: issue.resolvedAt ?? null,
+      dismissedAt: issue.dismissedAt ?? null,
+      requiresImmediateAction: Boolean(issue.requiresImmediateAction),
+      affectsHosting: issue.affectsHosting ?? null,
+    })),
+    conditions: safeArray(property.conditions).map((condition) => ({
+      id: condition.id,
+      title: condition.title || "",
+      status: condition.status ?? null,
+      blockingStatus: condition.blockingStatus ?? null,
+      severity: condition.severity ?? null,
+      createdAt: condition.createdAt ?? null,
+      updatedAt: condition.updatedAt ?? null,
+      resolvedAt: condition.resolvedAt ?? null,
+      dismissedAt: condition.dismissedAt ?? null,
+    })),
+    propertySupplies: safeArray(property.propertySupplies).map((supply) => ({
+      id: supply.id,
+      currentStock: supply.currentStock ?? null,
+      stateMode: supply.stateMode ?? null,
+      fillLevel: supply.fillLevel ?? null,
+      derivedState: supply.derivedState ?? null,
+      mediumThreshold: supply.mediumThreshold ?? null,
+      fullThreshold: supply.fullThreshold ?? null,
+      minimumThreshold: supply.minimumThreshold ?? null,
+      reorderThreshold: supply.reorderThreshold ?? null,
+      warningThreshold: supply.warningThreshold ?? null,
+      targetLevel: supply.targetLevel ?? null,
+      targetStock: supply.targetStock ?? null,
+      trackingMode: supply.trackingMode ?? null,
+      isCritical: supply.isCritical ?? null,
+      updatedAt: supply.updatedAt ?? null,
+      lastSeenUpdate: supply.lastUpdatedAt ?? null,
+      supplyItem: {
+        minimumStock: supply.supplyItem?.minimumStock ?? null,
+      },
+    })),
+  })
+
+  return {
+    property,
+    snapshot,
+    location: formatLocation(property),
+    nextBooking: getNextUpcomingBooking(property) ?? null,
+    counts: {
+      bookings: snapshot?.occupancy.bookingCount ?? 0,
+      tasks: snapshot?.tasks.count ?? 0,
+      alerts: snapshot?.tasks.activeAlertCount ?? 0,
+      shortages: getTodayMissingSuppliesCount(snapshot),
+      issues: snapshot?.issues.count ?? 0,
+    },
+  }
+}
+
+function matchesTodayMetricFilter(section: PropertyTodaySection, metricFilter: MetricFilter) {
+  switch (metricFilter) {
+    case "bookings":
+      return section.counts.bookings > 0
+    case "tasks":
+      return section.counts.tasks > 0
+    case "alerts":
+      return section.counts.alerts > 0
+    case "shortages":
+      return section.counts.shortages > 0
+    case "issues":
+      return section.counts.issues > 0
+    case "all":
+    default:
+      return true
+  }
+}
+
+function getTodayOccupancyBadgeClasses(state: PropertyCalendarDaySnapshot["occupancy"]["state"]) {
+  switch (state) {
+    case "turnover":
+      return "bg-violet-50 text-violet-700 ring-1 ring-violet-200"
+    case "check_in":
+      return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
+    case "check_out":
+      return "bg-amber-50 text-amber-700 ring-1 ring-amber-200"
+    case "occupied":
+      return "bg-blue-50 text-blue-700 ring-1 ring-blue-200"
+    case "vacant":
+    default:
+      return "bg-slate-100 text-slate-700 ring-1 ring-slate-200"
+  }
+}
+
+function getTodayOccupancyLabel(
+  language: "el" | "en",
+  state: PropertyCalendarDaySnapshot["occupancy"]["state"]
+) {
+  switch (state) {
+    case "turnover":
+      return localizeText(language, "Αναχώρηση + άφιξη", "Turnover")
+    case "check_in":
+      return localizeText(language, "Άφιξη σήμερα", "Check-in today")
+    case "check_out":
+      return localizeText(language, "Αναχώρηση σήμερα", "Check-out today")
+    case "occupied":
+      return localizeText(language, "Με διαμονή", "Occupied")
+    case "vacant":
+    default:
+      return localizeText(language, "Κενό σήμερα", "Vacant today")
+  }
+}
+
+function getTodayTaskBadgeClasses(state: PropertyCalendarDaySnapshot["tasks"]["state"]) {
+  switch (state) {
+    case "problem":
+      return "bg-red-50 text-red-700 ring-1 ring-red-200"
+    case "in_progress":
+      return "bg-sky-50 text-sky-700 ring-1 ring-sky-200"
+    case "accepted":
+      return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
+    case "assigned":
+      return "bg-amber-50 text-amber-700 ring-1 ring-amber-200"
+    case "scheduled":
+      return "bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200"
+    case "completed":
+      return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
+    case "none":
+    default:
+      return "bg-slate-100 text-slate-700 ring-1 ring-slate-200"
+  }
+}
+
+function getTodayTaskLabel(
+  language: "el" | "en",
+  state: PropertyCalendarDaySnapshot["tasks"]["state"]
+) {
+  switch (state) {
+    case "problem":
+      return localizeText(language, "Χρειάζεται ενέργεια", "Needs action")
+    case "in_progress":
+      return localizeText(language, "Σε εξέλιξη", "In progress")
+    case "accepted":
+      return localizeText(language, "Αποδεκτή", "Accepted")
+    case "assigned":
+      return localizeText(language, "Ανατεθειμένη", "Assigned")
+    case "scheduled":
+      return localizeText(language, "Προγραμματισμένη", "Scheduled")
+    case "completed":
+      return localizeText(language, "Ολοκληρωμένη", "Completed")
+    case "none":
+    default:
+      return localizeText(language, "Χωρίς εργασία", "No task")
+  }
+}
+
+function getTodayIssuesBadgeClasses(state: PropertyCalendarDaySnapshot["issues"]["state"]) {
+  switch (state) {
+    case "critical":
+      return "bg-red-50 text-red-700 ring-1 ring-red-200"
+    case "warning":
+      return "bg-amber-50 text-amber-700 ring-1 ring-amber-200"
+    case "clear":
+    default:
+      return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
+  }
+}
+
+function getTodayIssuesLabel(
+  language: "el" | "en",
+  state: PropertyCalendarDaySnapshot["issues"]["state"]
+) {
+  switch (state) {
+    case "critical":
+      return localizeText(language, "Κρίσιμα θέματα", "Critical issues")
+    case "warning":
+      return localizeText(language, "Ανοιχτά θέματα", "Open issues")
+    case "clear":
+    default:
+      return localizeText(language, "Καθαρό", "Clear")
+  }
+}
+
+function getTodaySupplyBadgeClasses(shortages: number) {
+  if (shortages > 0) return "bg-red-50 text-red-700 ring-1 ring-red-200"
+  return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
+}
+
+function getTodaySupplyLabel(language: "el" | "en", shortages: number) {
+  return shortages > 0
+    ? localizeText(language, "Με ελλείψεις", "Shortages detected")
+    : localizeText(language, "Πλήρες", "Covered")
+}
+
+function getTodayReadinessReason(
+  language: "el" | "en",
+  snapshot: PropertyCalendarDaySnapshot | null
+) {
+  if (!snapshot) {
+    return localizeText(language, "Δεν υπάρχουν αρκετά δεδομένα για σήμερα.", "Not enough data for today.")
+  }
+
+  switch (snapshot.readiness.blockingReason) {
+    case "occupied":
+      return localizeText(language, "Το ακίνητο έχει ενεργή διαμονή σήμερα.", "The property has an active stay today.")
+    case "turnover_without_task":
+      return localizeText(language, "Υπάρχει κίνηση κράτησης αλλά δεν υπάρχει εργασία κάλυψης.", "There is booking movement today without task coverage.")
+    case "turnover_task_pending":
+      return localizeText(language, "Η σημερινή εργασία είναι ακόμη ανοιχτή ή σε εξέλιξη.", "Today's task is still open or in progress.")
+    case "issues":
+      return localizeText(language, "Υπάρχουν ενεργά ζητήματα ή βλάβες που μπλοκάρουν τη μέρα.", "Active issues or damages are blocking the day.")
+    case "conditions":
+      return localizeText(language, "Υπάρχουν ενεργές προειδοποιήσεις που θέλουν παρακολούθηση.", "Active warnings need attention.")
+    case "clear":
+      return localizeText(language, "Η σημερινή εικόνα είναι καθαρή.", "Today's picture is clear.")
+    case "unknown":
+    default:
+      return localizeText(language, "Η σημερινή κατάσταση δεν είναι ακόμη διαθέσιμη.", "Today's status is not yet available.")
+  }
+}
+
+function TodaySnapshotPanel({
+  title,
+  badge,
+  children,
+}: {
+  title: string
+  badge: ReactNode
+  children: ReactNode
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
+        {badge}
+      </div>
+      <div className="mt-3 space-y-1.5 text-sm text-slate-700">{children}</div>
+    </div>
+  )
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function PropertiesPage() {
@@ -538,7 +954,6 @@ export default function PropertiesPage() {
   const [createSubmitting, setCreateSubmitting] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
   const todayReference = useMemo(() => new Date(), [])
-  const counterConfigs = useMemo(() => getCounterConfigs(language), [language])
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -597,41 +1012,7 @@ export default function PropertiesPage() {
     return values.sort((a, b) => a.localeCompare(b, texts.locale))
   }, [properties, texts.locale])
 
-  // ─── Μετρητές summary (readiness-based) ────────────────────────────────────
-  // Το readiness διαβάζεται από property.readinessStatus (canonical field).
-  // Τα BORDERLINE και NOT_READY είναι ξεχωριστές κατηγορίες.
-  const summary = useMemo(() => {
-    const active = properties.filter(
-      (item) => normalizePropertyStatus(item.status) === "ACTIVE"
-    ).length
-
-    const inactive = properties.filter(
-      (item) => normalizePropertyStatus(item.status) === "INACTIVE"
-    ).length
-
-    const ready = properties.filter(
-      (item) => normalizeReadinessForUI(item.readinessStatus) === "ready"
-    ).length
-
-    const borderline = properties.filter(
-      (item) => normalizeReadinessForUI(item.readinessStatus) === "borderline"
-    ).length
-
-    const notReady = properties.filter(
-      (item) => normalizeReadinessForUI(item.readinessStatus) === "not_ready"
-    ).length
-
-    return {
-      total: properties.length,
-      active,
-      inactive,
-      ready,
-      borderline,
-      notReady,
-    }
-  }, [properties])
-
-  const filteredProperties = useMemo(() => {
+  const todaySections = useMemo(() => {
     const term = search.trim().toLowerCase()
 
     const rows = [...properties].filter((property) => {
@@ -652,9 +1033,7 @@ export default function PropertiesPage() {
         cityFilter === "all" ||
         String(property.city || "").toLowerCase() === cityFilter.toLowerCase()
 
-      const matchesMetric = matchesMetricFilter(property, metricFilter)
-
-      return matchesSearch && matchesType && matchesCity && matchesMetric
+      return matchesSearch && matchesType && matchesCity
     })
 
     rows.sort((a, b) => {
@@ -675,17 +1054,118 @@ export default function PropertiesPage() {
       }
     })
 
-    return rows
+    return rows.map((property) => buildPropertyTodaySection(property, todayReference))
   }, [
+    cityFilter,
     properties,
     search,
-    typeFilter,
-    cityFilter,
     sortBy,
-    metricFilter,
     texts.locale,
+    todayReference,
+    typeFilter,
   ])
 
+  const todaySummary = useMemo(() => {
+    return todaySections.reduce(
+      (acc, section) => {
+        acc.bookings += section.counts.bookings
+        acc.tasks += section.counts.tasks
+        acc.alerts += section.counts.alerts
+        if (section.counts.shortages > 0) acc.shortages += 1
+        if (section.counts.issues > 0) acc.issues += 1
+        return acc
+      },
+      {
+        bookings: 0,
+        tasks: 0,
+        alerts: 0,
+        shortages: 0,
+        issues: 0,
+      }
+    )
+  }, [todaySections])
+
+  const metricCards = useMemo<MetricCard[]>(() => {
+    return [
+      {
+        key: "bookings",
+        label: localizeText(language, "Κρατήσεις", "Bookings"),
+        helper: localizeText(
+          language,
+          "Κρατήσεις που αγγίζουν το σήμερα",
+          "Bookings touching today"
+        ),
+        value: todaySummary.bookings,
+        valueClassName: "text-blue-700",
+      },
+      {
+        key: "tasks",
+        label: localizeText(language, "Εργασίες", "Tasks"),
+        helper: localizeText(
+          language,
+          "Προγραμματισμένες εργασίες σήμερα",
+          "Tasks scheduled today"
+        ),
+        value: todaySummary.tasks,
+        valueClassName: "text-slate-900",
+      },
+      {
+        key: "alerts",
+        label: localizeText(language, "Ενεργά alert", "Active alerts"),
+        helper: localizeText(
+          language,
+          "Εργασίες με ενεργό alert σήμερα",
+          "Tasks with active alerts today"
+        ),
+        value: todaySummary.alerts,
+        valueClassName: "text-amber-700",
+      },
+      {
+        key: "shortages",
+        label: localizeText(language, "Ακίνητα με ελλείψεις", "Properties with shortages"),
+        helper: localizeText(
+          language,
+          "Ακίνητα με ελλείψεις αναλωσίμων",
+          "Properties with supply shortages"
+        ),
+        value: todaySummary.shortages,
+        valueClassName: "text-red-700",
+      },
+      {
+        key: "issues",
+        label: localizeText(language, "Ακίνητα με βλάβες", "Properties with issues"),
+        helper: localizeText(
+          language,
+          "Ακίνητα με ενεργά θέματα ή ζημιές",
+          "Properties with open issues or damages"
+        ),
+        value: todaySummary.issues,
+        valueClassName: "text-red-700",
+      },
+    ]
+  }, [language, todaySummary])
+
+  const filteredSections = useMemo(() => {
+    return metricFilter === "all"
+      ? todaySections
+      : todaySections.filter((section) =>
+          matchesTodayMetricFilter(section, metricFilter)
+        )
+  }, [metricFilter, todaySections])
+
+  const filteredProperties = useMemo(
+    () =>
+      filteredSections
+        .map((section) => section.property)
+        .filter((property) => matchesMetricFilter(property, "all")),
+    [filteredSections]
+  )
+
+  const counterConfigs = useMemo(() => getCounterConfigs(language), [language])
+
+  // ─── Μετρητές summary (readiness-based) ────────────────────────────────────
+  // Το readiness διαβάζεται από property.readinessStatus (canonical field).
+  // Τα BORDERLINE και NOT_READY είναι ξεχωριστές κατηγορίες.
   function openCreateDrawer() {
     setCreateError(null)
     setCreateForm({
@@ -798,86 +1278,92 @@ export default function PropertiesPage() {
         {/* ─── Metric cards: readiness-based counters ─────────────────────────
             Κάθε κάρτα αντιστοιχεί σε ξεχωριστή canonical κατάσταση.
             BORDERLINE και NOT_READY εμφανίζονται ξεχωριστά. */}
-        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           <button
             type="button"
             onClick={() => setMetricFilter("all")}
-            className={`rounded-2xl border p-5 text-left shadow-sm transition ${getMetricCardClasses(
-              metricFilter === "all"
-            )}`}
+            className="hidden"
           >
-            <div className="text-sm text-slate-500">{texts.total}</div>
+            <div className="text-sm text-slate-500">
+              {localizeText(language, "Όλα τα ακίνητα", "All properties")}
+            </div>
             <div className="mt-2 text-2xl font-bold text-slate-900">
-              {summary.total}
+              {todaySections.length}
             </div>
           </button>
 
           <button
             type="button"
-            onClick={() => setMetricFilter("active")}
+            onClick={() => setMetricFilter("bookings")}
             className={`rounded-2xl border p-5 text-left shadow-sm transition ${getMetricCardClasses(
-              metricFilter === "active"
-            )}`}
-          >
-            <div className="text-sm text-slate-500">{texts.active}</div>
-            <div className="mt-2 text-2xl font-bold text-emerald-700">
-              {summary.active}
-            </div>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setMetricFilter("inactive")}
-            className={`rounded-2xl border p-5 text-left shadow-sm transition ${getMetricCardClasses(
-              metricFilter === "inactive"
-            )}`}
-          >
-            <div className="text-sm text-slate-500">{texts.inactive}</div>
-            <div className="mt-2 text-2xl font-bold text-slate-700">
-              {summary.inactive}
-            </div>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setMetricFilter("ready")}
-            className={`rounded-2xl border p-5 text-left shadow-sm transition ${getMetricCardClasses(
-              metricFilter === "ready"
-            )}`}
-          >
-            <div className="text-sm text-slate-500">{texts.ready}</div>
-            <div className="mt-2 text-2xl font-bold text-emerald-700">
-              {summary.ready}
-            </div>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setMetricFilter("borderline")}
-            className={`rounded-2xl border p-5 text-left shadow-sm transition ${getMetricCardClasses(
-              metricFilter === "borderline"
+              metricFilter === "bookings"
             )}`}
           >
             <div className="text-sm text-slate-500">
-              {language === "en" ? "Borderline" : "Οριακά"}
+              {localizeText(language, "Κρατήσεις", "Bookings")}
             </div>
-            <div className="mt-2 text-2xl font-bold text-amber-700">
-              {summary.borderline}
+            <div className="mt-2 text-2xl font-bold text-blue-700">
+              {todaySummary.bookings}
             </div>
           </button>
 
           <button
             type="button"
-            onClick={() => setMetricFilter("not_ready")}
+            onClick={() => setMetricFilter("tasks")}
             className={`rounded-2xl border p-5 text-left shadow-sm transition ${getMetricCardClasses(
-              metricFilter === "not_ready"
+              metricFilter === "tasks"
             )}`}
           >
             <div className="text-sm text-slate-500">
-              {language === "en" ? "Not ready" : "Μη έτοιμα"}
+              {localizeText(language, "Εργασίες", "Tasks")}
+            </div>
+            <div className="mt-2 text-2xl font-bold text-slate-900">
+              {todaySummary.tasks}
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setMetricFilter("alerts")}
+            className={`rounded-2xl border p-5 text-left shadow-sm transition ${getMetricCardClasses(
+              metricFilter === "alerts"
+            )}`}
+          >
+            <div className="text-sm text-slate-500">
+              {localizeText(language, "Ενεργά alert", "Active alerts")}
             </div>
             <div className="mt-2 text-2xl font-bold text-red-700">
-              {summary.notReady}
+              {todaySummary.alerts}
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setMetricFilter("shortages")}
+            className={`rounded-2xl border p-5 text-left shadow-sm transition ${getMetricCardClasses(
+              metricFilter === "shortages"
+            )}`}
+          >
+            <div className="text-sm text-slate-500">
+              {localizeText(language, "Ακίνητα με ελλείψεις", "Properties with shortages")}
+            </div>
+            <div className="mt-2 text-2xl font-bold text-red-700">
+              {todaySummary.shortages}
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setMetricFilter("issues")}
+            className={`rounded-2xl border p-5 text-left shadow-sm transition ${getMetricCardClasses(
+              metricFilter === "issues"
+            )}`}
+          >
+            <div className="text-sm text-slate-500">
+              {localizeText(language, "Ακίνητα με βλάβες", "Properties with issues")}
+            </div>
+            <div className="mt-2 text-2xl font-bold text-red-700">
+              {todaySummary.issues}
             </div>
           </button>
         </section>
@@ -969,11 +1455,17 @@ export default function PropertiesPage() {
             <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h2 className="text-base font-semibold text-slate-900">
-                  {texts.listTitle}
+                  {localizeText(language, "Σημερινή εικόνα ακινήτων", "Today's property overview")}
                 </h2>
                 <p className="text-sm text-slate-500">
-                  {filteredProperties.length} / {properties.length}
+                  {filteredSections.length} / {todaySections.length}
                 </p>
+                {metricFilter !== "all" ? (
+                  <p className="mt-1 text-xs text-slate-500">
+                    {localizeText(language, "Ενεργό φίλτρο:", "Active filter:")}{" "}
+                    {metricCards.find((card) => card.key === metricFilter)?.label}
+                  </p>
+                ) : null}
               </div>
             </div>
           </div>
@@ -982,12 +1474,281 @@ export default function PropertiesPage() {
             <div className="p-6 text-sm text-slate-500">{texts.loading}</div>
           ) : error ? (
             <div className="p-6 text-sm text-red-600">{error}</div>
-          ) : filteredProperties.length === 0 ? (
+          ) : filteredSections.length === 0 ? (
             <div className="p-6 text-sm text-slate-500">{texts.noResults}</div>
           ) : (
             <>
+              <div className="space-y-4 p-4 sm:p-6">
+                {filteredSections.map((section) => {
+                  const { property, snapshot, nextBooking, location } = section
+                  const shortageCount = section.counts.shortages
+                  const issueCount = section.counts.issues
+
+                  return (
+                    <section
+                      key={property.id}
+                      className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"
+                    >
+                      <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="text-xl font-semibold text-slate-900">
+                              {property.name}
+                            </h3>
+                            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
+                              {property.code}
+                            </span>
+                          </div>
+
+                          <p className="mt-2 text-sm text-slate-700">
+                            {location || "—"}
+                          </p>
+
+                          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                            <span>{getPropertyTypeLabel(language, property.type)}</span>
+                            <span>•</span>
+                            <span>{getPropertyStatusLabel(language, property.status)}</span>
+                            <span>•</span>
+                            <span>
+                              {formatCountText(
+                                property.maxGuests || 0,
+                                language,
+                                "επισκέπτης",
+                                "επισκέπτες",
+                                "guest",
+                                "guests"
+                              )}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col items-start gap-3 lg:items-end">
+                          <span
+                            className={`inline-flex rounded-full px-3 py-1.5 text-xs font-semibold ${getOperationalStatusBadgeClasses(
+                              snapshot?.readiness.state ?? "unknown"
+                            )}`}
+                          >
+                            {getOperationalStatusLabel(
+                              language,
+                              snapshot?.readiness.state ?? "unknown"
+                            )}
+                          </span>
+
+                          <div className="max-w-sm text-sm text-slate-600 lg:text-right">
+                            {getTodayReadinessReason(language, snapshot)}
+                          </div>
+
+                          <Link
+                            href={`/properties/${property.id}`}
+                            className="inline-flex items-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                          >
+                            {texts.view}
+                          </Link>
+                        </div>
+                      </div>
+
+                      <div className="mt-5 grid gap-4 xl:grid-cols-4">
+                        <TodaySnapshotPanel
+                          title={localizeText(language, "Κρατήσεις σήμερα", "Bookings today")}
+                          badge={
+                            <span
+                              className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${getTodayOccupancyBadgeClasses(
+                                snapshot?.occupancy.state ?? "vacant"
+                              )}`}
+                            >
+                              {getTodayOccupancyLabel(
+                                language,
+                                snapshot?.occupancy.state ?? "vacant"
+                              )}
+                            </span>
+                          }
+                        >
+                          <p className="font-medium text-slate-900">
+                            {formatCountText(
+                              section.counts.bookings,
+                              language,
+                              "κράτηση",
+                              "κρατήσεις",
+                              "booking",
+                              "bookings"
+                            )}
+                          </p>
+                          <p>
+                            {snapshot?.occupancy.primaryGuestName
+                              ? localizeText(
+                                  language,
+                                  `Κύριος επισκέπτης: ${snapshot.occupancy.primaryGuestName}`,
+                                  `Main guest: ${snapshot.occupancy.primaryGuestName}`
+                                )
+                              : localizeText(
+                                  language,
+                                  "Δεν υπάρχει κύριος επισκέπτης για σήμερα.",
+                                  "No primary guest for today."
+                                )}
+                          </p>
+                          <p>
+                            {formatTaskTimeRange(
+                              language,
+                              snapshot?.occupancy.fromTime,
+                              snapshot?.occupancy.toTime
+                            )}
+                          </p>
+                        </TodaySnapshotPanel>
+
+                        <TodaySnapshotPanel
+                          title={localizeText(language, "Εργασίες σήμερα", "Tasks today")}
+                          badge={
+                            <span
+                              className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${getTodayTaskBadgeClasses(
+                                snapshot?.tasks.state ?? "none"
+                              )}`}
+                            >
+                              {getTodayTaskLabel(language, snapshot?.tasks.state ?? "none")}
+                            </span>
+                          }
+                        >
+                          <p className="font-medium text-slate-900">
+                            {formatCountText(
+                              section.counts.tasks,
+                              language,
+                              "εργασία",
+                              "εργασίες",
+                              "task",
+                              "tasks"
+                            )}
+                          </p>
+                          <p>
+                            {localizeText(language, "Ενεργά alert:", "Active alerts:")}{" "}
+                            {snapshot?.tasks.activeAlertCount ?? 0}
+                          </p>
+                          <p>
+                            {localizeText(language, "Προβλήματα / καθυστερήσεις:", "Problems / overdue:")}{" "}
+                            {snapshot?.tasks.problemCount ?? 0}
+                          </p>
+                        </TodaySnapshotPanel>
+
+                        <TodaySnapshotPanel
+                          title={localizeText(language, "Αναλώσιμα σήμερα", "Supplies today")}
+                          badge={
+                            <span
+                              className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${getTodaySupplyBadgeClasses(
+                                shortageCount
+                              )}`}
+                            >
+                              {getTodaySupplyLabel(language, shortageCount)}
+                            </span>
+                          }
+                        >
+                          <p className="font-medium text-slate-900">
+                            {shortageCount > 0
+                              ? localizeText(
+                                  language,
+                                  `${shortageCount} ελλείψεις`,
+                                  `${shortageCount} shortages`
+                                )
+                              : localizeText(language, "Χωρίς ελλείψεις", "No shortages")}
+                          </p>
+                          <p>
+                            {localizeText(language, "Κρίσιμες ελλείψεις:", "Critical shortages:")}{" "}
+                            {snapshot?.supplies.criticalShortageCount ?? 0}
+                          </p>
+                          <p>
+                            {localizeText(language, "Πλήρη / μεσαία / ελλείψεις:", "Full / medium / missing:")}{" "}
+                            {snapshot?.supplies.segments.find((segment) => segment.state === "full")?.count ?? 0}
+                            {" / "}
+                            {snapshot?.supplies.segments.find((segment) => segment.state === "medium")?.count ?? 0}
+                            {" / "}
+                            {shortageCount}
+                          </p>
+                        </TodaySnapshotPanel>
+
+                        <TodaySnapshotPanel
+                          title={localizeText(language, "Θέματα και βλάβες", "Issues and damages")}
+                          badge={
+                            <span
+                              className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${getTodayIssuesBadgeClasses(
+                                snapshot?.issues.state ?? "clear"
+                              )}`}
+                            >
+                              {getTodayIssuesLabel(language, snapshot?.issues.state ?? "clear")}
+                            </span>
+                          }
+                        >
+                          <p className="font-medium text-slate-900">
+                            {formatCountText(
+                              issueCount,
+                              language,
+                              "θέμα",
+                              "θέματα",
+                              "item",
+                              "items"
+                            )}
+                          </p>
+                          <p>
+                            {localizeText(language, "Blocking:", "Blocking:")}{" "}
+                            {snapshot?.issues.blockingCount ?? 0}
+                          </p>
+                          <p>
+                            {localizeText(language, "Warnings:", "Warnings:")}{" "}
+                            {snapshot?.issues.warningCount ?? 0}
+                          </p>
+                        </TodaySnapshotPanel>
+                      </div>
+
+                      <div className="mt-5 grid gap-4 border-t border-slate-200 pt-4 md:grid-cols-3">
+                        <div>
+                          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            {localizeText(language, "Επόμενο check-in", "Next check-in")}
+                          </div>
+                          <div className="mt-1 text-sm text-slate-900">
+                            {nextBooking?.checkInAt
+                              ? formatDisplayDateTime(nextBooking.checkInAt, texts.locale)
+                              : "—"}
+                          </div>
+                          <div className="mt-1 text-xs text-slate-500">
+                            {nextBooking?.guestName ||
+                              localizeText(language, "Δεν υπάρχει επόμενη άφιξη.", "No upcoming arrival.")}
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            {localizeText(language, "Σημερινή ημερομηνία", "Today's date")}
+                          </div>
+                          <div className="mt-1 text-sm text-slate-900">
+                            {formatDisplayDate(todayReference, texts.locale)}
+                          </div>
+                          <div className="mt-1 text-xs text-slate-500">
+                            {localizeText(
+                              language,
+                              "Εικόνα ημέρας από το calendar snapshot.",
+                              "Day view based on the calendar snapshot."
+                            )}
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            {texts.updated}
+                          </div>
+                          <div className="mt-1 text-sm text-slate-900">
+                            {formatDisplayDateTime(property.updatedAt, texts.locale)}
+                          </div>
+                          <div className="mt-1 text-xs text-slate-500">
+                            {localizeText(
+                              language,
+                              "Τελευταία ενημέρωση εγγραφής ακινήτου.",
+                              "Latest property record update."
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </section>
+                  )
+                })}
+              </div>
               {/* ─── Desktop table ──────────────────────────────────────────── */}
-              <div className="hidden overflow-x-auto xl:block">
+              <div className="hidden">
                 <table className="min-w-full text-left text-sm">
                   <thead className="bg-slate-50 text-slate-600">
                     <tr>
@@ -1113,7 +1874,7 @@ export default function PropertiesPage() {
               </div>
 
               {/* ─── Mobile cards ───────────────────────────────────────────── */}
-              <div className="grid gap-4 p-4 sm:p-6 xl:hidden">
+              <div className="hidden">
                 {filteredProperties.map((property) => {
                   const readiness = normalizeReadinessForUI(property.readinessStatus)
                   const readinessExplanation = getReadinessExplanation(property, language)

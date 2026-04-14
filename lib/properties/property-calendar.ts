@@ -102,6 +102,7 @@ export type PropertyCalendarSuppliesSegmentState = "missing" | "medium" | "full"
 export type PropertyCalendarDaySnapshot = {
   key: string
   date: Date
+  isToday: boolean
   occupancy: {
     state: PropertyCalendarOccupancyState
     bookingCount: number
@@ -112,6 +113,9 @@ export type PropertyCalendarDaySnapshot = {
     primaryGuestName: string | null
     fromTime: string | null
     toTime: string | null
+    checkInBookingIds: string[]
+    checkOutBookingIds: string[]
+    showInCalendar: boolean
   }
   tasks: {
     state: PropertyCalendarTaskState
@@ -120,6 +124,12 @@ export type PropertyCalendarDaySnapshot = {
     activeAlertCount: number
     problemCount: number
     taskIds: string[]
+    isPastDay: boolean
+    pastDueOpenCount: number
+    lockedTaskIds: string[]
+    requiresClosureDecision: boolean
+    closureSuggestedStatus: "not_executed" | null
+    showInCalendar: boolean
   }
   supplies: {
     total: number
@@ -130,6 +140,8 @@ export type PropertyCalendarDaySnapshot = {
       count: number
       percentage: number
     }>
+    showInCalendar: boolean
+    showOnlyCurrentDay: boolean
   }
   issues: {
     state: PropertyCalendarIssuesState
@@ -138,6 +150,8 @@ export type PropertyCalendarDaySnapshot = {
     warningCount: number
     issueIds: string[]
     conditionIds: string[]
+    showInCalendar: boolean
+    showOnlyCurrentDay: boolean
   }
   readiness: {
     state: PropertyCalendarReadinessState
@@ -149,6 +163,12 @@ export type PropertyCalendarDaySnapshot = {
       | "conditions"
       | "clear"
       | "unknown"
+  }
+  visuals: {
+    hasOccupancyBar: boolean
+    hasTaskBar: boolean
+    hasSuppliesBar: boolean
+    hasIssuesBar: boolean
   }
 }
 
@@ -177,6 +197,35 @@ function normalizeInteger(value: number | null | undefined, fallback: number) {
   return Number.isFinite(value) ? Number(value) : fallback
 }
 
+function formatDateKeyParts(year: number, monthIndexOrNumber: number, day: number, isMonthIndex = false) {
+  const month = isMonthIndex ? monthIndexOrNumber + 1 : monthIndexOrNumber
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`
+}
+
+function extractLeadingDateToken(value: unknown) {
+  const text = String(value ?? "").trim()
+  if (!text) return null
+
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (!match) return null
+
+  return `${match[1]}-${match[2]}-${match[3]}`
+}
+
+function parseDateTokenAsLocalDate(token: string | null) {
+  if (!token) return null
+
+  const match = token.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!match) return null
+
+  const year = Number(match[1])
+  const month = Number(match[2]) - 1
+  const day = Number(match[3])
+
+  const date = new Date(year, month, day)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
 function toDateOrNull(value: DateLike) {
   if (!value) return null
 
@@ -187,28 +236,54 @@ function toDateOrNull(value: DateLike) {
   const text = String(value).trim()
   if (!text) return null
 
-  const dateOnlyMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})$/)
-  if (dateOnlyMatch) {
-    const year = Number(dateOnlyMatch[1])
-    const month = Number(dateOnlyMatch[2]) - 1
-    const day = Number(dateOnlyMatch[3])
-    const date = new Date(year, month, day)
-    return Number.isNaN(date.getTime()) ? null : date
+  const dateOnlyToken = extractLeadingDateToken(text)
+  const isDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(text)
+
+  if (isDateOnly && dateOnlyToken) {
+    return parseDateTokenAsLocalDate(dateOnlyToken)
   }
 
   const parsed = new Date(text)
   return Number.isNaN(parsed.getTime()) ? null : parsed
 }
 
-function normalizeDateKey(value: DateLike) {
+function normalizeLocalDateKey(value: DateLike) {
   const date = toDateOrNull(value)
   if (!date) return null
 
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, "0")
-  const day = String(date.getDate()).padStart(2, "0")
+  return formatDateKeyParts(date.getFullYear(), date.getMonth(), date.getDate(), true)
+}
 
-  return `${year}-${month}-${day}`
+function normalizeCalendarDateKey(value: DateLike) {
+  if (!value) return null
+
+  if (typeof value === "string") {
+    const token = extractLeadingDateToken(value)
+    if (token) return token
+
+    const parsed = new Date(value)
+    if (Number.isNaN(parsed.getTime())) return null
+
+    return formatDateKeyParts(
+      parsed.getUTCFullYear(),
+      parsed.getUTCMonth(),
+      parsed.getUTCDate(),
+      true
+    )
+  }
+
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return null
+
+    return formatDateKeyParts(
+      value.getUTCFullYear(),
+      value.getUTCMonth(),
+      value.getUTCDate(),
+      true
+    )
+  }
+
+  return null
 }
 
 function normalizeTime(value?: string | null) {
@@ -222,12 +297,14 @@ function normalizeTime(value?: string | null) {
 function startOfDay(value: DateLike) {
   const date = toDateOrNull(value)
   if (!date) return null
+
   return new Date(date.getFullYear(), date.getMonth(), date.getDate())
 }
 
 function endOfDay(value: DateLike) {
   const start = startOfDay(value)
   if (!start) return null
+
   return new Date(start.getFullYear(), start.getMonth(), start.getDate(), 23, 59, 59, 999)
 }
 
@@ -242,6 +319,22 @@ function compareDateKeys(a: string | null, b: string | null) {
   if (!a) return 1
   if (!b) return -1
   return a.localeCompare(b)
+}
+
+function isSameDateKey(a: string | null, b: string | null) {
+  return Boolean(a && b && a === b)
+}
+
+function isTodayKey(dayKey: string) {
+  const today = new Date()
+  const todayKey = formatDateKeyParts(today.getFullYear(), today.getMonth(), today.getDate(), true)
+  return dayKey === todayKey
+}
+
+function isPastDayKey(dayKey: string) {
+  const today = new Date()
+  const todayKey = formatDateKeyParts(today.getFullYear(), today.getMonth(), today.getDate(), true)
+  return compareDateKeys(dayKey, todayKey) < 0
 }
 
 function isOpenIssueStatus(status: string | null | undefined) {
@@ -273,7 +366,9 @@ function isTaskClosed(status: string | null | undefined) {
   return (
     normalized === "completed" ||
     normalized === "cancelled" ||
-    normalized === "canceled"
+    normalized === "canceled" ||
+    normalized === "not_executed" ||
+    normalized === "missed"
   )
 }
 
@@ -293,25 +388,32 @@ function isTaskProblem(task: PropertyCalendarTaskInput, dayEnd: Date) {
 
 function classifyTaskState(
   tasks: PropertyCalendarTaskInput[],
-  dayEnd: Date
+  dayEnd: Date,
+  dayKey: string
 ): PropertyCalendarDaySnapshot["tasks"] {
   const taskIds = tasks.map((task) => task.id)
   const completedCount = tasks.filter((task) => isTaskCompleted(task.status)).length
-  const activeAlertCount = tasks.filter(
-    (task) =>
-      task.alertEnabled === true &&
-      (() => {
-        const alertAt = toDateOrNull(task.alertAt)
-        return Boolean(alertAt && alertAt.getTime() <= dayEnd.getTime())
-      })()
-  ).length
+
+  const activeAlertCount = tasks.filter((task) => {
+    if (task.alertEnabled !== true) return false
+    const alertAt = toDateOrNull(task.alertAt)
+    return Boolean(alertAt && alertAt.getTime() <= dayEnd.getTime())
+  }).length
+
   const problemCount = tasks.filter((task) => isTaskProblem(task, dayEnd)).length
+  const isPastDay = isPastDayKey(dayKey)
+
+  const lockedPastTasks = isPastDay
+    ? tasks.filter((task) => !isTaskClosed(task.status))
+    : []
+
+  const pastDueOpenCount = lockedPastTasks.length
 
   let state: PropertyCalendarTaskState = "none"
 
   if (tasks.length === 0) {
     state = "none"
-  } else if (problemCount > 0) {
+  } else if (pastDueOpenCount > 0 || problemCount > 0) {
     state = "problem"
   } else if (tasks.some((task) => normalizeTaskStatus(task.status) === "in_progress")) {
     state = "in_progress"
@@ -336,8 +438,14 @@ function classifyTaskState(
     count: tasks.length,
     completedCount,
     activeAlertCount,
-    problemCount,
+    problemCount: Math.max(problemCount, pastDueOpenCount),
     taskIds,
+    isPastDay,
+    pastDueOpenCount,
+    lockedTaskIds: lockedPastTasks.map((task) => task.id),
+    requiresClosureDecision: pastDueOpenCount > 0,
+    closureSuggestedStatus: pastDueOpenCount > 0 ? "not_executed" : null,
+    showInCalendar: tasks.length > 0,
   }
 }
 
@@ -392,6 +500,7 @@ function conditionActiveOnDay(
 function classifyIssuesState(input: {
   issues: PropertyCalendarIssueInput[]
   conditions: PropertyCalendarConditionInput[]
+  isToday: boolean
 }) {
   const blockingCount =
     input.issues.filter((issue) => issueSeverityRank(issue.severity) >= 3).length +
@@ -414,10 +523,12 @@ function classifyIssuesState(input: {
     warningCount,
     issueIds: input.issues.map((issue) => issue.id),
     conditionIds: input.conditions.map((condition) => condition.id),
+    showInCalendar: input.isToday && (input.issues.length > 0 || input.conditions.length > 0),
+    showOnlyCurrentDay: true,
   }
 }
 
-function classifySuppliesState(supplies: PropertyCalendarSupplyInput[]) {
+function classifySuppliesState(supplies: PropertyCalendarSupplyInput[], isToday: boolean) {
   const buckets: Record<PropertyCalendarSuppliesSegmentState, number> = {
     missing: 0,
     medium: 0,
@@ -459,6 +570,7 @@ function classifySuppliesState(supplies: PropertyCalendarSupplyInput[]) {
 
     const candidateDate =
       toDateOrNull(supply.lastSeenUpdate) ?? toDateOrNull(supply.updatedAt)
+
     if (candidateDate && (!updatedAt || candidateDate.getTime() > updatedAt.getTime())) {
       updatedAt = candidateDate
     }
@@ -477,14 +589,17 @@ function classifySuppliesState(supplies: PropertyCalendarSupplyInput[]) {
         percentage: total > 0 ? Math.round((buckets[state] / total) * 100) : 0,
       })
     ),
+    showInCalendar: isToday && total > 0,
+    showOnlyCurrentDay: true,
   }
 }
 
 function bookingTouchesDay(booking: PropertyCalendarBookingInput, dayKey: string) {
   if (isBookingCancelled(booking.status)) return false
 
-  const checkInKey = normalizeDateKey(booking.checkInDate)
-  const checkOutKey = normalizeDateKey(booking.checkOutDate)
+  const checkInKey = normalizeCalendarDateKey(booking.checkInDate)
+  const checkOutKey = normalizeCalendarDateKey(booking.checkOutDate)
+
   if (!checkInKey || !checkOutKey) return false
 
   return compareDateKeys(checkInKey, dayKey) <= 0 && compareDateKeys(checkOutKey, dayKey) >= 0
@@ -495,16 +610,19 @@ function classifyOccupancyState(
   dayKey: string
 ): PropertyCalendarDaySnapshot["occupancy"] {
   const activeBookings = bookings.filter((booking) => bookingTouchesDay(booking, dayKey))
+
   const checkInBookings = activeBookings.filter(
-    (booking) => normalizeDateKey(booking.checkInDate) === dayKey
+    (booking) => isSameDateKey(normalizeCalendarDateKey(booking.checkInDate), dayKey)
   )
+
   const checkOutBookings = activeBookings.filter(
-    (booking) => normalizeDateKey(booking.checkOutDate) === dayKey
+    (booking) => isSameDateKey(normalizeCalendarDateKey(booking.checkOutDate), dayKey)
   )
 
   const primaryBooking = activeBookings[0] || null
 
   let state: PropertyCalendarOccupancyState = "vacant"
+
   if (checkInBookings.length > 0 && checkOutBookings.length > 0) state = "turnover"
   else if (checkInBookings.length > 0) state = "check_in"
   else if (checkOutBookings.length > 0) state = "check_out"
@@ -520,6 +638,9 @@ function classifyOccupancyState(
     primaryGuestName: primaryBooking?.guestName ?? null,
     fromTime: normalizeTime(primaryBooking?.checkInTime) ?? null,
     toTime: normalizeTime(primaryBooking?.checkOutTime) ?? null,
+    checkInBookingIds: checkInBookings.map((booking) => booking.id),
+    checkOutBookingIds: checkOutBookings.map((booking) => booking.id),
+    showInCalendar: activeBookings.length > 0,
   }
 }
 
@@ -555,10 +676,7 @@ function deriveReadinessState(input: {
   ) {
     return {
       state: input.tasks.state === "problem" ? ("not_ready" as const) : ("borderline" as const),
-      blockingReason:
-        input.tasks.state === "problem"
-          ? ("turnover_task_pending" as const)
-          : ("turnover_task_pending" as const),
+      blockingReason: "turnover_task_pending" as const,
     }
   }
 
@@ -619,27 +737,34 @@ export function buildPropertyCalendarDaySnapshot(input: {
   const dayEnd = endOfDay(dayStart)
   if (!dayEnd) return null
 
-  const key = normalizeDateKey(dayStart)
+  const key = normalizeLocalDateKey(dayStart)
   if (!key) return null
 
+  const isToday = isTodayKey(key)
+
   const dayBookings = safeArray(input.bookings).filter((booking) => bookingTouchesDay(booking, key))
+
   const dayTasks = safeArray(input.tasks).filter(
-    (task) => normalizeDateKey(task.scheduledDate) === key
+    (task) => normalizeCalendarDateKey(task.scheduledDate) === key
   )
+
   const dayIssues = safeArray(input.issues).filter((issue) =>
     issueActiveOnDay(issue, dayStart, dayEnd)
   )
+
   const dayConditions = safeArray(input.conditions).filter((condition) =>
     conditionActiveOnDay(condition, dayStart, dayEnd)
   )
 
   const occupancy = classifyOccupancyState(dayBookings, key)
-  const tasks = classifyTaskState(dayTasks, dayEnd)
-  const supplies = classifySuppliesState(safeArray(input.propertySupplies))
+  const tasks = classifyTaskState(dayTasks, dayEnd, key)
+  const supplies = classifySuppliesState(safeArray(input.propertySupplies), isToday)
   const issues = classifyIssuesState({
     issues: dayIssues,
     conditions: dayConditions,
+    isToday,
   })
+
   const readiness = deriveReadinessState({
     occupancy,
     tasks,
@@ -649,11 +774,18 @@ export function buildPropertyCalendarDaySnapshot(input: {
   return {
     key,
     date: dayStart,
+    isToday,
     occupancy,
     tasks,
     supplies,
     issues,
     readiness,
+    visuals: {
+      hasOccupancyBar: occupancy.showInCalendar,
+      hasTaskBar: tasks.showInCalendar,
+      hasSuppliesBar: supplies.showInCalendar,
+      hasIssuesBar: issues.showInCalendar,
+    },
   }
 }
 
@@ -681,14 +813,14 @@ export function buildPropertyCalendarSnapshot(
     }
   }
 
-  const firstDay = days[0]?.key ?? normalizeDateKey(anchorDate) ?? ""
+  const firstDay = days[0]?.key ?? normalizeLocalDateKey(anchorDate) ?? ""
   const lastDay =
     days[days.length - 1]?.key ??
-    normalizeDateKey(addDays(anchorDate, totalDays - 1)) ??
+    normalizeLocalDateKey(addDays(anchorDate, totalDays - 1)) ??
     firstDay
 
   return {
-    anchorDate: normalizeDateKey(anchorDate) ?? firstDay,
+    anchorDate: normalizeLocalDateKey(anchorDate) ?? firstDay,
     startDate: firstDay,
     endDate: lastDay,
     days,

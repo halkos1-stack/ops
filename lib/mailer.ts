@@ -7,13 +7,32 @@ type SendMailArgs = {
   text?: string
 }
 
+function isPlaceholderMailValue(value?: string | null) {
+  const normalized = String(value || "").trim().toLowerCase()
+  if (!normalized) return true
+
+  return (
+    normalized.includes("example.com") ||
+    normalized === "your_user" ||
+    normalized === "your_pass" ||
+    normalized === "your_email@example.com"
+  )
+}
+
 function getTransport() {
   const host = process.env.SMTP_HOST
   const port = Number(process.env.SMTP_PORT || 587)
   const user = process.env.SMTP_USER
   const pass = process.env.SMTP_PASS
 
-  if (!host || !user || !pass) {
+  if (
+    !host ||
+    !user ||
+    !pass ||
+    isPlaceholderMailValue(host) ||
+    isPlaceholderMailValue(user) ||
+    isPlaceholderMailValue(pass)
+  ) {
     return null
   }
 

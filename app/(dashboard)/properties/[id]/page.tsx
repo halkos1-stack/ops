@@ -1,7 +1,10 @@
+// app/(dashboard)/properties/[id]/page.tsx
+// ΜΕΡΟΣ 1 / 4
+
 "use client"
 
 import Link from "next/link"
-import { useParams } from "next/navigation"
+import { useParams, useRouter } from "next/navigation"
 import {
   useCallback,
   useEffect,
@@ -10,26 +13,23 @@ import {
   type ReactNode,
 } from "react"
 import { useAppLanguage } from "@/components/i18n/LanguageProvider"
-import {
-  getIssuePriorityLabel,
-  getIssueStatusLabel,
-  getTaskStatusLabel,
-} from "@/lib/i18n/labels"
-import {
-  normalizeIssuePriority,
-  normalizeIssueStatus,
-  normalizeTaskStatus,
-  normalizeTaskTitleText,
-} from "@/lib/i18n/normalizers"
 import { getSupplyDisplayName } from "@/lib/supply-presets"
 import { buildCanonicalSupplySnapshot } from "@/lib/supplies/compute-supply-state"
 
 type Language = "el" | "en"
 type ViewMode = "calendar" | "management"
 type CalendarGranularity = "month" | "week" | "day"
-type SupplyState = "missing" | "medium" | "full"
+type TaskTitleKey =
+  | "cleaning"
+  | "inspection"
+  | "repair"
+  | "damage"
+  | "supplies"
+  | "photos"
 type Tone = "slate" | "sky" | "amber" | "emerald" | "red"
-type TaskTitleKey = "cleaning" | "inspection" | "repair" | "damage" | "supplies" | "photos"
+type SupplyState = "missing" | "medium" | "full"
+type OccupancyKind = "vacant" | "arrival" | "departure" | "turnover" | "stay"
+type CalendarFilter = "bookings" | "tasks" | "supplies" | "issues" | null
 
 type PropertyBookingLite = {
   id: string
@@ -96,10 +96,11 @@ type PropertyIssueLite = {
 
 type PropertySupplyLite = {
   id: string
-  currentStock: number
+  currentStock?: number | null
   stateMode?: string | null
   mediumThreshold?: number | null
   fullThreshold?: number | null
+  targetLevel?: number | null
   targetStock?: number | null
   reorderThreshold?: number | null
   minimumThreshold?: number | null
@@ -172,54 +173,58 @@ type TaskModalState = {
   notes: string
 }
 
-type SupplyCounts = Record<SupplyState, number>
-
-type BarData = {
-  tone: Tone
-  label: string
-  detail: string
-  hoverText: string
-}
-
 type WorkWindow = {
   key: string
   booking: PropertyBookingLite
   nextBooking: PropertyBookingLite | null
   startAt: Date
   endAt: Date | null
-  task: PropertyTaskLite | null
+  linkedTask: PropertyTaskLite | null
 }
 
-type DaySnapshot = {
-  date: Date
+type SupplyRow = PropertySupplyLite & {
+  displayName: string
+  state: SupplyState
+  updateKey: string | null
+}
+
+type DayEntry = {
   key: string
+  date: Date
   isToday: boolean
   isCurrentMonth: boolean
-  occupancy: BarData
-  tasks: BarData
-  supplies: {
-    detail: string
-    hoverText: string
-    counts: SupplyCounts
-  }
-  issues: BarData
+  occupancyKind: OccupancyKind
+  arrivals: PropertyBookingLite[]
+  departures: PropertyBookingLite[]
+  stays: PropertyBookingLite[]
+  activeBookings: PropertyBookingLite[]
+  scheduledTasks: PropertyTaskLite[]
   workWindow: WorkWindow | null
-  bookings: PropertyBookingLite[]
-  dayTasks: PropertyTaskLite[]
-  openIssues: PropertyIssueLite[]
+  taskForCalendar: PropertyTaskLite | null
+  issueRecords: PropertyIssueLite[]
+  supplyRecords: SupplyRow[]
+}
+
+type HourRow = {
+  hour: number
+  label: string
+  arrivals: PropertyBookingLite[]
+  departures: PropertyBookingLite[]
+  activeStays: PropertyBookingLite[]
+  tasks: PropertyTaskLite[]
 }
 
 const translations = {
   el: {
-    loading: "Φόρτωση ημερολογίου ακινήτου...",
-    loadError: "Δεν ήταν δυνατή η φόρτωση του ημερολογίου ακινήτου.",
+    loading: "Φόρτωση ακινήτου...",
+    loadError: "Δεν ήταν δυνατή η φόρτωση του ακινήτου.",
     noData: "Δεν υπάρχουν διαθέσιμα δεδομένα ακινήτου.",
     calendarView: "Ημερολόγιο ακινήτου",
     managementView: "Διαχείριση ακινήτου",
     calendarViewHint:
-      "Βασική προβολή ελέγχου ακινήτου με κύρια έμφαση στο εβδομαδιαίο ημερολόγιο και στη ροή εργασίας ανάμεσα σε check-out και επόμενο check-in.",
+      "Ημερολογιακή εικόνα readiness με καθαρές αφίξεις, αναχωρήσεις, εργασία, ζημιές και αναλώσιμα.",
     managementViewHint:
-      "Από εδώ γίνονται οι βασικές ενέργειες για στοιχεία ακινήτου, προεπιλεγμένο συνεργάτη και λίστες.",
+      "Κεντρικές ενέργειες για στοιχεία ακινήτου, συνεργάτη και λίστες.",
     month: "Μήνας",
     week: "Εβδομάδα",
     day: "Ημέρα",
@@ -227,78 +232,42 @@ const translations = {
     today: "Σήμερα",
     next: "Επόμενο",
     createTask: "Δημιουργία εργασίας",
-    occupancy: "Φιλοξενία",
-    tasks: "Εργασίες",
-    supplies: "Αναλώσιμα",
-    issues: "Ζημιές / βλάβες",
-    noGuest: "Χωρίς φιλοξενούμενους",
-    occupied: "Με φιλοξενούμενους",
-    arrival: "Άφιξη",
-    departure: "Αναχώρηση",
-    turnover: "Άφιξη / Αναχώρηση",
-    stay: "Διαμονή",
-    openWindow: "Ανοικτό παράθυρο εργασίας",
-    noTask: "Χωρίς εργασία",
-    createCleaningTaskPrompt:
-      "Δημιουργήστε εργασία καθαρισμού για το επόμενο check-in",
-    openTasks: "Ανοιχτές εργασίες",
-    inProgressTask: "Σε εξέλιξη",
-    completedTasks: "Ολοκληρωμένη εργασία",
-    alerts: "Ενεργό alert",
-    cleanPicture: "Καθαρή εικόνα",
-    openIssues: "Ανοιχτά θέματα",
-    selectedDay: "Εικόνα ημέρας",
-    bookingsTitle: "Κρατήσεις ημέρας",
-    tasksTitle: "Εργασίες ημέρας",
-    suppliesTitle: "Τρέχουσα εικόνα αναλωσίμων",
-    issuesTitle: "Ανοιχτές ζημιές / βλάβες",
-    from: "Από",
-    to: "Έως",
-    guest: "Φιλοξενούμενος",
-    unnamedGuest: "Χωρίς όνομα",
-    untitledTask: "Χωρίς τίτλο",
-    untitledIssue: "Χωρίς τίτλο",
-    noBookingsForDay: "Δεν υπάρχουν κρατήσεις για αυτή την ημέρα.",
-    noTasksForDay: "Δεν υπάρχει ενεργό παράθυρο εργασίας για αυτή την ημέρα.",
-    noIssuesForDay: "Δεν υπάρχουν ανοιχτές ζημιές ή βλάβες.",
-    noSupplies: "Δεν υπάρχουν καταχωρημένα αναλώσιμα.",
-    missing: "Έλλειψη",
-    medium: "Μέτρια",
-    full: "Πλήρης",
-    bookingsSuffix: "κρατήσεις",
-    tasksSuffix: "εργασίες",
-    issuesSuffix: "θέματα",
-    viewTask: "Προβολή εργασίας",
+    openTask: "Προβολή εργασίας",
     editTask: "Επεξεργασία εργασίας",
     deleteTask: "Διαγραφή εργασίας",
-    editProperty: "Στοιχεία ακινήτου",
-    editPartner: "Συνεργάτης",
-    editLists: "Λίστες ακινήτου",
-    editPropertyHint:
-      "Ενημέρωση βασικών πεδίων ακινήτου χωρίς να φύγεις από αυτή τη σελίδα.",
-    editPartnerHint:
-      "Ορισμός ή αλλαγή προεπιλεγμένου συνεργάτη για το ακίνητο.",
-    editListsHint:
-      "Μετάβαση στις λίστες ακινήτου που χρησιμοποιούνται στη ροή εκτέλεσης.",
-    currentSuppliesState:
-      "Η τρέχουσα κατάσταση αναλωσίμων προβάλλεται σε όλες τις ημέρες του ημερολογίου.",
-    currentIssuesState:
-      "Η τρέχουσα ανοιχτή εικόνα ζημιών και βλαβών προβάλλεται σε όλες τις ημέρες του ημερολογίου.",
-    save: "Αποθήκευση",
-    cancel: "Κλείσιμο",
-    close: "Κλείσιμο",
-    choosePartner: "Επιλογή συνεργάτη",
+    occupancy: "Φιλοξενία",
+    tasks: "Εργασία",
+    supplies: "Αναλώσιμα",
+    issues: "Ζημιές / βλάβες",
+    selectedDay: "Εικόνα ημέρας",
+    arrivalsTitle: "Αφίξεις",
+    departuresTitle: "Αναχωρήσεις",
+    staysTitle: "Διαμονές",
+    dayTimelineTitle: "Προβολή ημέρας ανά ώρα",
+    taskPanelTitle: "Εργασία ημέρας",
+    suppliesPanelTitle: "Αναλώσιμα που υποβλήθηκαν αυτή την ημέρα",
+    issuesPanelTitle: "Ζημιές / βλάβες που καταγράφηκαν αυτή την ημέρα",
+    noArrivals: "Δεν υπάρχουν αφίξεις.",
+    noDepartures: "Δεν υπάρχουν αναχωρήσεις.",
+    noStays: "Δεν υπάρχουν ενεργές διαμονές.",
+    noTimelineItems: "Δεν υπάρχουν καταχωρήσεις για αυτή την ώρα.",
+    noWorkWindow: "Δεν υπάρχει ενεργό παράθυρο εργασίας για αυτή την ημέρα.",
+    noTaskForDay: "Δεν έχει δημιουργηθεί εργασία για αυτό το παράθυρο.",
+    noSuppliesForDay: "Δεν υποβλήθηκαν αναλώσιμα αυτή την ημέρα.",
+    noIssuesForDay: "Δεν υποβλήθηκαν ζημιές ή βλάβες αυτή την ημέρα.",
     noPartner: "Χωρίς συνεργάτη",
-    propertySaved: "Τα στοιχεία ακινήτου αποθηκεύτηκαν επιτυχώς.",
-    partnerSaved: "Ο προεπιλεγμένος συνεργάτης αποθηκεύτηκε επιτυχώς.",
-    taskSaved: "Η εργασία αποθηκεύτηκε επιτυχώς.",
-    taskDeleted: "Η εργασία διαγράφηκε επιτυχώς.",
+    unnamedGuest: "Χωρίς όνομα",
+    propertySaved: "Τα στοιχεία ακινήτου αποθηκεύτηκαν.",
+    partnerSaved: "Ο προεπιλεγμένος συνεργάτης αποθηκεύτηκε.",
+    taskSaved: "Η εργασία αποθηκεύτηκε.",
+    taskDeleted: "Η εργασία διαγράφηκε.",
     saveError: "Δεν ήταν δυνατή η αποθήκευση.",
     deleteError: "Δεν ήταν δυνατή η διαγραφή της εργασίας.",
     deleteConfirm: "Θέλεις σίγουρα να διαγράψεις αυτή την εργασία;",
-    editTaskTitle: "Εργασία",
     propertyDetailsTitle: "Στοιχεία ακινήτου",
     partnerTitle: "Προεπιλεγμένος συνεργάτης",
+    taskModalTitle: "Εργασία",
+    choosePartner: "Επιλογή συνεργάτη",
     code: "Κωδικός",
     name: "Όνομα",
     address: "Διεύθυνση",
@@ -312,38 +281,78 @@ const translations = {
     date: "Ημερομηνία εκτέλεσης",
     startTime: "Ώρα έναρξης",
     endTime: "Ώρα λήξης",
-    alertTitle: "Alert",
     alertEnabled: "Ενεργοποίηση alert",
-    alertAt: "Ώρα alert",
-    taskTitleLabel: "Τίτλος εργασίας",
-    propertyLabel: "Ακίνητο",
-    taskWindowLabel: "Παράθυρο εργασίας",
-    managementPanelTitle: "Κεντρική διαχείριση ακινήτου",
-    managementPanelSubtitle:
-      "Όλες οι βασικές ενέργειες για λίστες, συνεργάτη, στοιχεία ακινήτου και νέα εργασία γίνονται από εδώ.",
-    workWindowInstruction:
-      "Άνοιξε την ημερομηνία για να διαχειριστείς την εργασία αυτής της περιόδου.",
-    viewDayInstruction:
-      "Άνοιξε την ημέρα για να διαχειριστείς την εργασία.",
-    nextCheckInMissing: "Δεν υπάρχει επόμενο check-in.",
-    monday: "Δευ",
-    tuesday: "Τρι",
-    wednesday: "Τετ",
-    thursday: "Πεμ",
-    friday: "Παρ",
-    saturday: "Σαβ",
-    sunday: "Κυρ",
+    alertAt: "Χρόνος alert",
+    taskTitleLabel: "Τύπος / τίτλος εργασίας",
+    save: "Αποθήκευση",
+    cancel: "Κλείσιμο",
+    lists: "Λίστες ακινήτου",
+    editProperty: "Στοιχεία ακινήτου",
+    editPartner: "Συνεργάτης",
+    editListsHint:
+      "Μετάβαση στις λίστες ακινήτου που χρησιμοποιούνται στη ροή readiness.",
+    editPropertyHint:
+      "Ενημέρωση βασικών στοιχείων ακινήτου χωρίς έξοδο από τη σελίδα.",
+    editPartnerHint:
+      "Ορισμός ή αλλαγή προεπιλεγμένου συνεργάτη για το ακίνητο.",
+    managementTitle: "Κεντρική διαχείριση ακινήτου",
+    managementSubtitle:
+      "Οι βασικές ενέργειες παραμένουν συγκεντρωμένες εδώ, ενώ η επιχειρησιακή εικόνα δίνεται στο ημερολόγιο.",
+    hour: "Ώρα",
+    issueDetailTitle: "Απαντήσεις ζημιών / βλαβών",
+    supplyDetailTitle: "Απαντήσεις αναλωσίμων",
+    taskStatus: {
+      new: "Νέα",
+      pending: "Σε αναμονή",
+      assigned: "Ανατεθειμένη",
+      waiting_acceptance: "Προς αποδοχή",
+      accepted: "Αποδεκτή",
+      in_progress: "Σε εξέλιξη",
+      completed: "Ολοκληρωμένη",
+      cancelled: "Ακυρωμένη",
+    },
+    issueStatus: {
+      open: "Ανοιχτό",
+      in_progress: "Σε εξέλιξη",
+      resolved: "Επιλυμένο",
+      closed: "Κλειστό",
+    },
+    supplyState: {
+      missing: "Έλλειψη",
+      medium: "Μέτρια",
+      full: "Πλήρης",
+    },
+    occupancyHint: {
+      arrival: "Άφιξη την ημέρα αυτή",
+      departure: "Αναχώρηση την ημέρα αυτή",
+      turnover: "Άφιξη και αναχώρηση την ίδια ημέρα",
+      stay: "Ενεργή διαμονή",
+    },
+    bookingArrival: "Άφιξη",
+    bookingStay: "Διαμονή",
+    bookingDeparture: "Αναχώρηση",
+    timelineArrival: "Άφιξη",
+    timelineStay: "Διαμονή",
+    timelineDeparture: "Αναχώρηση",
+    timelineTask: "Εργασία",
+    viewDay: "Προβολή ημέρας",
+    filterAll: "Όλα",
+    filterBookings: "Κρατήσεις",
+    filterTasks: "Εργασίες",
+    filterSupplies: "Αναλώσιμα",
+    filterIssues: "Βλάβες / Ζημιές",
+    weekdays: ["Δευ", "Τρι", "Τετ", "Πεμ", "Παρ", "Σαβ", "Κυρ"],
   },
   en: {
-    loading: "Loading property calendar...",
-    loadError: "The property calendar could not be loaded.",
+    loading: "Loading property...",
+    loadError: "The property could not be loaded.",
     noData: "No property data are available.",
     calendarView: "Property calendar",
     managementView: "Property management",
     calendarViewHint:
-      "Main control view with focus on the weekly calendar and the work flow between check-out and next check-in.",
+      "Calendar-first readiness view with clear arrivals, departures, task, issues and supplies.",
     managementViewHint:
-      "Core actions for property details, default partner and property lists happen from here.",
+      "Core actions for property details, partner and lists.",
     month: "Month",
     week: "Week",
     day: "Day",
@@ -351,78 +360,42 @@ const translations = {
     today: "Today",
     next: "Next",
     createTask: "Create task",
-    occupancy: "Occupancy",
-    tasks: "Tasks",
-    supplies: "Supplies",
-    issues: "Issues / damages",
-    noGuest: "No guests",
-    occupied: "Occupied",
-    arrival: "Arrival",
-    departure: "Departure",
-    turnover: "Arrival / Departure",
-    stay: "Stay",
-    openWindow: "Open work window",
-    noTask: "No task",
-    createCleaningTaskPrompt:
-      "Create a cleaning task for the next check-in",
-    openTasks: "Open tasks",
-    inProgressTask: "In progress",
-    completedTasks: "Completed task",
-    alerts: "Active alert",
-    cleanPicture: "Clean picture",
-    openIssues: "Open issues",
-    selectedDay: "Day view",
-    bookingsTitle: "Bookings for this day",
-    tasksTitle: "Tasks for this day",
-    suppliesTitle: "Current supplies picture",
-    issuesTitle: "Open issues / damages",
-    from: "From",
-    to: "To",
-    guest: "Guest",
-    unnamedGuest: "Unnamed guest",
-    untitledTask: "Untitled",
-    untitledIssue: "Untitled",
-    noBookingsForDay: "There are no bookings for this day.",
-    noTasksForDay: "There is no active work window for this day.",
-    noIssuesForDay: "There are no open issues or damages.",
-    noSupplies: "There are no registered supplies.",
-    missing: "Missing",
-    medium: "Medium",
-    full: "Full",
-    bookingsSuffix: "bookings",
-    tasksSuffix: "tasks",
-    issuesSuffix: "issues",
-    viewTask: "View task",
+    openTask: "Open task",
     editTask: "Edit task",
     deleteTask: "Delete task",
-    editProperty: "Property details",
-    editPartner: "Partner",
-    editLists: "Property lists",
-    editPropertyHint:
-      "Update core property fields without leaving this page.",
-    editPartnerHint:
-      "Set or change the default partner for this property.",
-    editListsHint:
-      "Open the property lists used in the execution flow.",
-    currentSuppliesState:
-      "The current supplies state is shown across all days of the calendar.",
-    currentIssuesState:
-      "The current open issues and damages picture is shown across all days of the calendar.",
-    save: "Save",
-    cancel: "Close",
-    close: "Close",
-    choosePartner: "Choose partner",
+    occupancy: "Hosting",
+    tasks: "Task",
+    supplies: "Supplies",
+    issues: "Issues / damages",
+    selectedDay: "Day view",
+    arrivalsTitle: "Arrivals",
+    departuresTitle: "Departures",
+    staysTitle: "Stays",
+    dayTimelineTitle: "Day timeline by hour",
+    taskPanelTitle: "Task for this day",
+    suppliesPanelTitle: "Supplies submitted on this day",
+    issuesPanelTitle: "Issues / damages submitted on this day",
+    noArrivals: "No arrivals.",
+    noDepartures: "No departures.",
+    noStays: "No active stays.",
+    noTimelineItems: "No entries for this hour.",
+    noWorkWindow: "There is no active work window for this day.",
+    noTaskForDay: "No task has been created for this window.",
+    noSuppliesForDay: "No supplies were submitted on this day.",
+    noIssuesForDay: "No issues or damages were submitted on this day.",
     noPartner: "No partner",
-    propertySaved: "Property details were saved successfully.",
-    partnerSaved: "The default partner was saved successfully.",
-    taskSaved: "The task was saved successfully.",
-    taskDeleted: "The task was deleted successfully.",
+    unnamedGuest: "Unnamed guest",
+    propertySaved: "Property details were saved.",
+    partnerSaved: "Default partner was saved.",
+    taskSaved: "Task was saved.",
+    taskDeleted: "Task was deleted.",
     saveError: "The changes could not be saved.",
     deleteError: "The task could not be deleted.",
     deleteConfirm: "Are you sure you want to delete this task?",
-    editTaskTitle: "Task",
     propertyDetailsTitle: "Property details",
     partnerTitle: "Default partner",
+    taskModalTitle: "Task",
+    choosePartner: "Choose partner",
     code: "Code",
     name: "Name",
     address: "Address",
@@ -436,29 +409,69 @@ const translations = {
     date: "Execution date",
     startTime: "Start time",
     endTime: "End time",
-    alertTitle: "Alert",
     alertEnabled: "Enable alert",
     alertAt: "Alert time",
-    taskTitleLabel: "Task title",
-    propertyLabel: "Property",
-    taskWindowLabel: "Work window",
-    managementPanelTitle: "Property management center",
-    managementPanelSubtitle:
-      "All key actions for lists, partner, property details and new task creation happen here.",
-    workWindowInstruction:
-      "Open the date to manage the task for this period.",
-    viewDayInstruction:
-      "Open the date to manage the task.",
-    nextCheckInMissing: "There is no next check-in.",
-    monday: "Mon",
-    tuesday: "Tue",
-    wednesday: "Wed",
-    thursday: "Thu",
-    friday: "Fri",
-    saturday: "Sat",
-    sunday: "Sun",
+    taskTitleLabel: "Task type / title",
+    save: "Save",
+    cancel: "Close",
+    lists: "Property lists",
+    editProperty: "Property details",
+    editPartner: "Partner",
+    editListsHint:
+      "Open the property lists used in the readiness flow.",
+    editPropertyHint:
+      "Update core property fields without leaving this page.",
+    editPartnerHint:
+      "Set or change the default partner for this property.",
+    managementTitle: "Property management center",
+    managementSubtitle:
+      "Core actions stay here, while the operational picture is shown in the calendar.",
+    hour: "Hour",
+    issueDetailTitle: "Issue / damage answers",
+    supplyDetailTitle: "Supply answers",
+    taskStatus: {
+      new: "New",
+      pending: "Pending",
+      assigned: "Assigned",
+      waiting_acceptance: "Waiting acceptance",
+      accepted: "Accepted",
+      in_progress: "In progress",
+      completed: "Completed",
+      cancelled: "Cancelled",
+    },
+    issueStatus: {
+      open: "Open",
+      in_progress: "In progress",
+      resolved: "Resolved",
+      closed: "Closed",
+    },
+    supplyState: {
+      missing: "Missing",
+      medium: "Medium",
+      full: "Full",
+    },
+    occupancyHint: {
+      arrival: "Arrival on this day",
+      departure: "Departure on this day",
+      turnover: "Arrival and departure on the same day",
+      stay: "Active stay",
+    },
+    bookingArrival: "Arrival",
+    bookingStay: "Stay",
+    bookingDeparture: "Departure",
+    timelineArrival: "Arrival",
+    timelineStay: "Stay",
+    timelineDeparture: "Departure",
+    timelineTask: "Task",
+    viewDay: "Day view",
+    filterAll: "All",
+    filterBookings: "Bookings",
+    filterTasks: "Tasks",
+    filterSupplies: "Supplies",
+    filterIssues: "Issues / Damages",
+    weekdays: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
   },
-} satisfies Record<Language, Record<string, string>>
+} satisfies Record<Language, Record<string, any>>
 
 const TASK_TITLE_OPTIONS: TaskTitleKey[] = [
   "cleaning",
@@ -484,11 +497,33 @@ function normalizeDate(value?: string | null) {
   return date
 }
 
-function normalizeDateOnlyValue(value?: string | null) {
+function formatLocalDateKey(date: Date) {
+  if (Number.isNaN(date.getTime())) return null
+
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+
+  return `${year}-${month}-${day}`
+}
+
+function normalizeDateOnly(value?: string | Date | null) {
   if (!value) return null
-  const text = String(value).slice(0, 10)
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return null
-  return text
+
+  if (value instanceof Date) {
+    return formatLocalDateKey(value)
+  }
+
+  const text = String(value).trim()
+  if (!text) return null
+
+  const dateOnlyMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (dateOnlyMatch) {
+    return `${dateOnlyMatch[1]}-${dateOnlyMatch[2]}-${dateOnlyMatch[3]}`
+  }
+
+  const date = new Date(text)
+  return formatLocalDateKey(date)
 }
 
 function startOfDay(date: Date) {
@@ -525,14 +560,13 @@ function sameDay(a: Date, b: Date) {
 
 function startOfWeek(date: Date) {
   const base = startOfDay(date)
-  const day = base.getDay()
-  const diff = day === 0 ? -6 : 1 - day
-  return addDays(base, diff)
+  const jsDay = base.getDay()
+  const mondayOffset = jsDay === 0 ? -6 : 1 - jsDay
+  return addDays(base, mondayOffset)
 }
 
 function getMonthGridStart(date: Date) {
-  const first = new Date(date.getFullYear(), date.getMonth(), 1)
-  return startOfWeek(first)
+  return startOfWeek(new Date(date.getFullYear(), date.getMonth(), 1))
 }
 
 function buildVisibleDates(anchorDate: Date, granularity: CalendarGranularity) {
@@ -545,8 +579,8 @@ function buildVisibleDates(anchorDate: Date, granularity: CalendarGranularity) {
     return Array.from({ length: 7 }, (_, index) => addDays(weekStart, index))
   }
 
-  const start = getMonthGridStart(anchorDate)
-  return Array.from({ length: 42 }, (_, index) => addDays(start, index))
+  const gridStart = getMonthGridStart(anchorDate)
+  return Array.from({ length: 42 }, (_, index) => addDays(gridStart, index))
 }
 
 function formatMonthTitle(date: Date, locale: string) {
@@ -564,10 +598,10 @@ function formatFullDate(date: Date, locale: string) {
     year: "numeric",
   }).format(date)
 }
-function formatShortDate(value?: string | null, locale?: string) {
-  const date = normalizeDate(value)
-  if (!date || !locale) return "—"
 
+function formatShortDate(value?: string | null, locale = "el-GR") {
+  const date = normalizeDate(value)
+  if (!date) return "—"
   return new Intl.DateTimeFormat(locale, {
     day: "2-digit",
     month: "2-digit",
@@ -576,8 +610,9 @@ function formatShortDate(value?: string | null, locale?: string) {
 }
 
 function formatTime(value?: string | null) {
-  if (!value) return "—"
-  return String(value).slice(0, 5)
+  const text = String(value || "").trim()
+  if (!text) return "—"
+  return text.slice(0, 5)
 }
 
 function formatDateTime(date: Date | null, locale: string) {
@@ -592,12 +627,11 @@ function formatDateTime(date: Date | null, locale: string) {
 }
 
 function combineDateAndTime(dateValue?: string | null, timeValue?: string | null) {
-  const dateText = normalizeDateOnlyValue(dateValue)
+  const dateText = normalizeDateOnly(dateValue)
   if (!dateText) return null
   const timeText = String(timeValue || "00:00").slice(0, 5)
   const combined = new Date(`${dateText}T${timeText}:00`)
-  if (Number.isNaN(combined.getTime())) return null
-  return combined
+  return Number.isNaN(combined.getTime()) ? null : combined
 }
 
 function toDateTimeLocalValue(date: Date | null) {
@@ -647,110 +681,103 @@ function getTaskTitleOptions(language: Language) {
   } satisfies Record<TaskTitleKey, string>
 }
 
-function getWeekdayLabels(language: Language) {
-  const t = translations[language]
-  return [
-    t.monday,
-    t.tuesday,
-    t.wednesday,
-    t.thursday,
-    t.friday,
-    t.saturday,
-    t.sunday,
-  ]
+function normalizeTaskStatus(status?: string | null) {
+  return String(status || "").trim().toLowerCase()
 }
 
-function getToneClasses(tone: Tone) {
-  if (tone === "sky") {
-    return {
-      bar: "bg-sky-500",
-      soft: "border-sky-200 bg-sky-50 text-sky-800",
-    }
-  }
-
-  if (tone === "amber") {
-    return {
-      bar: "bg-amber-500",
-      soft: "border-amber-200 bg-amber-50 text-amber-800",
-    }
-  }
-
-  if (tone === "emerald") {
-    return {
-      bar: "bg-emerald-500",
-      soft: "border-emerald-200 bg-emerald-50 text-emerald-800",
-    }
-  }
-
-  if (tone === "red") {
-    return {
-      bar: "bg-red-500",
-      soft: "border-red-200 bg-red-50 text-red-800",
-    }
-  }
-
-  return {
-    bar: "bg-slate-300",
-    soft: "border-slate-200 bg-slate-50 text-slate-700",
-  }
+function normalizeIssueStatus(status?: string | null) {
+  return String(status || "").trim().toLowerCase()
 }
 
-function isTaskAlertActive(task: PropertyTaskLite) {
-  if (!task.alertEnabled || !task.alertAt) return false
-  const alertDate = normalizeDate(task.alertAt)
-  if (!alertDate) return false
-  return alertDate.getTime() <= Date.now()
+function normalizeIssueSeverity(value?: string | null) {
+  return String(value || "").trim().toLowerCase()
 }
 
-function isOpenTaskStatus(status?: string | null) {
-  const normalized = normalizeTaskStatus(status)
-  return [
-    "NEW",
-    "PENDING",
-    "ASSIGNED",
-    "WAITING_ACCEPTANCE",
-    "ACCEPTED",
-    "IN_PROGRESS",
-  ].includes(normalized)
+function getTaskStatusLabel(language: Language, status?: string | null) {
+  const key = normalizeTaskStatus(status) as keyof (typeof translations)[Language]["taskStatus"]
+  return translations[language].taskStatus[key] || status || "—"
 }
 
-function isCompletedTaskStatus(status?: string | null) {
-  return normalizeTaskStatus(status) === "COMPLETED"
+function getIssueStatusLabel(language: Language, status?: string | null) {
+  const key = normalizeIssueStatus(status) as keyof (typeof translations)[Language]["issueStatus"]
+  return translations[language].issueStatus[key] || status || "—"
 }
 
-function isBookingActive(status?: string | null) {
-  return String(status || "").trim().toLowerCase() !== "cancelled"
+function getSupplyStateLabel(language: Language, state: SupplyState) {
+  return translations[language].supplyState[state]
 }
 
 function getLatestAssignment(task: PropertyTaskLite) {
   return safeArray(task.assignments)[0] || null
 }
 
-function getAssignmentPhaseText(task: PropertyTaskLite, language: Language) {
-  const latestAssignment = getLatestAssignment(task)
-  if (!latestAssignment?.status) {
-    return language === "en" ? "No assignment yet" : "Δεν έχει ανατεθεί ακόμη"
+function getTaskTone(task: PropertyTaskLite): Tone {
+  const normalized = normalizeTaskStatus(task.status)
+
+  if (task.alertEnabled && task.alertAt) {
+    const alertAt = normalizeDate(task.alertAt)
+    if (alertAt && alertAt.getTime() <= Date.now()) return "red"
   }
 
-  const normalized = String(latestAssignment.status).trim().toLowerCase()
+  if (normalized === "completed") return "emerald"
+  if (normalized === "in_progress") return "sky"
+  if (normalized === "accepted") return "sky"
+  if (normalized === "assigned" || normalized === "waiting_acceptance") return "amber"
+  if (normalized === "cancelled") return "slate"
+  return "amber"
+}
+
+function getTaskActionInstruction(task: PropertyTaskLite, language: Language) {
+  const normalized = normalizeTaskStatus(task.status)
+
+  if (task.alertEnabled && task.alertAt) {
+    const alertAt = normalizeDate(task.alertAt)
+    if (alertAt && alertAt.getTime() <= Date.now()) {
+      return language === "en"
+        ? "Immediate action needed. Open the day and correct the execution plan now."
+        : "Απαιτείται άμεση ενέργεια. Άνοιξε την ημέρα και διόρθωσε τώρα το πλάνο εκτέλεσης."
+    }
+  }
+
+  if (normalized === "in_progress") {
+    return language === "en"
+      ? "Execution is running. Review progress and close only when the work is actually done."
+      : "Η εκτέλεση τρέχει. Έλεγξε την πρόοδο και κλείσε μόνο όταν η εργασία έχει όντως τελειώσει."
+  }
 
   if (normalized === "accepted") {
-    return language === "en" ? "Accepted by partner" : "Έχει αποδεχθεί ο συνεργάτης"
+    return language === "en"
+      ? "The partner has accepted the task. Next step is execution tracking."
+      : "Ο συνεργάτης έχει αποδεχθεί την εργασία. Επόμενο βήμα είναι η παρακολούθηση της εκτέλεσης."
   }
 
-  if (normalized === "in_progress" || latestAssignment.startedAt) {
-    return language === "en" ? "Execution started" : "Έχει ξεκινήσει η εκτέλεση"
+  if (normalized === "assigned" || normalized === "waiting_acceptance") {
+    return language === "en"
+      ? "Waiting for partner response. Check whether acceptance or reassignment is needed."
+      : "Αναμένει απάντηση συνεργάτη. Έλεγξε αν χρειάζεται αποδοχή ή νέα ανάθεση."
   }
 
-  if (normalized === "completed" || latestAssignment.completedAt) {
-    return language === "en" ? "Completed by partner" : "Ολοκληρώθηκε από συνεργάτη"
+  if (normalized === "completed") {
+    return language === "en"
+      ? "The task is completed. Open the task and review the final proof."
+      : "Η εργασία είναι ολοκληρωμένη. Άνοιξε την εργασία και έλεγξε το τελικό αποδεικτικό υλικό."
   }
 
-  if (normalized === "rejected" || latestAssignment.rejectedAt) {
-    return language === "en" ? "Rejected by partner" : "Απορρίφθηκε από συνεργάτη"
-  }
+  return language === "en"
+    ? "Task exists but still needs scheduling attention. Open the day and continue management."
+    : "Η εργασία υπάρχει αλλά θέλει ακόμη διαχείριση προγραμματισμού. Άνοιξε την ημέρα και συνέχισε τη διαχείριση."
+}
+// app/(dashboard)/properties/[id]/page.tsx
+// ΜΕΡΟΣ 2 / 4
 
-  return language === "en" ? "Assigned" : "Ανατεθειμένη"
+function isBookingCancelled(status?: string | null) {
+  const normalized = String(status || "").trim().toLowerCase()
+  return normalized === "cancelled" || normalized === "canceled"
+}
+
+function isOpenIssue(issue: PropertyIssueLite) {
+  const normalized = normalizeIssueStatus(issue.status)
+  return normalized === "open" || normalized === "in_progress"
 }
 
 function getSupplyState(supply: PropertySupplyLite): SupplyState {
@@ -763,6 +790,7 @@ function getSupplyState(supply: PropertySupplyLite): SupplyState {
     fullThreshold: supply.fullThreshold,
     minimumThreshold: supply.minimumThreshold,
     reorderThreshold: supply.reorderThreshold,
+    targetLevel: supply.targetLevel,
     targetStock: supply.targetStock,
     supplyMinimumStock: supply.supplyItem?.minimumStock,
   })
@@ -772,57 +800,57 @@ function getSupplyState(supply: PropertySupplyLite): SupplyState {
   return "full"
 }
 
-function buildSupplyCounts(supplies: PropertySupplyLite[]): SupplyCounts {
-  const counts: SupplyCounts = {
-    missing: 0,
-    medium: 0,
-    full: 0,
-  }
-
-  supplies.forEach((supply) => {
-    counts[getSupplyState(supply)] += 1
-  })
-
-  return counts
-}
-
-function formatSuppliesDetail(counts: SupplyCounts, language: Language) {
-  const t = translations[language]
-  return `${counts.missing} ${t.missing} • ${counts.medium} ${t.medium} • ${counts.full} ${t.full}`
-}
-
-function getOccupancyBookingsForDay(bookings: PropertyBookingLite[], dateKey: string) {
-  return bookings.filter((booking) => {
-    if (!isBookingActive(booking.status)) return false
-
-    const checkIn = normalizeDateOnlyValue(booking.checkInDate)
-    const checkOut = normalizeDateOnlyValue(booking.checkOutDate)
-
-    if (!checkIn || !checkOut) return false
-
-    return checkIn <= dateKey && checkOut >= dateKey
-  })
+function buildSupplyRows(language: Language, property: PropertyDetail | null): SupplyRow[] {
+  return safeArray(property?.propertySupplies).map((supply) => ({
+    ...supply,
+    state: getSupplyState(supply),
+    updateKey: normalizeDateOnly(supply.lastUpdatedAt || supply.updatedAt),
+    displayName: getSupplyDisplayName(language, {
+      code: supply.supplyItem?.code,
+      fallbackName:
+        supply.supplyItem?.nameEn ||
+        supply.supplyItem?.nameEl ||
+        supply.supplyItem?.name ||
+        supply.id,
+    }),
+  }))
 }
 
 function buildWorkWindows(bookings: PropertyBookingLite[], tasks: PropertyTaskLite[]) {
-  const activeBookings = bookings
-    .filter((booking) => isBookingActive(booking.status))
-    .filter((booking) => booking.id && booking.checkOutDate)
-    .sort((a, b) => String(a.checkInDate || "").localeCompare(String(b.checkInDate || "")))
+  const activeBookings = safeArray(bookings)
+    .filter((booking) => !isBookingCancelled(booking.status))
+    .filter((booking) => Boolean(booking.id && booking.checkOutDate))
+    .sort((a, b) => {
+      const aDate = combineDateAndTime(a.checkOutDate, a.checkOutTime)
+      const bDate = combineDateAndTime(b.checkOutDate, b.checkOutTime)
+      if (!aDate && !bDate) return 0
+      if (!aDate) return 1
+      if (!bDate) return -1
+      return aDate.getTime() - bDate.getTime()
+    })
 
   return activeBookings
     .map((booking, index) => {
-      const nextBooking = activeBookings[index + 1] || null
       const startAt = combineDateAndTime(booking.checkOutDate, booking.checkOutTime)
       if (!startAt) return null
 
+      const nextBooking = activeBookings[index + 1] || null
       const endAt = nextBooking
         ? combineDateAndTime(nextBooking.checkInDate, nextBooking.checkInTime)
         : null
 
       const linkedTask =
         tasks.find((task) => task.booking?.id === booking.id) ||
-        tasks.find((task) => String(task.id || "").includes(String(booking.id || ""))) ||
+        tasks.find((task) => {
+          const scheduledAt = combineDateAndTime(
+            task.scheduledDate,
+            task.scheduledStartTime
+          )
+          if (!scheduledAt) return false
+          if (scheduledAt.getTime() < startAt.getTime()) return false
+          if (endAt && scheduledAt.getTime() > endAt.getTime()) return false
+          return true
+        }) ||
         null
 
       return {
@@ -831,294 +859,421 @@ function buildWorkWindows(bookings: PropertyBookingLite[], tasks: PropertyTaskLi
         nextBooking,
         startAt,
         endAt,
-        task: linkedTask,
+        linkedTask,
       } satisfies WorkWindow
     })
-    .filter((item): item is WorkWindow => Boolean(item))
+    .filter((window): window is WorkWindow => Boolean(window))
 }
 
-function workWindowIncludesDay(window: WorkWindow, date: Date) {
-  const dayStart = startOfDay(date)
-  const dayEnd = endOfDay(date)
+function workWindowTouchesDay(window: WorkWindow, day: Date) {
+  const dayStart = startOfDay(day)
+  const dayEnd = endOfDay(day)
 
   if (window.endAt) {
-    return window.startAt <= dayEnd && window.endAt >= dayStart
+    return window.startAt.getTime() <= dayEnd.getTime() && window.endAt.getTime() >= dayStart.getTime()
   }
 
-  return window.startAt <= dayEnd
+  return window.startAt.getTime() <= dayEnd.getTime()
 }
 
-function getWorkWindowForDay(windows: WorkWindow[], date: Date) {
-  return windows.find((window) => workWindowIncludesDay(window, date)) || null
+function getWorkWindowForDay(windows: WorkWindow[], day: Date) {
+  return windows.find((window) => workWindowTouchesDay(window, day)) || null
 }
 
-function getTaskActionText(task: PropertyTaskLite, language: Language) {
-  const normalizedStatus = normalizeTaskStatus(task.status)
-
-  if (isTaskAlertActive(task)) {
-    return language === "en"
-      ? "Immediate action required. Open the date, review the task and adjust the execution timing if needed."
-      : "Απαιτείται άμεση ενέργεια. Άνοιξε την ημερομηνία, έλεγξε την εργασία και διόρθωσε χρόνο εκτέλεσης αν χρειάζεται."
-  }
-
-  if (normalizedStatus === "IN_PROGRESS") {
-    return language === "en"
-      ? "Execution is in progress. Review progress and complete the task when the work is finished."
-      : "Η εργασία είναι σε εξέλιξη. Έλεγξε την πρόοδο και ολοκλήρωσέ την όταν τελειώσει η εκτέλεση."
-  }
-
-  if (["NEW", "PENDING"].includes(normalizedStatus)) {
-    return language === "en"
-      ? "The task needs handling. Open the date and continue with execution planning."
-      : "Η εργασία θέλει διαχείριση. Άνοιξε την ημερομηνία και συνέχισε με τον προγραμματισμό εκτέλεσης."
-  }
-
-  if (["ASSIGNED", "WAITING_ACCEPTANCE"].includes(normalizedStatus)) {
-    return language === "en"
-      ? "The task is assigned and waits for response. Open the date to continue management."
-      : "Η εργασία είναι ανατεθειμένη και περιμένει απάντηση. Άνοιξε την ημερομηνία για συνέχεια διαχείρισης."
-  }
-
-  if (normalizedStatus === "ACCEPTED") {
-    return language === "en"
-      ? "The partner has accepted the task. Open the date to continue execution tracking."
-      : "Ο συνεργάτης έχει αποδεχθεί την εργασία. Άνοιξε την ημερομηνία για να συνεχίσεις την παρακολούθηση."
-  }
-
-  if (normalizedStatus === "COMPLETED") {
-    return language === "en"
-      ? "The task is completed. Open the date to review the final task state."
-      : "Η εργασία έχει ολοκληρωθεί. Άνοιξε την ημερομηνία για να δεις την τελική κατάστασή της."
-  }
-
-  return language === "en"
-    ? "Open the date to manage the task."
-    : "Άνοιξε την ημερομηνία για να διαχειριστείς την εργασία."
+function getBookingsForDay(bookings: PropertyBookingLite[], dayKey: string) {
+  return safeArray(bookings).filter((booking) => {
+    if (isBookingCancelled(booking.status)) return false
+    const checkIn = normalizeDateOnly(booking.checkInDate)
+    const checkOut = normalizeDateOnly(booking.checkOutDate)
+    if (!checkIn || !checkOut) return false
+    return checkIn <= dayKey && checkOut >= dayKey
+  })
 }
-function getOccupancyBarData(
-  bookings: PropertyBookingLite[],
-  locale: string,
-  language: Language,
-  dateKey: string
-): BarData {
-  const t = translations[language]
 
-  if (bookings.length === 0) {
-    return {
-      tone: "slate",
-      label: t.noGuest,
-      detail: "—",
-      hoverText: language === "en" ? "No active stay on this day." : "Δεν υπάρχει ενεργή φιλοξενία αυτή την ημέρα.",
-    }
-  }
+function getOccupancyKind(bookings: PropertyBookingLite[], dayKey: string): OccupancyKind {
+  if (bookings.length === 0) return "vacant"
 
   const hasArrival = bookings.some(
-    (booking) => normalizeDateOnlyValue(booking.checkInDate) === dateKey
+    (booking) => normalizeDateOnly(booking.checkInDate) === dayKey
   )
   const hasDeparture = bookings.some(
-    (booking) => normalizeDateOnlyValue(booking.checkOutDate) === dateKey
+    (booking) => normalizeDateOnly(booking.checkOutDate) === dayKey
   )
 
-  let tone: Tone = "emerald"
-  let label = t.occupied
-
-  if (hasArrival && hasDeparture) {
-    tone = "amber"
-    label = t.turnover
-  } else if (hasArrival) {
-    tone = "sky"
-    label = t.arrival
-  } else if (hasDeparture) {
-    tone = "amber"
-    label = t.departure
-  }
-
-  const detail = bookings
-    .map((booking) => {
-      return `${formatShortDate(booking.checkInDate, locale)} ${formatTime(booking.checkInTime)} → ${formatShortDate(booking.checkOutDate, locale)} ${formatTime(booking.checkOutTime)}`
-    })
-    .join(" • ")
-
-  const hoverText = bookings
-    .map((booking) => {
-      const guestName = booking.guestName || t.unnamedGuest
-      return `${guestName}\n${t.from}: ${formatShortDate(booking.checkInDate, locale)} ${formatTime(booking.checkInTime)}\n${t.to}: ${formatShortDate(booking.checkOutDate, locale)} ${formatTime(booking.checkOutTime)}`
-    })
-    .join("\n\n")
-
-  return {
-    tone,
-    label,
-    detail,
-    hoverText,
-  }
+  if (hasArrival && hasDeparture) return "turnover"
+  if (hasArrival) return "arrival"
+  if (hasDeparture) return "departure"
+  return "stay"
 }
 
-function getTaskBarData(
-  workWindow: WorkWindow | null,
+function buildOccupancyTooltip(
   language: Language,
-  locale: string
-): BarData {
+  locale: string,
+  kind: OccupancyKind,
+  bookings: PropertyBookingLite[]
+) {
+  if (kind === "vacant") return ""
+
   const t = translations[language]
+  const header = t.occupancyHint[kind as Exclude<OccupancyKind, "vacant">]
 
-  if (!workWindow) {
-    return {
-      tone: "slate",
-      label: t.noTask,
-      detail: t.noTasksForDay,
-      hoverText: t.viewDayInstruction,
-    }
-  }
-
-  const windowDetail = workWindow.endAt
-    ? `${formatDateTime(workWindow.startAt, locale)} → ${formatDateTime(workWindow.endAt, locale)}`
-    : `${formatDateTime(workWindow.startAt, locale)} → ${t.nextCheckInMissing}`
-
-  if (!workWindow.task) {
-    return {
-      tone: "red",
-      label: t.createCleaningTaskPrompt,
-      detail: windowDetail,
-      hoverText: `${t.createCleaningTaskPrompt}\n${windowDetail}\n${t.workWindowInstruction}`,
-    }
-  }
-
-  const task = workWindow.task
-  const latestAssignment = getLatestAssignment(task)
-  const taskStatus = getTaskStatusLabel(language, task.status)
-  const partnerName = latestAssignment?.partner?.name || t.noPartner
-  const phaseText = getAssignmentPhaseText(task, language)
-  const timeRange = `${formatTime(task.scheduledStartTime)} - ${formatTime(task.scheduledEndTime)}`
-
-  let tone: Tone = "amber"
-
-  if (isTaskAlertActive(task)) {
-    tone = "red"
-  } else if (normalizeTaskStatus(task.status) === "IN_PROGRESS") {
-    tone = "sky"
-  } else if (normalizeTaskStatus(task.status) === "COMPLETED") {
-    tone = "emerald"
-  } else if (["ASSIGNED", "WAITING_ACCEPTANCE", "ACCEPTED"].includes(normalizeTaskStatus(task.status))) {
-    tone = "sky"
-  }
-
-  const hoverText = [
-    `${normalizeTaskTitleText(task.title, language) || t.untitledTask}`,
-    `${t.date}: ${formatShortDate(task.scheduledDate, locale)}`,
-    `${t.from}: ${formatTime(task.scheduledStartTime)}`,
-    `${t.to}: ${formatTime(task.scheduledEndTime)}`,
-    `${t.editPartner}: ${partnerName}`,
-    `${t.status}: ${taskStatus}`,
-    `${t.tasks}: ${phaseText}`,
-    getTaskActionText(task, language),
-  ].join("\n")
-
-  return {
-    tone,
-    label: isTaskAlertActive(task) ? `${t.alerts} • ${taskStatus}` : taskStatus,
-    detail: `${timeRange} • ${partnerName}`,
-    hoverText,
-  }
-}
-
-function getIssuesBarData(issues: PropertyIssueLite[], language: Language): BarData {
-  const t = translations[language]
-  const openIssues = issues.filter((issue) => {
-    const normalized = normalizeIssueStatus(issue.status)
-    return normalized === "OPEN" || normalized === "IN_PROGRESS"
+  const lines = bookings.map((booking) => {
+    const guest = booking.guestName || t.unnamedGuest
+    return `${guest}\n${formatShortDate(booking.checkInDate, locale)} ${formatTime(
+      booking.checkInTime
+    )} → ${formatShortDate(booking.checkOutDate, locale)} ${formatTime(
+      booking.checkOutTime
+    )}`
   })
 
-  if (openIssues.length === 0) {
-    return {
-      tone: "emerald",
-      label: t.cleanPicture,
-      detail: "0",
-      hoverText: language === "en" ? "There are no open issues or damages." : "Δεν υπάρχουν ανοιχτές ζημιές ή βλάβες.",
-    }
-  }
+  return [header, ...lines].join("\n\n")
+}
 
-  const highestSeverity = openIssues.reduce<string | null>((current, issue) => {
-    const severity = normalizeIssuePriority(issue.severity)
-    if (severity === "URGENT") return "URGENT"
-    if (severity === "HIGH" && current !== "URGENT") return "HIGH"
-    if (severity === "MEDIUM" && !current) return "MEDIUM"
-    return current
-  }, null)
+function buildTaskTooltip(
+  language: Language,
+  locale: string,
+  task: PropertyTaskLite
+) {
+  const latestAssignment = getLatestAssignment(task)
+  const partnerName = latestAssignment?.partner?.name || translations[language].noPartner
+  const title = task.title || translations[language].taskTitleLabel
 
-  const tone: Tone = highestSeverity === "URGENT" || highestSeverity === "HIGH"
-    ? "red"
-    : "amber"
+  return [
+    title,
+    `${translations[language].status}: ${getTaskStatusLabel(language, task.status)}`,
+    `${translations[language].date}: ${formatShortDate(task.scheduledDate, locale)}`,
+    `${translations[language].startTime}: ${formatTime(task.scheduledStartTime)}`,
+    `${translations[language].endTime}: ${formatTime(task.scheduledEndTime)}`,
+    `${translations[language].editPartner}: ${partnerName}`,
+    getTaskActionInstruction(task, language),
+  ].join("\n")
+}
 
-  const label = highestSeverity
-    ? getIssuePriorityLabel(language, highestSeverity)
-    : t.openIssues
-
-  const hoverText = openIssues
+function buildIssueTooltip(language: Language, issues: PropertyIssueLite[]) {
+  return issues
     .map((issue) => {
-      const title = issue.title || t.untitledIssue
-      const status = getIssueStatusLabel(language, issue.status)
-      const severity = getIssuePriorityLabel(language, issue.severity)
-      const description = issue.description?.trim() || "—"
-      return `${title} | ${status} | ${severity}\n${description}`
+      const severity = normalizeIssueSeverity(issue.severity)
+      const severityText = severity ? severity.toUpperCase() : "—"
+      return [
+        issue.title || translations[language].issues,
+        `${getIssueStatusLabel(language, issue.status)} • ${severityText}`,
+        issue.description?.trim() || "—",
+      ].join("\n")
     })
     .join("\n\n")
-
-  return {
-    tone,
-    label,
-    detail: `${openIssues.length} ${t.issuesSuffix}`,
-    hoverText,
-  }
 }
 
-function getSuppliesBarData(supplies: PropertySupplyLite[], language: Language) {
-  const counts = buildSupplyCounts(supplies)
-  const detail = formatSuppliesDetail(counts, language)
-  const hoverText = language === "en"
-    ? `Current supplies picture\n${detail}`
-    : `Τρέχουσα εικόνα αναλωσίμων\n${detail}`
-
-  return {
-    counts,
-    detail,
-    hoverText,
-  }
+function buildSupplyTooltip(language: Language, rows: SupplyRow[]) {
+  return rows
+    .map((row) => {
+      return [
+        row.displayName,
+        `${translations[language].supplyState[row.state]} • ${row.currentStock ?? 0}`,
+      ].join("\n")
+    })
+    .join("\n\n")
 }
 
-function buildDaySnapshot(params: {
+function buildDayEntry(params: {
   date: Date
   anchorDate: Date
   property: PropertyDetail
-  workWindows: WorkWindow[]
-  language: Language
-  locale: string
-}): DaySnapshot {
-  const { date, anchorDate, property, workWindows, language, locale } = params
-  const dateKey = normalizeDateOnlyValue(date.toISOString()) || ""
-  const bookings = getOccupancyBookingsForDay(safeArray(property.bookings), dateKey)
-  const dayTasks = safeArray(property.tasks).filter(
-    (task) => normalizeDateOnlyValue(task.scheduledDate) === dateKey
+  supplyRows: SupplyRow[]
+  windows: WorkWindow[]
+}): DayEntry {
+  const dayKey = normalizeDateOnly(params.date) || ""
+  const activeBookings = getBookingsForDay(params.property.bookings || [], dayKey)
+  const arrivals = activeBookings.filter(
+    (booking) => normalizeDateOnly(booking.checkInDate) === dayKey
   )
-  const openIssues = safeArray(property.issues).filter((issue) => {
-    const normalized = normalizeIssueStatus(issue.status)
-    return normalized === "OPEN" || normalized === "IN_PROGRESS"
+  const departures = activeBookings.filter(
+    (booking) => normalizeDateOnly(booking.checkOutDate) === dayKey
+  )
+  const stays = activeBookings.filter(
+    (booking) =>
+      normalizeDateOnly(booking.checkInDate) !== dayKey &&
+      normalizeDateOnly(booking.checkOutDate) !== dayKey
+  )
+
+  const scheduledTasks = safeArray(params.property.tasks).filter(
+    (task) => normalizeDateOnly(task.scheduledDate) === dayKey
+  )
+
+  const workWindow = getWorkWindowForDay(params.windows, params.date)
+  // Εργασία εμφανίζεται ΜΟΝΟ την ημέρα που έχει προγραμματιστεί (scheduledDate)
+  const taskForCalendar = scheduledTasks[0] || null
+
+  const issueRecords = safeArray(params.property.issues).filter((issue) => {
+    if (!isOpenIssue(issue)) return false
+    const issueKey = normalizeDateOnly(issue.createdAt || issue.updatedAt)
+    return issueKey === dayKey
   })
-  const workWindow = getWorkWindowForDay(workWindows, date)
+
+  const supplyRecords = params.supplyRows.filter((row) => row.updateKey === dayKey)
 
   return {
-    date,
-    key: dateKey,
-    isToday: sameDay(date, new Date()),
-    isCurrentMonth: date.getMonth() === anchorDate.getMonth(),
-    occupancy: getOccupancyBarData(bookings, locale, language, dateKey),
-    tasks: getTaskBarData(workWindow, language, locale),
-    supplies: getSuppliesBarData(safeArray(property.propertySupplies), language),
-    issues: getIssuesBarData(openIssues, language),
+    key: dayKey,
+    date: params.date,
+    isToday: sameDay(params.date, new Date()),
+    isCurrentMonth: params.date.getMonth() === params.anchorDate.getMonth(),
+    occupancyKind: getOccupancyKind(activeBookings, dayKey),
+    arrivals,
+    departures,
+    stays,
+    activeBookings,
+    scheduledTasks,
     workWindow,
-    bookings,
-    dayTasks,
-    openIssues,
+    taskForCalendar,
+    issueRecords,
+    supplyRecords,
   }
+}
+
+function buildHourRows(entry: DayEntry): HourRow[] {
+  return Array.from({ length: 24 }, (_, hour) => {
+    const label = `${String(hour).padStart(2, "0")}:00`
+
+    const arrivals = entry.arrivals.filter((booking) => {
+      const time = formatTime(booking.checkInTime)
+      return time !== "—" && Number(time.slice(0, 2)) === hour
+    })
+
+    const departures = entry.departures.filter((booking) => {
+      const time = formatTime(booking.checkOutTime)
+      return time !== "—" && Number(time.slice(0, 2)) === hour
+    })
+
+    const activeStays = entry.activeBookings.filter((booking) => {
+      const start = combineDateAndTime(entry.key, booking.checkInTime || "00:00")
+      const end = combineDateAndTime(entry.key, booking.checkOutTime || "23:59")
+      if (!start || !end) return false
+      return start.getHours() <= hour && end.getHours() >= hour
+    })
+
+    const tasks = entry.scheduledTasks.filter((task) => {
+      const time = formatTime(task.scheduledStartTime)
+      return time !== "—" && Number(time.slice(0, 2)) === hour
+    })
+
+    return {
+      hour,
+      label,
+      arrivals,
+      departures,
+      activeStays,
+      tasks,
+    }
+  })
+}
+
+function getToneClasses(tone: Tone) {
+  if (tone === "sky") {
+    return {
+      soft: "border-sky-200 bg-sky-50 text-sky-700",
+      fill: "bg-sky-500",
+    }
+  }
+
+  if (tone === "amber") {
+    return {
+      soft: "border-amber-200 bg-amber-50 text-amber-700",
+      fill: "bg-amber-500",
+    }
+  }
+
+  if (tone === "emerald") {
+    return {
+      soft: "border-emerald-200 bg-emerald-50 text-emerald-700",
+      fill: "bg-emerald-500",
+    }
+  }
+
+  if (tone === "red") {
+    return {
+      soft: "border-red-200 bg-red-50 text-red-700",
+      fill: "bg-red-500",
+    }
+  }
+
+  return {
+    soft: "border-slate-200 bg-slate-50 text-slate-700",
+    fill: "bg-slate-500",
+  }
+}
+
+function getOccupancyTone(kind: OccupancyKind): Tone {
+  if (kind === "arrival") return "sky"
+  if (kind === "departure") return "amber"
+  if (kind === "turnover") return "amber"
+  if (kind === "stay") return "emerald"
+  return "slate"
+}
+
+function getBookingDayKind(booking: PropertyBookingLite, dayKey: string): OccupancyKind {
+  const isArrival = normalizeDateOnly(booking.checkInDate) === dayKey
+  const isDeparture = normalizeDateOnly(booking.checkOutDate) === dayKey
+  if (isArrival && isDeparture) return "turnover"
+  if (isArrival) return "arrival"
+  if (isDeparture) return "departure"
+  return "stay"
+}
+
+function getBookingDayLabel(t: (typeof translations)[Language], kind: OccupancyKind): string {
+  if (kind === "arrival") return t.bookingArrival
+  if (kind === "departure") return t.bookingDeparture
+  if (kind === "turnover") return `${t.bookingArrival} / ${t.bookingDeparture}`
+  return t.bookingStay
+}
+
+function getIssuesTone(issues: PropertyIssueLite[]): Tone {
+  const hasCritical = issues.some((issue) => {
+    const severity = normalizeIssueSeverity(issue.severity)
+    return severity === "critical" || severity === "high" || severity === "urgent"
+  })
+
+  return hasCritical ? "red" : "amber"
+}
+
+function getSuppliesTone(rows: SupplyRow[]): Tone {
+  if (rows.some((row) => row.state === "missing")) return "red"
+  if (rows.some((row) => row.state === "medium")) return "amber"
+  return "emerald"
+}
+
+function CalendarFilterButton({
+  icon,
+  label,
+  count,
+  active,
+  tone,
+  onClick,
+}: {
+  icon: ReactNode
+  label: string
+  count: number
+  active: boolean
+  tone: Tone
+  onClick: () => void
+}) {
+  const classes = getToneClasses(tone)
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "inline-flex items-center gap-2 rounded-2xl border px-3 py-2 text-sm font-medium transition hover:scale-[1.02]",
+        active
+          ? cn(classes.soft, "ring-2 ring-current/30 shadow-sm")
+          : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+      )}
+    >
+      <span className={cn("flex h-5 w-5 items-center justify-center", active ? "" : "opacity-50")}>
+        {icon}
+      </span>
+      <span>{label}</span>
+      <span
+        className={cn(
+          "inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-bold",
+          active ? "bg-current/10 text-current" : "bg-slate-100 text-slate-500"
+        )}
+      >
+        {count}
+      </span>
+    </button>
+  )
+}
+
+function BedIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 7v13M21 7v13" />
+      <path d="M3 13h18" />
+      <path d="M3 7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2" />
+      <rect x="7" y="7" width="4" height="3" rx="0.5" />
+    </svg>
+  )
+}
+
+function BroomIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 22l9-9" />
+      <path d="M12 13l7-7a2 2 0 0 0-3-3l-7 7 3 3Z" />
+      <path d="M3 22l2.5-1 5.5-5.5-3-3-5.5 5.5L3 22Z" />
+    </svg>
+  )
+}
+
+function SupplyBarsIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <rect x="2" y="15" width="4" height="7" rx="0.5" />
+      <rect x="10" y="9" width="4" height="13" rx="0.5" />
+      <rect x="18" y="3" width="4" height="19" rx="0.5" />
+    </svg>
+  )
+}
+
+function WrenchIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76Z" />
+    </svg>
+  )
+}
+
+function SignalButton({
+  title,
+  tone,
+  onClick,
+  children,
+}: {
+  title: string
+  tone: Tone
+  onClick?: () => void
+  children: ReactNode
+}) {
+  const classes = getToneClasses(tone)
+
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={(event) => {
+        event.stopPropagation()
+        onClick?.()
+      }}
+      className={cn(
+        "inline-flex h-9 min-w-9 items-center justify-center rounded-xl border px-2 transition hover:scale-[1.03]",
+        classes.soft
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
+function SmallCircleIcon({ label }: { label: string }) {
+  return (
+    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-current text-[10px] font-bold">
+      {label}
+    </span>
+  )
+}
+
+function SupplySegmentsIcon({ rows }: { rows: SupplyRow[] }) {
+  const missing = rows.filter((row) => row.state === "missing").length
+  const medium = rows.filter((row) => row.state === "medium").length
+  const full = rows.filter((row) => row.state === "full").length
+  const total = rows.length || 1
+
+  return (
+    <div className="flex h-2.5 w-10 overflow-hidden rounded-full bg-slate-200">
+      <div className="bg-red-500" style={{ width: `${(missing / total) * 100}%` }} />
+      <div className="bg-amber-500" style={{ width: `${(medium / total) * 100}%` }} />
+      <div className="bg-emerald-500" style={{ width: `${(full / total) * 100}%` }} />
+    </div>
+  )
 }
 
 function ModalShell({
@@ -1136,7 +1291,7 @@ function ModalShell({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
-      <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
+      <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
         <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
           <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
           <button
@@ -1205,131 +1360,6 @@ function CalendarModeButton({
     </button>
   )
 }
-function FlatBar({
-  title,
-  bar,
-}: {
-  title: string
-  bar: BarData
-}) {
-  const toneClasses = getToneClasses(bar.tone)
-
-  return (
-    <div className="space-y-1.5" title={bar.hoverText}>
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-          {title}
-        </span>
-        <span className="truncate text-[10px] text-slate-400">{bar.detail}</span>
-      </div>
-      <div className="h-3 w-full rounded-full bg-slate-200">
-        <div className={cn("h-3 rounded-full", toneClasses.bar)} style={{ width: "100%" }} />
-      </div>
-      <div className="text-[11px] font-medium text-slate-700">{bar.label}</div>
-    </div>
-  )
-}
-
-function SupplyBar({
-  title,
-  detail,
-  counts,
-  hoverText,
-}: {
-  title: string
-  detail: string
-  counts: SupplyCounts
-  hoverText: string
-}) {
-  const total = counts.missing + counts.medium + counts.full
-
-  return (
-    <div className="space-y-1.5" title={hoverText}>
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-          {title}
-        </span>
-        <span className="truncate text-[10px] text-slate-400">{detail}</span>
-      </div>
-      <div className="flex h-3 w-full overflow-hidden rounded-full bg-slate-200">
-        <div
-          className="bg-red-500"
-          style={{ width: total === 0 ? "0%" : `${(counts.missing / total) * 100}%` }}
-        />
-        <div
-          className="bg-amber-500"
-          style={{ width: total === 0 ? "0%" : `${(counts.medium / total) * 100}%` }}
-        />
-        <div
-          className="bg-emerald-500"
-          style={{ width: total === 0 ? "0%" : `${(counts.full / total) * 100}%` }}
-        />
-      </div>
-      <div className="text-[11px] font-medium text-slate-700">{detail}</div>
-    </div>
-  )
-}
-
-function CalendarCell({
-  snapshot,
-  granularity,
-  t,
-  onOpenDay,
-}: {
-  snapshot: DaySnapshot
-  granularity: CalendarGranularity
-  t: Record<string, string>
-  onOpenDay: () => void
-}) {
-  const minHeight = granularity === "week" ? "min-h-[340px]" : "min-h-[220px]"
-
-  return (
-    <button
-      type="button"
-      onClick={onOpenDay}
-      title={t.viewDayInstruction}
-      className={cn(
-        "rounded-2xl border p-3 text-left transition hover:-translate-y-0.5 hover:shadow-sm",
-        minHeight,
-        snapshot.isCurrentMonth || granularity !== "month"
-          ? "border-slate-200 bg-white"
-          : "border-slate-100 bg-slate-50/70",
-        snapshot.isToday && "ring-2 ring-slate-900/10"
-      )}
-    >
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <span
-          className={cn(
-            "text-sm font-semibold",
-            snapshot.isCurrentMonth || granularity !== "month"
-              ? "text-slate-900"
-              : "text-slate-400"
-          )}
-        >
-          {snapshot.date.getDate()}
-        </span>
-
-        {snapshot.isToday ? (
-          <span className="rounded-full bg-slate-900 px-2 py-0.5 text-[10px] font-semibold text-white">
-            {t.today}
-          </span>
-        ) : null}
-      </div>
-
-      <div className="space-y-3">
-        <FlatBar title={t.occupancy} bar={snapshot.occupancy} />
-        <FlatBar title={t.tasks} bar={snapshot.tasks} />
-        <SupplyBar
-          title={t.supplies}
-          detail={snapshot.supplies.detail}
-          counts={snapshot.supplies.counts}
-          hoverText={snapshot.supplies.hoverText}
-        />
-        <FlatBar title={t.issues} bar={snapshot.issues} />
-      </div>
-    </button>
-  )
-}
 
 function ManagementCard({
   title,
@@ -1341,10 +1371,227 @@ function ManagementCard({
   action: ReactNode
 }) {
   return (
-    <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm" title={hint}>
+    <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="text-base font-semibold text-slate-900">{title}</div>
       <div className="mt-2 text-sm leading-6 text-slate-500">{hint}</div>
       <div className="mt-4">{action}</div>
+    </div>
+  )
+}
+function CalendarCell({
+  entry,
+  granularity,
+  language,
+  locale,
+  activeFilter,
+  onOpenDay,
+  onOpenIssues,
+  onOpenSupplies,
+}: {
+  entry: DayEntry
+  granularity: CalendarGranularity
+  language: Language
+  locale: string
+  activeFilter: CalendarFilter
+  onOpenDay: () => void
+  onOpenIssues: () => void
+  onOpenSupplies: () => void
+}) {
+  const router = useRouter()
+  const t = translations[language]
+  const isCompact = granularity === "month"
+
+  const showBookings = activeFilter === null || activeFilter === "bookings"
+  const showTasks    = activeFilter === null || activeFilter === "tasks"
+  const showSupplies = activeFilter === null || activeFilter === "supplies"
+  const showIssues   = activeFilter === null || activeFilter === "issues"
+
+  // Shared bar class (slot filler when empty keeps the height)
+  const slotBase = "min-h-[22px] w-full"
+  const barBase =
+    "flex h-[22px] w-full items-center gap-1.5 rounded-lg px-2 text-xs font-medium cursor-pointer select-none transition hover:opacity-80"
+
+  return (
+    <button
+      type="button"
+      onClick={onOpenDay}
+      className={cn(
+        "flex flex-col rounded-2xl border p-3 text-left transition hover:-translate-y-0.5 hover:shadow-sm",
+        entry.isCurrentMonth || granularity !== "month"
+          ? "border-slate-200 bg-white"
+          : "border-slate-100 bg-slate-50/70",
+        entry.isToday && "ring-2 ring-slate-900/10"
+      )}
+    >
+      {/* Αριθμός ημέρας */}
+      <div className="flex items-center justify-between gap-2">
+        <span
+          className={cn(
+            "text-sm font-semibold",
+            entry.isCurrentMonth || granularity !== "month"
+              ? "text-slate-900"
+              : "text-slate-400"
+          )}
+        >
+          {entry.date.getDate()}
+        </span>
+        {entry.isToday ? (
+          <span className="rounded-full bg-slate-900 px-2 py-0.5 text-[10px] font-semibold text-white">
+            {t.today}
+          </span>
+        ) : null}
+      </div>
+
+      {/* 4 fixed slots — σταθερή θέση ανεξάρτητα από περιεχόμενο */}
+      <div className="mt-2 flex flex-1 flex-col gap-1">
+
+        {/* Slot 1: Κρατήσεις (🛏) */}
+        <div className={slotBase}>
+          {showBookings && entry.activeBookings.length > 0
+            ? entry.activeBookings.slice(0, 1).map((booking) => {
+                const kind = getBookingDayKind(booking, entry.key)
+                const classes = getToneClasses(getOccupancyTone(kind))
+                const label = getBookingDayLabel(t, kind)
+                return (
+                  <div
+                    key={booking.id}
+                    title={buildOccupancyTooltip(language, locale, kind, [booking])}
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => { e.stopPropagation(); router.push(`/bookings/${booking.id}`) }}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.stopPropagation(); router.push(`/bookings/${booking.id}`) } }}
+                    className={cn(barBase, classes.soft)}
+                  >
+                    <BedIcon className="h-3 w-3 shrink-0" />
+                    <span className="truncate font-semibold">{label}</span>
+                    {!isCompact && booking.guestName ? (
+                      <span className="ml-auto truncate opacity-60">{booking.guestName}</span>
+                    ) : null}
+                  </div>
+                )
+              })
+            : (
+              <div title={t.filterBookings} className="flex h-[22px] w-full items-center rounded-lg px-1.5 text-slate-400 opacity-40 transition hover:opacity-100 hover:bg-sky-50 hover:text-sky-500">
+                <BedIcon className="h-3 w-3" />
+              </div>
+            )
+          }
+        </div>
+
+        {/* Slot 2: Εργασία (🧹) — μόνο την ημέρα scheduledDate */}
+        <div className={slotBase}>
+          {showTasks && entry.taskForCalendar ? (
+            <div
+              title={buildTaskTooltip(language, locale, entry.taskForCalendar)}
+              role="button"
+              tabIndex={0}
+              onClick={(e) => { e.stopPropagation(); router.push(`/tasks/${entry.taskForCalendar!.id}`) }}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.stopPropagation(); router.push(`/tasks/${entry.taskForCalendar!.id}`) } }}
+              className={cn(barBase, getToneClasses(getTaskTone(entry.taskForCalendar)).soft)}
+            >
+              <BroomIcon className="h-3 w-3 shrink-0" />
+              <span className="truncate">{getTaskStatusLabel(language, entry.taskForCalendar.status)}</span>
+            </div>
+          ) : (
+            <div title={t.filterTasks} className="flex h-[22px] w-full items-center rounded-lg px-1.5 text-slate-400 opacity-40 transition hover:opacity-100 hover:bg-amber-50 hover:text-amber-500">
+              <BroomIcon className="h-3 w-3" />
+            </div>
+          )}
+        </div>
+
+        {/* Slot 3: Αναλώσιμα (📊) — χρώμα: κόκκινο/κίτρινο/πράσινο */}
+        <div className={slotBase}>
+          {showSupplies && entry.supplyRecords.length > 0 ? (
+            <div
+              title={buildSupplyTooltip(language, entry.supplyRecords)}
+              role="button"
+              tabIndex={0}
+              onClick={(e) => {
+                e.stopPropagation()
+                if (entry.taskForCalendar) { router.push(`/tasks/${entry.taskForCalendar.id}`) }
+                else { onOpenSupplies() }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.stopPropagation()
+                  if (entry.taskForCalendar) { router.push(`/tasks/${entry.taskForCalendar.id}`) }
+                  else { onOpenSupplies() }
+                }
+              }}
+              className={cn(barBase, getToneClasses(getSuppliesTone(entry.supplyRecords)).soft)}
+            >
+              <SupplyBarsIcon className="h-3 w-3 shrink-0" />
+              <span className="truncate">{t.supplies}: {entry.supplyRecords.length}</span>
+            </div>
+          ) : (
+            <div title={t.filterSupplies} className="flex h-[22px] w-full items-center rounded-lg px-1.5 text-slate-400 opacity-40 transition hover:opacity-100 hover:bg-emerald-50 hover:text-emerald-500">
+              <SupplyBarsIcon className="h-3 w-3" />
+            </div>
+          )}
+        </div>
+
+        {/* Slot 4: Ζημιές / Βλάβες (🔧) */}
+        <div className={slotBase}>
+          {showIssues && entry.issueRecords.length > 0 ? (
+            <div
+              title={buildIssueTooltip(language, entry.issueRecords)}
+              role="button"
+              tabIndex={0}
+              onClick={(e) => {
+                e.stopPropagation()
+                if (entry.taskForCalendar) { router.push(`/tasks/${entry.taskForCalendar.id}`) }
+                else { onOpenIssues() }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.stopPropagation()
+                  if (entry.taskForCalendar) { router.push(`/tasks/${entry.taskForCalendar.id}`) }
+                  else { onOpenIssues() }
+                }
+              }}
+              className={cn(barBase, getToneClasses(getIssuesTone(entry.issueRecords)).soft)}
+            >
+              <WrenchIcon className="h-3 w-3 shrink-0" />
+              <span className="truncate">{t.issues}: {entry.issueRecords.length}</span>
+            </div>
+          ) : (
+            <div title={t.filterIssues} className="flex h-[22px] w-full items-center rounded-lg px-1.5 text-slate-400 opacity-40 transition hover:opacity-100 hover:bg-red-50 hover:text-red-500">
+              <WrenchIcon className="h-3 w-3" />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Κουμπί προβολής ημέρας */}
+      <div className="mt-2 flex items-center justify-end gap-1 border-t border-slate-100 pt-1.5">
+        <span className="text-[10px] font-semibold text-slate-400">{t.viewDay}</span>
+        <span className="text-[10px] text-slate-300">→</span>
+      </div>
+    </button>
+  )
+}
+
+function DayListCard({
+  title,
+  emptyText,
+  children,
+}: {
+  title: string
+  emptyText: string
+  children: ReactNode
+}) {
+  const isEmpty = Array.isArray(children) && children.length === 0
+
+  return (
+    <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="mb-4 text-sm font-semibold text-slate-900">{title}</div>
+      {isEmpty ? (
+        <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+          {emptyText}
+        </div>
+      ) : (
+        <div className="space-y-3">{children}</div>
+      )}
     </div>
   )
 }
@@ -1370,6 +1617,9 @@ export default function PropertyDetailPage() {
   const [propertyModalOpen, setPropertyModalOpen] = useState(false)
   const [partnerModalOpen, setPartnerModalOpen] = useState(false)
   const [taskModal, setTaskModal] = useState<TaskModalState | null>(null)
+  const [issuesModalOpen, setIssuesModalOpen] = useState(false)
+  const [suppliesModalOpen, setSuppliesModalOpen] = useState(false)
+  const [activeFilter, setActiveFilter] = useState<CalendarFilter>(null)
 
   const [propertyForm, setPropertyForm] = useState<PropertyFormState | null>(null)
   const [selectedPartnerId, setSelectedPartnerId] = useState("")
@@ -1416,7 +1666,7 @@ export default function PropertyDetailPage() {
         setPartners([])
       }
     } catch (err) {
-      console.error("Property calendar load error:", err)
+      console.error("Property page load error:", err)
       setError(err instanceof Error ? err.message : t.loadError)
       setProperty(null)
       setPartners([])
@@ -1429,66 +1679,87 @@ export default function PropertyDetailPage() {
     void loadData()
   }, [loadData])
 
-  const workWindows = useMemo(() => {
-    if (!property) return []
-    return buildWorkWindows(safeArray(property.bookings), safeArray(property.tasks))
-  }, [property])
+  const supplyRows = useMemo(() => buildSupplyRows(language, property), [language, property])
 
-  const weekdayLabels = useMemo(() => getWeekdayLabels(language), [language])
+  const workWindows = useMemo(() => {
+    return buildWorkWindows(safeArray(property?.bookings), safeArray(property?.tasks))
+  }, [property?.bookings, property?.tasks])
+
   const visibleDates = useMemo(
     () => buildVisibleDates(anchorDate, granularity),
     [anchorDate, granularity]
   )
 
-  const daySnapshots = useMemo(() => {
+  const dayEntries = useMemo(() => {
     if (!property) return []
 
     return visibleDates.map((date) =>
-      buildDaySnapshot({
+      buildDayEntry({
         date,
         anchorDate,
         property,
-        workWindows,
-        language,
-        locale,
+        supplyRows,
+        windows: workWindows,
       })
     )
-  }, [property, visibleDates, anchorDate, workWindows, language, locale])
+  }, [property, visibleDates, anchorDate, supplyRows, workWindows])
 
-  const selectedDaySnapshot = useMemo(() => {
+  // Δυναμικοί μετρητές για το ορατό εύρος ημερολογίου
+  const calendarCounters = useMemo(() => {
+    const bookingIds = new Set<string>()
+    const taskIds = new Set<string>()
+    const supplyIds = new Set<string>()
+    const issueIds = new Set<string>()
+
+    const closedStatuses = new Set(["completed", "cancelled", "canceled", "not_executed", "missed"])
+
+    for (const entry of dayEntries) {
+      for (const booking of entry.activeBookings) {
+        bookingIds.add(booking.id)
+      }
+      // Μόνο ΕΝΕΡΓΕΣ εργασίες (όχι ολοκληρωμένες/ακυρωμένες)
+      for (const task of entry.scheduledTasks) {
+        if (!closedStatuses.has(normalizeTaskStatus(task.status))) {
+          taskIds.add(task.id)
+        }
+      }
+      for (const supply of entry.supplyRecords) {
+        supplyIds.add(supply.id)
+      }
+      for (const issue of entry.issueRecords) {
+        issueIds.add(issue.id)
+      }
+    }
+
+    return {
+      bookings: bookingIds.size,
+      tasks: taskIds.size,
+      supplies: supplyIds.size,
+      issues: issueIds.size,
+    }
+  }, [dayEntries])
+
+  const selectedEntry = useMemo(() => {
     if (!property) return null
 
-    const selectedKey = normalizeDateOnlyValue(anchorDate.toISOString())
+    const selectedKey = normalizeDateOnly(anchorDate)
+
     return (
-      daySnapshots.find((snapshot) => snapshot.key === selectedKey) ||
-      buildDaySnapshot({
+      dayEntries.find((entry) => entry.key === selectedKey) ||
+      buildDayEntry({
         date: anchorDate,
         anchorDate,
         property,
-        workWindows,
-        language,
-        locale,
+        supplyRows,
+        windows: workWindows,
       })
     )
-  }, [property, daySnapshots, anchorDate, workWindows, language, locale])
+  }, [property, dayEntries, anchorDate, supplyRows, workWindows])
 
-  const supplyRows = useMemo(() => {
-    return safeArray(property?.propertySupplies).map((supply) => {
-      const state = getSupplyState(supply)
-      return {
-        ...supply,
-        state,
-        displayName: getSupplyDisplayName(language, {
-          code: supply.supplyItem?.code,
-          fallbackName:
-            supply.supplyItem?.nameEn ||
-            supply.supplyItem?.nameEl ||
-            supply.supplyItem?.name ||
-            supply.id,
-        }),
-      }
-    })
-  }, [property?.propertySupplies, language])
+  const hourRows = useMemo(() => {
+    if (!selectedEntry) return []
+    return buildHourRows(selectedEntry)
+  }, [selectedEntry])
 
   function moveRange(direction: "prev" | "next") {
     if (granularity === "month") {
@@ -1505,9 +1776,15 @@ export default function PropertyDetailPage() {
   }
 
   function openCreateTaskModal(window: WorkWindow) {
-    const selectedDate = normalizeDateOnlyValue(anchorDate.toISOString()) || normalizeDateOnlyValue(window.startAt.toISOString()) || ""
-    const defaultStartTime = normalizeDateOnlyValue(window.startAt.toISOString()) === selectedDate
-      ? formatTime(`${String(window.startAt.getHours()).padStart(2, "0")}:${String(window.startAt.getMinutes()).padStart(2, "0")}`)
+    const selectedDate =
+      normalizeDateOnly(anchorDate) ||
+      normalizeDateOnly(window.startAt) ||
+      ""
+
+    const defaultStart = normalizeDateOnly(window.startAt) === selectedDate
+      ? `${String(window.startAt.getHours()).padStart(2, "0")}:${String(
+          window.startAt.getMinutes()
+        ).padStart(2, "0")}`
       : ""
 
     setTaskModal({
@@ -1515,7 +1792,7 @@ export default function PropertyDetailPage() {
       workWindowKey: window.key,
       titleKey: "cleaning",
       scheduledDate: selectedDate,
-      scheduledStartTime: defaultStartTime === "—" ? "" : defaultStartTime,
+      scheduledStartTime: defaultStart,
       scheduledEndTime: "",
       alertEnabled: false,
       alertAt: "",
@@ -1524,14 +1801,20 @@ export default function PropertyDetailPage() {
   }
 
   function openEditTaskModal(window: WorkWindow, task: PropertyTaskLite) {
+    const normalizedType = String(task.taskType || "").trim().toLowerCase()
+    const titleKey = TASK_TITLE_OPTIONS.includes(normalizedType as TaskTitleKey)
+      ? (normalizedType as TaskTitleKey)
+      : "cleaning"
+
     setTaskModal({
       mode: "edit",
       taskId: task.id,
       workWindowKey: window.key,
-      titleKey: TASK_TITLE_OPTIONS.includes(String(task.taskType || "") as TaskTitleKey)
-        ? (String(task.taskType || "") as TaskTitleKey)
-        : "cleaning",
-      scheduledDate: normalizeDateOnlyValue(task.scheduledDate) || normalizeDateOnlyValue(anchorDate.toISOString()) || "",
+      titleKey,
+      scheduledDate:
+        normalizeDateOnly(task.scheduledDate) ||
+        normalizeDateOnly(anchorDate) ||
+        "",
       scheduledStartTime: task.scheduledStartTime || "",
       scheduledEndTime: task.scheduledEndTime || "",
       alertEnabled: Boolean(task.alertEnabled),
@@ -1539,8 +1822,9 @@ export default function PropertyDetailPage() {
       notes: task.notes || "",
     })
   }
-  async function savePropertyChanges(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault()
+
+  async function savePropertyChanges(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
     if (!property || !propertyForm) return
 
     try {
@@ -1580,8 +1864,8 @@ export default function PropertyDetailPage() {
     }
   }
 
-  async function savePartnerChanges(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault()
+  async function savePartnerChanges(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
     if (!property) return
 
     try {
@@ -1591,9 +1875,7 @@ export default function PropertyDetailPage() {
       const response = await fetch(`/api/properties/${property.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          defaultPartnerId: selectedPartnerId || null,
-        }),
+        body: JSON.stringify({ defaultPartnerId: selectedPartnerId || null }),
       })
 
       const json = await response.json().catch(() => null)
@@ -1612,15 +1894,16 @@ export default function PropertyDetailPage() {
     }
   }
 
-  async function saveTaskChanges(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault()
+  async function saveTaskChanges(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
     if (!property || !taskModal) return
 
     try {
       setSaving(true)
       setMessage(null)
 
-      const targetWindow = workWindows.find((window) => window.key === taskModal.workWindowKey) || null
+      const targetWindow =
+        workWindows.find((window) => window.key === taskModal.workWindowKey) || null
       const title = taskTitleOptions[taskModal.titleKey]
 
       const payload = {
@@ -1705,7 +1988,7 @@ export default function PropertyDetailPage() {
     )
   }
 
-  if (error || !property || !propertyForm || !selectedDaySnapshot) {
+  if (error || !property || !propertyForm || !selectedEntry) {
     return (
       <div className="rounded-3xl border border-red-200 bg-white p-6 shadow-sm">
         <div className="text-sm text-red-700">{error || t.noData}</div>
@@ -1713,8 +1996,8 @@ export default function PropertyDetailPage() {
     )
   }
 
-  const selectedWindow = selectedDaySnapshot.workWindow
-  const selectedWindowTask = selectedWindow?.task || null
+  const selectedWindow = selectedEntry.workWindow
+  const selectedTask = selectedEntry.taskForCalendar
 
   return (
     <>
@@ -1750,9 +2033,8 @@ export default function PropertyDetailPage() {
             {viewMode === "calendar" ? (
               <button
                 type="button"
-                onClick={() => selectedWindow && openCreateTaskModal(selectedWindow)}
-                disabled={!selectedWindow || Boolean(selectedWindowTask)}
-                title={selectedWindow ? t.createTask : t.noTasksForDay}
+                onClick={() => selectedWindow && !selectedTask && openCreateTaskModal(selectedWindow)}
+                disabled={!selectedWindow || Boolean(selectedTask)}
                 className="inline-flex items-center justify-center rounded-2xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
               >
                 {t.createTask}
@@ -1770,20 +2052,20 @@ export default function PropertyDetailPage() {
         {viewMode === "management" ? (
           <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
             <div>
-              <h2 className="text-2xl font-bold text-slate-900">{t.managementPanelTitle}</h2>
-              <p className="mt-2 text-sm text-slate-500">{t.managementPanelSubtitle}</p>
+              <h2 className="text-2xl font-bold text-slate-900">{t.managementTitle}</h2>
+              <p className="mt-2 text-sm text-slate-500">{t.managementSubtitle}</p>
             </div>
 
             <div className="mt-5 grid gap-4 xl:grid-cols-3">
               <ManagementCard
-                title={t.editLists}
+                title={t.lists}
                 hint={t.editListsHint}
                 action={
                   <Link
                     href={`/property-checklists/${property.id}`}
                     className="inline-flex rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                   >
-                    {t.editLists}
+                    {t.lists}
                   </Link>
                 }
               />
@@ -1832,85 +2114,326 @@ export default function PropertyDetailPage() {
             </div>
 
             <div className="mt-5 text-2xl font-bold capitalize text-slate-900">
-              {granularity === "day" ? formatFullDate(anchorDate, locale) : formatMonthTitle(anchorDate, locale)}
+              {granularity === "day"
+                ? formatFullDate(anchorDate, locale)
+                : formatMonthTitle(anchorDate, locale)}
+            </div>
+
+            {/* Δυναμικοί μετρητές / φίλτρα */}
+            <div className="mt-4 flex flex-wrap gap-2">
+              <CalendarFilterButton
+                icon={<span className="text-[11px] font-bold leading-none">✓</span>}
+                label={t.filterAll}
+                count={calendarCounters.bookings + calendarCounters.tasks + calendarCounters.supplies + calendarCounters.issues}
+                active={activeFilter === null}
+                tone="slate"
+                onClick={() => setActiveFilter(null)}
+              />
+              <CalendarFilterButton
+                icon={<BedIcon className="h-3.5 w-3.5" />}
+                label={t.filterBookings}
+                count={calendarCounters.bookings}
+                active={activeFilter === "bookings"}
+                tone="sky"
+                onClick={() => setActiveFilter(activeFilter === "bookings" ? null : "bookings")}
+              />
+              <CalendarFilterButton
+                icon={<BroomIcon className="h-3.5 w-3.5" />}
+                label={t.filterTasks}
+                count={calendarCounters.tasks}
+                active={activeFilter === "tasks"}
+                tone="amber"
+                onClick={() => setActiveFilter(activeFilter === "tasks" ? null : "tasks")}
+              />
+              <CalendarFilterButton
+                icon={<SupplyBarsIcon className="h-3.5 w-3.5" />}
+                label={t.filterSupplies}
+                count={calendarCounters.supplies}
+                active={activeFilter === "supplies"}
+                tone="emerald"
+                onClick={() => setActiveFilter(activeFilter === "supplies" ? null : "supplies")}
+              />
+              <CalendarFilterButton
+                icon={<WrenchIcon className="h-3.5 w-3.5" />}
+                label={t.filterIssues}
+                count={calendarCounters.issues}
+                active={activeFilter === "issues"}
+                tone="red"
+                onClick={() => setActiveFilter(activeFilter === "issues" ? null : "issues")}
+              />
             </div>
 
             {granularity !== "day" ? (
               <div className="mt-5 grid grid-cols-7 gap-3">
-                {weekdayLabels.map((label) => (
-                  <div key={label} className="rounded-xl bg-slate-50 px-3 py-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</div>
+                {t.weekdays.map((label: string) => (
+                  <div
+                    key={label}
+                    className="rounded-xl bg-slate-50 px-3 py-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-500"
+                  >
+                    {label}
+                  </div>
                 ))}
               </div>
             ) : null}
 
             {granularity === "month" ? (
               <div className="mt-3 grid grid-cols-7 gap-3">
-                {daySnapshots.map((snapshot) => (
-                  <CalendarCell key={snapshot.key} snapshot={snapshot} granularity={granularity} t={t} onOpenDay={() => { setAnchorDate(snapshot.date); setGranularity("day") }} />
+                {dayEntries.map((entry) => (
+                  <CalendarCell
+                    key={entry.key}
+                    entry={entry}
+                    granularity={granularity}
+                    language={language}
+                    locale={locale}
+                    activeFilter={activeFilter}
+                    onOpenDay={() => {
+                      setAnchorDate(entry.date)
+                      setGranularity("day")
+                    }}
+                    onOpenIssues={() => {
+                      setAnchorDate(entry.date)
+                      setGranularity("day")
+                      setIssuesModalOpen(true)
+                    }}
+                    onOpenSupplies={() => {
+                      setAnchorDate(entry.date)
+                      setGranularity("day")
+                      setSuppliesModalOpen(true)
+                    }}
+                  />
                 ))}
               </div>
             ) : null}
 
             {granularity === "week" ? (
               <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-7">
-                {daySnapshots.map((snapshot) => (
-                  <CalendarCell key={snapshot.key} snapshot={snapshot} granularity={granularity} t={t} onOpenDay={() => { setAnchorDate(snapshot.date); setGranularity("day") }} />
+                {dayEntries.map((entry) => (
+                  <CalendarCell
+                    key={entry.key}
+                    entry={entry}
+                    granularity={granularity}
+                    language={language}
+                    locale={locale}
+                    activeFilter={activeFilter}
+                    onOpenDay={() => {
+                      setAnchorDate(entry.date)
+                      setGranularity("day")
+                    }}
+                    onOpenIssues={() => {
+                      setAnchorDate(entry.date)
+                      setGranularity("day")
+                      setIssuesModalOpen(true)
+                    }}
+                    onOpenSupplies={() => {
+                      setAnchorDate(entry.date)
+                      setGranularity("day")
+                      setSuppliesModalOpen(true)
+                    }}
+                  />
                 ))}
               </div>
             ) : null}
-
+            
             {granularity === "day" ? (
               <div className="mt-5 space-y-5">
-                <div className="grid gap-4 xl:grid-cols-2">
-                  <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-                    <div className="mb-4 text-sm font-semibold text-slate-900">{t.selectedDay}</div>
-                    <div className="space-y-4">
-                      <FlatBar title={t.occupancy} bar={selectedDaySnapshot.occupancy} />
-                      <FlatBar title={t.tasks} bar={selectedDaySnapshot.tasks} />
-                      <SupplyBar title={t.supplies} detail={selectedDaySnapshot.supplies.detail} counts={selectedDaySnapshot.supplies.counts} hoverText={selectedDaySnapshot.supplies.hoverText} />
-                      <FlatBar title={t.issues} bar={selectedDaySnapshot.issues} />
-                    </div>
-                  </div>
+                {/* Αφίξεις / Αναχωρήσεις / Διαμονές */}
+                <div className="grid gap-5 xl:grid-cols-3">
+                  <DayListCard title={t.arrivalsTitle} emptyText={t.noArrivals}>
+                    {selectedEntry.arrivals.map((booking) => (
+                      <Link
+                        key={booking.id}
+                        href={`/bookings/${booking.id}`}
+                        className="block rounded-2xl border border-slate-200 bg-sky-50 p-4 transition hover:bg-sky-100"
+                      >
+                        <div className="text-sm font-semibold text-slate-900">
+                          {booking.guestName || t.unnamedGuest}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-600">
+                          {formatShortDate(booking.checkInDate, locale)} • {formatTime(booking.checkInTime)}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-500">
+                          {formatShortDate(booking.checkOutDate, locale)} • {formatTime(booking.checkOutTime)}
+                        </div>
+                      </Link>
+                    ))}
+                  </DayListCard>
 
-                  <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-                    <div className="mb-4 text-sm font-semibold text-slate-900">{t.suppliesTitle}</div>
-                    {supplyRows.length === 0 ? (
-                      <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">{t.noSupplies}</div>
-                    ) : (
-                      <div className="space-y-3">
-                        {supplyRows.map((supply) => {
-                          const tone: Tone = supply.state === "missing" ? "red" : supply.state === "medium" ? "amber" : "emerald"
-                          const toneClasses = getToneClasses(tone)
-                          return (
-                            <div key={supply.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                  <div className="truncate text-sm font-semibold text-slate-900">{supply.displayName}</div>
-                                  <div className="mt-1 text-xs text-slate-500">{supply.currentStock}</div>
-                                </div>
-                                <span className={cn("inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold", toneClasses.soft)}>{supply.state === "missing" ? t.missing : supply.state === "medium" ? t.medium : t.full}</span>
-                              </div>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    )}
-                    <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-500">{t.currentSuppliesState}</div>
-                  </div>
+                  <DayListCard title={t.departuresTitle} emptyText={t.noDepartures}>
+                    {selectedEntry.departures.map((booking) => (
+                      <Link
+                        key={booking.id}
+                        href={`/bookings/${booking.id}`}
+                        className="block rounded-2xl border border-slate-200 bg-amber-50 p-4 transition hover:bg-amber-100"
+                      >
+                        <div className="text-sm font-semibold text-slate-900">
+                          {booking.guestName || t.unnamedGuest}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-600">
+                          {formatShortDate(booking.checkInDate, locale)} • {formatTime(booking.checkInTime)}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-500">
+                          {formatShortDate(booking.checkOutDate, locale)} • {formatTime(booking.checkOutTime)}
+                        </div>
+                      </Link>
+                    ))}
+                  </DayListCard>
+
+                  <DayListCard title={t.staysTitle} emptyText={t.noStays}>
+                    {selectedEntry.stays.map((booking) => (
+                      <Link
+                        key={booking.id}
+                        href={`/bookings/${booking.id}`}
+                        className="block rounded-2xl border border-slate-200 bg-emerald-50 p-4 transition hover:bg-emerald-100"
+                      >
+                        <div className="text-sm font-semibold text-slate-900">
+                          {booking.guestName || t.unnamedGuest}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-600">
+                          {formatShortDate(booking.checkInDate, locale)} • {formatTime(booking.checkInTime)}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-500">
+                          {formatShortDate(booking.checkOutDate, locale)} • {formatTime(booking.checkOutTime)}
+                        </div>
+                      </Link>
+                    ))}
+                  </DayListCard>
                 </div>
 
+                {/* Πάνελ εργασίας / αναλωσίμων / ζημιών — πάνω από την ωριαία προβολή */}
                 <div className="grid gap-5 xl:grid-cols-3">
                   <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-                    <div className="mb-4 text-sm font-semibold text-slate-900">{t.bookingsTitle}</div>
-                    {selectedDaySnapshot.bookings.length === 0 ? (
-                      <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">{t.noBookingsForDay}</div>
+                    <div className="mb-4 flex items-center justify-between gap-3">
+                      <div className="text-sm font-semibold text-slate-900">
+                        {t.taskPanelTitle}
+                      </div>
+
+                      {!selectedTask && selectedWindow ? (
+                        <button
+                          type="button"
+                          onClick={() => openCreateTaskModal(selectedWindow)}
+                          className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700"
+                        >
+                          {t.createTask}
+                        </button>
+                      ) : null}
+                    </div>
+
+                    {!selectedWindow ? (
+                      <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+                        {t.noWorkWindow}
+                      </div>
+                    ) : !selectedTask ? (
+                      <div className="rounded-2xl border border-red-200 bg-red-50 p-4">
+                        <div className="text-sm font-semibold text-red-700">
+                          {t.noTaskForDay}
+                        </div>
+                        <div className="mt-2 text-xs text-red-600">
+                          {formatDateTime(selectedWindow.startAt, locale)} → {selectedWindow.endAt
+                            ? formatDateTime(selectedWindow.endAt, locale)
+                            : "—"}
+                        </div>
+                      </div>
+                    ) : (
+                      <div
+                        className={cn(
+                          "rounded-2xl border p-4",
+                          getToneClasses(getTaskTone(selectedTask)).soft
+                        )}
+                      >
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-semibold">
+                            {selectedTask.title}
+                          </span>
+                          <span className="rounded-full border border-current/20 bg-white/70 px-2.5 py-1 text-[11px] font-semibold">
+                            {getTaskStatusLabel(language, selectedTask.status)}
+                          </span>
+                        </div>
+
+                        <div className="mt-3 space-y-1 text-xs">
+                          <div>
+                            {t.date}: {formatShortDate(selectedTask.scheduledDate, locale)}
+                          </div>
+                          <div>
+                            {t.startTime}: {formatTime(selectedTask.scheduledStartTime)}
+                          </div>
+                          <div>
+                            {t.endTime}: {formatTime(selectedTask.scheduledEndTime)}
+                          </div>
+                          <div>
+                            {t.editPartner}: {getLatestAssignment(selectedTask)?.partner?.name || t.noPartner}
+                          </div>
+                        </div>
+
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          <Link
+                            href={`/tasks/${selectedTask.id}`}
+                            className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                          >
+                            {t.openTask}
+                          </Link>
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              selectedWindow &&
+                              openEditTaskModal(selectedWindow, selectedTask)
+                            }
+                            className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                          >
+                            {t.editTask}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <div className="mb-4 flex items-center justify-between gap-3">
+                      <div className="text-sm font-semibold text-slate-900">
+                        {t.suppliesPanelTitle}
+                      </div>
+
+                      {selectedEntry.supplyRecords.length > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => setSuppliesModalOpen(true)}
+                          className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                        >
+                          {t.supplies}
+                        </button>
+                      ) : null}
+                    </div>
+
+                    {selectedEntry.supplyRecords.length === 0 ? (
+                      <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+                        {t.noSuppliesForDay}
+                      </div>
                     ) : (
                       <div className="space-y-3">
-                        {selectedDaySnapshot.bookings.map((booking) => (
-                          <div key={booking.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                            <div className="text-sm font-semibold text-slate-900">{booking.guestName || t.unnamedGuest}</div>
-                            <div className="mt-2 text-xs text-slate-500">{t.from}: {formatShortDate(booking.checkInDate, locale)} {formatTime(booking.checkInTime)}</div>
-                            <div className="mt-1 text-xs text-slate-500">{t.to}: {formatShortDate(booking.checkOutDate, locale)} {formatTime(booking.checkOutTime)}</div>
+                        {selectedEntry.supplyRecords.map((row) => (
+                          <div
+                            key={row.id}
+                            className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="truncate text-sm font-semibold text-slate-900">
+                                  {row.displayName}
+                                </div>
+                                <div className="mt-1 text-xs text-slate-500">
+                                  {row.currentStock ?? 0}
+                                </div>
+                              </div>
+
+                              <span
+                                className={cn(
+                                  "inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold",
+                                  getToneClasses(getSuppliesTone([row])).soft
+                                )}
+                              >
+                                {getSupplyStateLabel(language, row.state)}
+                              </span>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -1919,54 +2442,135 @@ export default function PropertyDetailPage() {
 
                   <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
                     <div className="mb-4 flex items-center justify-between gap-3">
-                      <div className="text-sm font-semibold text-slate-900">{t.tasksTitle}</div>
-                      {!selectedWindowTask && selectedWindow ? (
-                        <button type="button" onClick={() => openCreateTaskModal(selectedWindow)} className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700">{t.createTask}</button>
+                      <div className="text-sm font-semibold text-slate-900">
+                        {t.issuesPanelTitle}
+                      </div>
+
+                      {selectedEntry.issueRecords.length > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => setIssuesModalOpen(true)}
+                          className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                        >
+                          {t.issues}
+                        </button>
                       ) : null}
                     </div>
 
-                    {!selectedWindow ? (
-                      <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">{t.noTasksForDay}</div>
-                    ) : !selectedWindowTask ? (
-                      <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700" title={selectedDaySnapshot.tasks.hoverText}>
-                        <div className="font-semibold">{t.createCleaningTaskPrompt}</div>
-                        <div className="mt-2 text-xs">{selectedDaySnapshot.tasks.detail}</div>
+                    {selectedEntry.issueRecords.length === 0 ? (
+                      <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+                        {t.noIssuesForDay}
                       </div>
-                    ) : (
-                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4" title={selectedDaySnapshot.tasks.hoverText}>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-sm font-semibold text-slate-900">{normalizeTaskTitleText(selectedWindowTask.title, language) || t.untitledTask}</span>
-                          <span className="inline-flex rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700">{getTaskStatusLabel(language, selectedWindowTask.status)}</span>
-                          {isTaskAlertActive(selectedWindowTask) ? <span className="inline-flex rounded-full border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700">{t.alerts}</span> : null}
-                        </div>
-                        <div className="mt-2 text-xs text-slate-500">{t.from}: {formatTime(selectedWindowTask.scheduledStartTime)} • {t.to}: {formatTime(selectedWindowTask.scheduledEndTime)}</div>
-                        <div className="mt-4 flex flex-wrap gap-2">
-                          <button type="button" onClick={() => openEditTaskModal(selectedWindow, selectedWindowTask)} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">{t.editTask}</button>
-                          <Link href={`/tasks/${selectedWindowTask.id}`} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">{t.viewTask}</Link>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-                    <div className="mb-4 text-sm font-semibold text-slate-900">{t.issuesTitle}</div>
-                    {selectedDaySnapshot.openIssues.length === 0 ? (
-                      <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">{t.noIssuesForDay}</div>
                     ) : (
                       <div className="space-y-3">
-                        {selectedDaySnapshot.openIssues.map((issue) => (
-                          <div key={issue.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                        {selectedEntry.issueRecords.map((issue) => (
+                          <div
+                            key={issue.id}
+                            className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                          >
                             <div className="flex flex-wrap items-center gap-2">
-                              <span className="text-sm font-semibold text-slate-900">{issue.title || t.untitledIssue}</span>
-                              <span className="inline-flex rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700">{getIssueStatusLabel(language, issue.status)}</span>
-                              <span className="inline-flex rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700">{getIssuePriorityLabel(language, issue.severity)}</span>
+                              <span className="text-sm font-semibold text-slate-900">
+                                {issue.title}
+                              </span>
+                              <span
+                                className={cn(
+                                  "inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold",
+                                  getToneClasses(getIssuesTone([issue])).soft
+                                )}
+                              >
+                                {getIssueStatusLabel(language, issue.status)}
+                              </span>
                             </div>
-                            {issue.description ? <div className="mt-2 text-xs leading-5 text-slate-500">{issue.description}</div> : null}
+
+                            {issue.description ? (
+                              <div className="mt-2 text-xs leading-5 text-slate-500">
+                                {issue.description}
+                              </div>
+                            ) : null}
                           </div>
                         ))}
                       </div>
                     )}
-                    <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-500">{t.currentIssuesState}</div>
+                  </div>
+                </div>
+
+                {/* Ωριαία προβολή — κάτω από τα πάνελ */}
+                <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="mb-4 text-sm font-semibold text-slate-900">
+                    {t.dayTimelineTitle}
+                  </div>
+
+                  <div className="space-y-2">
+                    {hourRows.map((row) => {
+                      const hasContent =
+                        row.arrivals.length > 0 ||
+                        row.departures.length > 0 ||
+                        row.activeStays.length > 0 ||
+                        row.tasks.length > 0
+
+                      return (
+                        <div
+                          key={row.hour}
+                          className={cn(
+                            "grid gap-3 rounded-2xl border p-3 md:grid-cols-[84px_1fr]",
+                            hasContent
+                              ? "border-slate-200 bg-slate-50"
+                              : "border-slate-100 bg-white"
+                          )}
+                        >
+                          <div className="text-sm font-semibold text-slate-700">
+                            {row.label}
+                          </div>
+
+                          {!hasContent ? (
+                            <div className="text-sm text-slate-400">
+                              {t.noTimelineItems}
+                            </div>
+                          ) : (
+                            <div className="flex flex-wrap gap-2">
+                              {row.arrivals.map((booking) => (
+                                <Link
+                                  key={`arrival-${booking.id}-${row.hour}`}
+                                  href={`/bookings/${booking.id}`}
+                                  className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-medium text-sky-700 transition hover:bg-sky-100"
+                                >
+                                  {t.timelineArrival} • {booking.guestName || t.unnamedGuest} • {formatTime(booking.checkInTime)}
+                                </Link>
+                              ))}
+
+                              {row.departures.map((booking) => (
+                                <Link
+                                  key={`departure-${booking.id}-${row.hour}`}
+                                  href={`/bookings/${booking.id}`}
+                                  className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 transition hover:bg-amber-100"
+                                >
+                                  {t.timelineDeparture} • {booking.guestName || t.unnamedGuest} • {formatTime(booking.checkOutTime)}
+                                </Link>
+                              ))}
+
+                              {row.tasks.map((task) => (
+                                <Link
+                                  key={`task-${task.id}-${row.hour}`}
+                                  href={`/tasks/${task.id}`}
+                                  className={cn(
+                                    "rounded-xl border px-3 py-2 text-xs font-medium transition hover:opacity-80",
+                                    getToneClasses(getTaskTone(task)).soft
+                                  )}
+                                >
+                                  {t.timelineTask} • {task.title} • {getTaskStatusLabel(language, task.status)}
+                                </Link>
+                              ))}
+
+                              {row.activeStays.length > 0 ? (
+                                <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-700">
+                                  {t.timelineStay} • {row.activeStays.length}
+                                </div>
+                              ) : null}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               </div>
@@ -1975,57 +2579,464 @@ export default function PropertyDetailPage() {
         )}
       </div>
 
-      <ModalShell open={propertyModalOpen} title={t.propertyDetailsTitle} onClose={() => setPropertyModalOpen(false)}>
+      <ModalShell
+        open={propertyModalOpen}
+        title={t.propertyDetailsTitle}
+        onClose={() => setPropertyModalOpen(false)}
+      >
         <form onSubmit={savePropertyChanges} className="space-y-4">
           <div className="grid gap-4 md:grid-cols-2">
-            <label className="space-y-1"><span className="text-sm font-medium text-slate-700">{t.code}</span><input value={propertyForm.code} onChange={(e) => setPropertyForm((prev) => prev ? { ...prev, code: e.target.value } : prev)} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900" /></label>
-            <label className="space-y-1"><span className="text-sm font-medium text-slate-700">{t.name}</span><input value={propertyForm.name} onChange={(e) => setPropertyForm((prev) => prev ? { ...prev, name: e.target.value } : prev)} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900" /></label>
+            <label className="space-y-1">
+              <span className="text-sm font-medium text-slate-700">{t.code}</span>
+              <input
+                value={propertyForm.code}
+                onChange={(e) =>
+                  setPropertyForm((prev) =>
+                    prev ? { ...prev, code: e.target.value } : prev
+                  )
+                }
+                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
+              />
+            </label>
+
+            <label className="space-y-1">
+              <span className="text-sm font-medium text-slate-700">{t.name}</span>
+              <input
+                value={propertyForm.name}
+                onChange={(e) =>
+                  setPropertyForm((prev) =>
+                    prev ? { ...prev, name: e.target.value } : prev
+                  )
+                }
+                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
+              />
+            </label>
           </div>
-          <label className="space-y-1 block"><span className="text-sm font-medium text-slate-700">{t.address}</span><input value={propertyForm.address} onChange={(e) => setPropertyForm((prev) => prev ? { ...prev, address: e.target.value } : prev)} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900" /></label>
+
+          <label className="block space-y-1">
+            <span className="text-sm font-medium text-slate-700">{t.address}</span>
+            <input
+              value={propertyForm.address}
+              onChange={(e) =>
+                setPropertyForm((prev) =>
+                  prev ? { ...prev, address: e.target.value } : prev
+                )
+              }
+              className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
+            />
+          </label>
+
           <div className="grid gap-4 md:grid-cols-3">
-            <label className="space-y-1"><span className="text-sm font-medium text-slate-700">{t.city}</span><input value={propertyForm.city} onChange={(e) => setPropertyForm((prev) => prev ? { ...prev, city: e.target.value } : prev)} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900" /></label>
-            <label className="space-y-1"><span className="text-sm font-medium text-slate-700">{t.region}</span><input value={propertyForm.region} onChange={(e) => setPropertyForm((prev) => prev ? { ...prev, region: e.target.value } : prev)} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900" /></label>
-            <label className="space-y-1"><span className="text-sm font-medium text-slate-700">{t.postalCode}</span><input value={propertyForm.postalCode} onChange={(e) => setPropertyForm((prev) => prev ? { ...prev, postalCode: e.target.value } : prev)} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900" /></label>
+            <label className="space-y-1">
+              <span className="text-sm font-medium text-slate-700">{t.city}</span>
+              <input
+                value={propertyForm.city}
+                onChange={(e) =>
+                  setPropertyForm((prev) =>
+                    prev ? { ...prev, city: e.target.value } : prev
+                  )
+                }
+                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
+              />
+            </label>
+
+            <label className="space-y-1">
+              <span className="text-sm font-medium text-slate-700">{t.region}</span>
+              <input
+                value={propertyForm.region}
+                onChange={(e) =>
+                  setPropertyForm((prev) =>
+                    prev ? { ...prev, region: e.target.value } : prev
+                  )
+                }
+                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
+              />
+            </label>
+
+            <label className="space-y-1">
+              <span className="text-sm font-medium text-slate-700">{t.postalCode}</span>
+              <input
+                value={propertyForm.postalCode}
+                onChange={(e) =>
+                  setPropertyForm((prev) =>
+                    prev ? { ...prev, postalCode: e.target.value } : prev
+                  )
+                }
+                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
+              />
+            </label>
           </div>
+
           <div className="grid gap-4 md:grid-cols-3">
-            <label className="space-y-1"><span className="text-sm font-medium text-slate-700">{t.country}</span><input value={propertyForm.country} onChange={(e) => setPropertyForm((prev) => prev ? { ...prev, country: e.target.value } : prev)} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900" /></label>
-            <label className="space-y-1"><span className="text-sm font-medium text-slate-700">{t.type}</span><input value={propertyForm.type} onChange={(e) => setPropertyForm((prev) => prev ? { ...prev, type: e.target.value } : prev)} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900" /></label>
-            <label className="space-y-1"><span className="text-sm font-medium text-slate-700">{t.status}</span><input value={propertyForm.status} onChange={(e) => setPropertyForm((prev) => prev ? { ...prev, status: e.target.value } : prev)} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900" /></label>
+            <label className="space-y-1">
+              <span className="text-sm font-medium text-slate-700">{t.country}</span>
+              <input
+                value={propertyForm.country}
+                onChange={(e) =>
+                  setPropertyForm((prev) =>
+                    prev ? { ...prev, country: e.target.value } : prev
+                  )
+                }
+                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
+              />
+            </label>
+
+            <label className="space-y-1">
+              <span className="text-sm font-medium text-slate-700">{t.type}</span>
+              <input
+                value={propertyForm.type}
+                onChange={(e) =>
+                  setPropertyForm((prev) =>
+                    prev ? { ...prev, type: e.target.value } : prev
+                  )
+                }
+                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
+              />
+            </label>
+
+            <label className="space-y-1">
+              <span className="text-sm font-medium text-slate-700">{t.status}</span>
+              <input
+                value={propertyForm.status}
+                onChange={(e) =>
+                  setPropertyForm((prev) =>
+                    prev ? { ...prev, status: e.target.value } : prev
+                  )
+                }
+                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
+              />
+            </label>
           </div>
-          <label className="space-y-1 block"><span className="text-sm font-medium text-slate-700">{t.notes}</span><textarea value={propertyForm.notes} onChange={(e) => setPropertyForm((prev) => prev ? { ...prev, notes: e.target.value } : prev)} rows={5} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900" /></label>
-          <div className="flex justify-end gap-3"><button type="button" onClick={() => setPropertyModalOpen(false)} className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">{t.cancel}</button><button type="submit" disabled={saving} className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60">{t.save}</button></div>
+
+          <label className="block space-y-1">
+            <span className="text-sm font-medium text-slate-700">{t.notes}</span>
+            <textarea
+              value={propertyForm.notes}
+              onChange={(e) =>
+                setPropertyForm((prev) =>
+                  prev ? { ...prev, notes: e.target.value } : prev
+                )
+              }
+              rows={5}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
+            />
+          </label>
+
+          <div className="flex justify-end gap-3">
+            <button
+              type="button"
+              onClick={() => setPropertyModalOpen(false)}
+              className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              {t.cancel}
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+            >
+              {t.save}
+            </button>
+          </div>
         </form>
       </ModalShell>
 
-      <ModalShell open={partnerModalOpen} title={t.partnerTitle} onClose={() => setPartnerModalOpen(false)}>
+      <ModalShell
+        open={partnerModalOpen}
+        title={t.partnerTitle}
+        onClose={() => setPartnerModalOpen(false)}
+      >
         <form onSubmit={savePartnerChanges} className="space-y-4">
-          <label className="space-y-1 block"><span className="text-sm font-medium text-slate-700">{t.choosePartner}</span><select value={selectedPartnerId} onChange={(e) => setSelectedPartnerId(e.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"><option value="">{t.noPartner}</option>{partners.map((partner) => <option key={partner.id} value={partner.id}>{partner.name} ({partner.code})</option>)}</select></label>
-          <div className="flex justify-end gap-3"><button type="button" onClick={() => setPartnerModalOpen(false)} className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">{t.cancel}</button><button type="submit" disabled={saving} className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60">{t.save}</button></div>
+          <label className="block space-y-1">
+            <span className="text-sm font-medium text-slate-700">{t.choosePartner}</span>
+            <select
+              value={selectedPartnerId}
+              onChange={(e) => setSelectedPartnerId(e.target.value)}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
+            >
+              <option value="">{t.noPartner}</option>
+              {partners.map((partner) => (
+                <option key={partner.id} value={partner.id}>
+                  {partner.name} ({partner.code})
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className="flex justify-end gap-3">
+            <button
+              type="button"
+              onClick={() => setPartnerModalOpen(false)}
+              className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              {t.cancel}
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+            >
+              {t.save}
+            </button>
+          </div>
         </form>
       </ModalShell>
 
-      <ModalShell open={Boolean(taskModal)} title={t.editTaskTitle} onClose={() => setTaskModal(null)}>
+      <ModalShell
+        open={Boolean(taskModal)}
+        title={t.taskModalTitle}
+        onClose={() => setTaskModal(null)}
+      >
         {taskModal ? (
           <form onSubmit={saveTaskChanges} className="space-y-4">
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
-              <div><strong>{t.propertyLabel}:</strong> {property.name}</div>
+              <div>
+                <strong>{t.name}:</strong> {property.name}
+              </div>
               <div className="mt-1">{property.address}</div>
-              <div className="mt-2"><strong>{t.taskWindowLabel}:</strong> {selectedWindow ? selectedDaySnapshot.tasks.detail : "—"}</div>
+
+              {selectedWindow ? (
+                <div className="mt-2">
+                  <strong>Παράθυρο:</strong> {formatDateTime(selectedWindow.startAt, locale)} → {selectedWindow.endAt
+                    ? formatDateTime(selectedWindow.endAt, locale)
+                    : "—"}
+                </div>
+              ) : null}
             </div>
-            <label className="space-y-1 block"><span className="text-sm font-medium text-slate-700">{t.taskTitleLabel}</span><select value={taskModal.titleKey} onChange={(e) => setTaskModal((prev) => prev ? { ...prev, titleKey: e.target.value as TaskTitleKey } : prev)} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900">{TASK_TITLE_OPTIONS.map((key) => <option key={key} value={key}>{taskTitleOptions[key]}</option>)}</select></label>
-            <label className="space-y-1 block"><span className="text-sm font-medium text-slate-700">{t.date}</span><input type="date" value={taskModal.scheduledDate} onChange={(e) => setTaskModal((prev) => prev ? { ...prev, scheduledDate: e.target.value } : prev)} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900" required /></label>
+
+            <label className="block space-y-1">
+              <span className="text-sm font-medium text-slate-700">{t.taskTitleLabel}</span>
+              <select
+                value={taskModal.titleKey}
+                onChange={(e) =>
+                  setTaskModal((prev) =>
+                    prev
+                      ? { ...prev, titleKey: e.target.value as TaskTitleKey }
+                      : prev
+                  )
+                }
+                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
+              >
+                {TASK_TITLE_OPTIONS.map((key) => (
+                  <option key={key} value={key}>
+                    {taskTitleOptions[key]}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block space-y-1">
+              <span className="text-sm font-medium text-slate-700">{t.date}</span>
+              <input
+                type="date"
+                value={taskModal.scheduledDate}
+                onChange={(e) =>
+                  setTaskModal((prev) =>
+                    prev ? { ...prev, scheduledDate: e.target.value } : prev
+                  )
+                }
+                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
+                required
+              />
+            </label>
+
             <div className="grid gap-4 md:grid-cols-2">
-              <label className="space-y-1"><span className="text-sm font-medium text-slate-700">{t.startTime}</span><input type="time" value={taskModal.scheduledStartTime} onChange={(e) => setTaskModal((prev) => prev ? { ...prev, scheduledStartTime: e.target.value } : prev)} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900" /></label>
-              <label className="space-y-1"><span className="text-sm font-medium text-slate-700">{t.endTime}</span><input type="time" value={taskModal.scheduledEndTime} onChange={(e) => setTaskModal((prev) => prev ? { ...prev, scheduledEndTime: e.target.value } : prev)} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900" /></label>
+              <label className="space-y-1">
+                <span className="text-sm font-medium text-slate-700">{t.startTime}</span>
+                <input
+                  type="time"
+                  value={taskModal.scheduledStartTime}
+                  onChange={(e) =>
+                    setTaskModal((prev) =>
+                      prev
+                        ? { ...prev, scheduledStartTime: e.target.value }
+                        : prev
+                    )
+                  }
+                  className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
+                />
+              </label>
+
+              <label className="space-y-1">
+                <span className="text-sm font-medium text-slate-700">{t.endTime}</span>
+                <input
+                  type="time"
+                  value={taskModal.scheduledEndTime}
+                  onChange={(e) =>
+                    setTaskModal((prev) =>
+                      prev ? { ...prev, scheduledEndTime: e.target.value } : prev
+                    )
+                  }
+                  className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
+                />
+              </label>
             </div>
+
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <label className="flex items-center gap-3 text-sm font-medium text-slate-700"><input type="checkbox" checked={taskModal.alertEnabled} onChange={(e) => setTaskModal((prev) => prev ? { ...prev, alertEnabled: e.target.checked, alertAt: e.target.checked ? prev.alertAt : "" } : prev)} />{t.alertEnabled}</label>
-              {taskModal.alertEnabled ? <label className="mt-3 block space-y-1"><span className="text-sm font-medium text-slate-700">{t.alertAt}</span><input type="datetime-local" value={taskModal.alertAt} onChange={(e) => setTaskModal((prev) => prev ? { ...prev, alertAt: e.target.value } : prev)} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900" /></label> : null}
+              <label className="flex items-center gap-3 text-sm font-medium text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={taskModal.alertEnabled}
+                  onChange={(e) =>
+                    setTaskModal((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            alertEnabled: e.target.checked,
+                            alertAt: e.target.checked ? prev.alertAt : "",
+                          }
+                        : prev
+                    )
+                  }
+                />
+                {t.alertEnabled}
+              </label>
+
+              {taskModal.alertEnabled ? (
+                <label className="mt-3 block space-y-1">
+                  <span className="text-sm font-medium text-slate-700">{t.alertAt}</span>
+                  <input
+                    type="datetime-local"
+                    value={taskModal.alertAt}
+                    onChange={(e) =>
+                      setTaskModal((prev) =>
+                        prev ? { ...prev, alertAt: e.target.value } : prev
+                      )
+                    }
+                    className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
+                  />
+                </label>
+              ) : null}
             </div>
-            <label className="space-y-1 block"><span className="text-sm font-medium text-slate-700">{t.notes}</span><textarea value={taskModal.notes} onChange={(e) => setTaskModal((prev) => prev ? { ...prev, notes: e.target.value } : prev)} rows={4} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900" /></label>
-            <div className="flex flex-wrap justify-end gap-3">{taskModal.mode === "edit" && taskModal.taskId ? <button type="button" onClick={() => deleteTask(taskModal.taskId!)} disabled={deletingTaskId === taskModal.taskId} className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:opacity-60">{t.deleteTask}</button> : null}<button type="button" onClick={() => setTaskModal(null)} className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">{t.close}</button><button type="submit" disabled={saving} className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60">{taskModal.mode === "create" ? t.createTask : t.save}</button></div>
+
+            <label className="block space-y-1">
+              <span className="text-sm font-medium text-slate-700">{t.notes}</span>
+              <textarea
+                value={taskModal.notes}
+                onChange={(e) =>
+                  setTaskModal((prev) =>
+                    prev ? { ...prev, notes: e.target.value } : prev
+                  )
+                }
+                rows={4}
+                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
+              />
+            </label>
+
+            <div className="flex flex-wrap justify-end gap-3">
+              {taskModal.mode === "edit" && taskModal.taskId ? (
+                <button
+                  type="button"
+                  onClick={() => deleteTask(taskModal.taskId!)}
+                  disabled={deletingTaskId === taskModal.taskId}
+                  className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:opacity-60"
+                >
+                  {t.deleteTask}
+                </button>
+              ) : null}
+
+              <button
+                type="button"
+                onClick={() => setTaskModal(null)}
+                className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                {t.cancel}
+              </button>
+
+              <button
+                type="submit"
+                disabled={saving}
+                className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+              >
+                {taskModal.mode === "create" ? t.createTask : t.save}
+              </button>
+            </div>
           </form>
         ) : null}
+      </ModalShell>
+
+      <ModalShell
+        open={issuesModalOpen}
+        title={t.issueDetailTitle}
+        onClose={() => setIssuesModalOpen(false)}
+      >
+        {selectedEntry.issueRecords.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+            {t.noIssuesForDay}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {selectedEntry.issueRecords.map((issue) => (
+              <div
+                key={issue.id}
+                className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-semibold text-slate-900">{issue.title}</span>
+                  <span
+                    className={cn(
+                      "inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold",
+                      getToneClasses(getIssuesTone([issue])).soft
+                    )}
+                  >
+                    {getIssueStatusLabel(language, issue.status)}
+                  </span>
+                </div>
+
+                <div className="mt-2 text-xs text-slate-500">
+                  Severity: {String(issue.severity || "—").toUpperCase()}
+                </div>
+
+                {issue.description ? (
+                  <div className="mt-3 text-sm leading-6 text-slate-700">
+                    {issue.description}
+                  </div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        )}
+      </ModalShell>
+
+      <ModalShell
+        open={suppliesModalOpen}
+        title={t.supplyDetailTitle}
+        onClose={() => setSuppliesModalOpen(false)}
+      >
+        {selectedEntry.supplyRecords.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+            {t.noSuppliesForDay}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {selectedEntry.supplyRecords.map((row) => (
+              <div
+                key={row.id}
+                className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-slate-900">
+                      {row.displayName}
+                    </div>
+                    <div className="mt-1 text-xs text-slate-500">
+                      {row.currentStock ?? 0}
+                    </div>
+                  </div>
+
+                  <span
+                    className={cn(
+                      "inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold",
+                      getToneClasses(getSuppliesTone([row])).soft
+                    )}
+                  >
+                    {getSupplyStateLabel(language, row.state)}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </ModalShell>
     </>
   )

@@ -29,22 +29,32 @@ function toNullableString(value: unknown) {
   return text || null
 }
 
+function toLocalDateKey(value: Date) {
+  if (Number.isNaN(value.getTime())) return null
+
+  const year = value.getFullYear()
+  const month = String(value.getMonth() + 1).padStart(2, "0")
+  const day = String(value.getDate()).padStart(2, "0")
+
+  return `${year}-${month}-${day}`
+}
+
 function normalizeDateOnly(value: DateLike) {
   if (!value) return null
   if (value instanceof Date) {
-    return Number.isNaN(value.getTime()) ? null : value.toISOString().slice(0, 10)
+    return toLocalDateKey(value)
   }
 
   const text = String(value).trim()
   if (!text) return null
 
-  const dateOnlyMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  const dateOnlyMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})$/)
   if (dateOnlyMatch) {
     return `${dateOnlyMatch[1]}-${dateOnlyMatch[2]}-${dateOnlyMatch[3]}`
   }
 
   const parsed = new Date(text)
-  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10)
+  return toLocalDateKey(parsed)
 }
 
 function normalizeTime(value?: string | null) {
