@@ -1,60 +1,23 @@
 ﻿"use client"
 
 import Link from "next/link"
-import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useMemo, useState } from "react"
 import { useAppLanguage } from "@/components/i18n/LanguageProvider"
-import { TaskAlertPanel } from "@/components/tasks/TaskAlertPanel"
-import { TaskChecklistPanel } from "@/components/tasks/TaskChecklistPanel"
-import { getBookingsModuleTexts } from "@/lib/i18n/translations"
-import {
-  getPriorityLabel,
-  getTaskStatusLabel,
-  getTaskTypeLabel,
-} from "@/lib/i18n/labels"
-import { normalizePriority } from "@/lib/i18n/normalizers"
 
 type BookingTask = {
   id: string
   title: string
-  taskType: string
   status: string
-  source: string
+  taskType: string
   priority: string
   scheduledDate: string
   scheduledStartTime?: string | null
   scheduledEndTime?: string | null
-  dueDate?: string | null
-  alertEnabled: boolean
-  alertAt?: string | null
-  createdAt: string
-  assignments?: Array<{
-    id: string
-    status: string
-    assignedAt?: string | null
-    acceptedAt?: string | null
-    partner?: {
-      id: string
-      code: string
-      name: string
-      email?: string | null
-      specialty?: string | null
-      status?: string | null
-    } | null
-  }>
-}
-
-type BookingWorkWindow = {
-  nextCheckInDate?: string | null
-  nextCheckInTime?: string | null
-  windowStart?: string | null
-  windowEnd?: string | null
-  windowDurationMinutes?: number | null
-  windowDurationCompact?: string | null
 }
 
 type BookingRow = {
   id: string
+  propertyId?: string | null
   sourcePlatform: string
   externalBookingId: string
   externalListingId?: string | null
@@ -74,2177 +37,1018 @@ type BookingRow = {
   status: string
   syncStatus: string
   needsMapping: boolean
+  importedAt?: string | null
+  lastProcessedAt?: string | null
+  lastError?: string | null
   notes?: string | null
-  taskStatus?: "no_task" | "created" | "assigned" | "completed" | string
-  workWindow?: BookingWorkWindow | null
+  taskStatus?: string
   property?: {
     id: string
-    code: string
-    name: string
+    code?: string | null
+    name?: string | null
     address?: string | null
     city?: string | null
     region?: string | null
+    postalCode?: string | null
+    country?: string | null
     status?: string | null
-    defaultPartner?: {
-      id: string
-      code: string
-      name: string
-      email?: string | null
-    } | null
+    readinessStatus?: string | null
+    nextCheckInAt?: string | null
   } | null
   tasks: BookingTask[]
 }
 
-type PropertyOption = {
-  id: string
-  code: string
-  name: string
-  address?: string | null
-  city?: string | null
-  region?: string | null
-  type?: string | null
-  status?: string | null
+type CalendarView = "month" | "week" | "day"
+
+type SettingsPayload = {
+  calendarDefaultView?: string | null
 }
 
-type FilterKey =
-  | "all"
-  | "active"
-  | "withoutTasks"
-  | "withTasks"
-  | "needsMapping"
-  | "cancelled"
-  | "todayCheckout"
-  | "next3Days"
-
-type TaskCreateModalState = {
-  open: boolean
-  booking: BookingRow | null
+function startOfDay(date: Date) {
+  const next = new Date(date)
+  next.setHours(0, 0, 0, 0)
+  return next
 }
 
-type MappingModalState = {
-  open: boolean
-  booking: BookingRow | null
+function endOfDay(date: Date) {
+  const next = new Date(date)
+  next.setHours(23, 59, 59, 999)
+  return next
 }
 
-function isValidDate(value?: string | null) {
-  if (!value) return false
-  const date = new Date(value)
-  return !Number.isNaN(date.getTime())
+function startOfWeekMonday(date: Date) {
+  const next = startOfDay(date)
+  const day = next.getDay()
+  const diff = day === 0 ? -6 : 1 - day
+  next.setDate(next.getDate() + diff)
+  return next
 }
 
-function isValidTimeString(value?: string | null) {
-  if (!value) return false
-  return /^([01]\d|2[0-3]):([0-5]\d)$/.test(value.trim())
+function endOfWeekSunday(date: Date) {
+  const next = startOfWeekMonday(date)
+  next.setDate(next.getDate() + 6)
+  return endOfDay(next)
 }
 
-function formatDate(value: string | null | undefined, locale: string) {
-  if (!value || !isValidDate(value)) return "-"
-  return new Date(value).toLocaleDateString(locale)
+function startOfMonth(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), 1, 0, 0, 0, 0)
 }
 
-function formatTime(value?: string | null) {
-  if (!value || !isValidTimeString(value)) return ""
-  return value.trim().slice(0, 5)
+function endOfMonth(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59, 999)
 }
 
-function formatDateAndTime(
-  dateValue: string | null | undefined,
-  timeValue: string | null | undefined,
-  locale: string,
-  emptyText: string
-) {
-  if (!dateValue || !isValidDate(dateValue)) return emptyText
-
-  const dateText = formatDate(dateValue, locale)
-  const timeText = formatTime(timeValue)
-
-  return timeText ? `${dateText} · ${timeText}` : dateText
+function addDays(date: Date, days: number) {
+  const next = new Date(date)
+  next.setDate(next.getDate() + days)
+  return next
 }
 
-function toDateInputValue(value?: string | null) {
-  if (!value || !isValidDate(value)) return ""
-  return new Date(value).toISOString().slice(0, 10)
+function addMonths(date: Date, months: number) {
+  const next = new Date(date)
+  next.setMonth(next.getMonth() + months)
+  return next
 }
 
-function toDateTimeLocalValue(
-  dateString?: string | null,
-  timeString?: string | null
-) {
-  if (!dateString || !isValidDate(dateString)) return ""
-  const base = new Date(dateString).toISOString().slice(0, 10)
-  const time = formatTime(timeString)
-  return `${base}T${time || "09:00"}`
+function formatDateKey(date: Date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
 }
 
-function getTodayDateOnly() {
-  const now = new Date()
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate())
-}
-
-function getDateOnly(value: string) {
-  const date = new Date(value)
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate())
-}
-
-function normalizeDateOnlyValue(value?: string | null) {
+function parseDate(value: string | null | undefined) {
   if (!value) return null
-  const text = String(value).slice(0, 10)
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return null
-  return text
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
 }
 
-function isDateInRange(
-  targetDate?: string | null,
-  fromDate?: string,
-  toDate?: string
-) {
-  const normalizedTarget = normalizeDateOnlyValue(targetDate)
-  if (!normalizedTarget) return false
-
-  if (fromDate && normalizedTarget < fromDate) return false
-  if (toDate && normalizedTarget > toDate) return false
-
-  return true
-}
-
-function isCancelledBooking(status: string) {
-  return status.toLowerCase() === "cancelled"
-}
-
-function isActiveBooking(booking: BookingRow) {
-  return !isCancelledBooking(booking.status)
-}
-
-function normalizeSourcePlatform(
-  sourcePlatform: string,
-  texts: ReturnType<typeof getBookingsModuleTexts>
-) {
-  const normalized = sourcePlatform.trim().toUpperCase()
-
-  if (normalized === "AIRBNB") return texts.platforms.airbnb
-  if (normalized === "BOOKING_COM") return texts.platforms.booking
-  if (normalized === "VRBO") return texts.platforms.vrbo
-  if (normalized === "DIRECT") return texts.platforms.direct
-  if (normalized === "MANUAL") return texts.platforms.manual
-
-  return sourcePlatform
-}
-
-function getSyncLabel(
-  syncStatus: string,
-  needsMapping: boolean,
-  texts: ReturnType<typeof getBookingsModuleTexts>
-) {
-  if (syncStatus === "CANCELLED") return texts.statuses.cancelled
-  if (needsMapping) return texts.statuses.needsMapping
-  if (syncStatus === "READY_FOR_ACTION") return texts.statuses.readyForAction
-  if (syncStatus === "ERROR") return texts.statuses.error
-  if (syncStatus === "PENDING_MATCH") return texts.statuses.pendingMatch
-  return syncStatus
-}
-
-function getBadgeClassName(kind: "neutral" | "success" | "warning" | "danger") {
-  if (kind === "success") {
-    return "rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700"
-  }
-
-  if (kind === "warning") {
-    return "rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700"
-  }
-
-  if (kind === "danger") {
-    return "rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700"
-  }
-
-  return "rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700"
-}
-
-function normalizeTaskTitle(
-  title: string | null | undefined,
-  language: "el" | "en"
-) {
-  if (!title || !title.trim()) return "-"
-
-  let text = title.trim()
-
-  if (language === "en") {
-    text = text
-      .replace(/^Καθαρισμός μετά από check-out\s*-\s*/i, "Cleaning after check-out - ")
-      .replace(/^Επιθεώρηση μετά από check-out\s*-\s*/i, "Inspection after check-out - ")
-      .replace(/^Συντήρηση μετά από check-out\s*-\s*/i, "Maintenance after check-out - ")
-      .replace(/^Καθαρισμός\s*-\s*/i, "Cleaning - ")
-      .replace(/^Επιθεώρηση\s*-\s*/i, "Inspection - ")
-      .replace(/^Συντήρηση\s*-\s*/i, "Maintenance - ")
-    return text
-  }
-
-  text = text
-    .replace(/^Cleaning after check-out\s*-\s*/i, "Καθαρισμός μετά από check-out - ")
-    .replace(/^Inspection after check-out\s*-\s*/i, "Επιθεώρηση μετά από check-out - ")
-    .replace(/^Maintenance after check-out\s*-\s*/i, "Συντήρηση μετά από check-out - ")
-    .replace(/^Cleaning\s*-\s*/i, "Καθαρισμός - ")
-    .replace(/^Inspection\s*-\s*/i, "Επιθεώρηση - ")
-    .replace(/^Maintenance\s*-\s*/i, "Συντήρηση - ")
-
-  return text
-}
-
-function getTaskTypeDisplay(
-  taskType: string | null | undefined,
-  language: "el" | "en",
-  texts: ReturnType<typeof getBookingsModuleTexts>
-) {
-  const normalized = String(taskType || "").trim().toLowerCase()
-
-  if (normalized === "maintenance") {
-    return texts.modal.taskTypes.maintenance
-  }
-
-  if (normalized === "custom") {
-    return texts.modal.taskTypes.custom
-  }
-
-  return getTaskTypeLabel(language, taskType)
-}
-
-function getTaskStatusDisplay(
-  status: string | null | undefined,
-  language: "el" | "en"
-) {
-  return getTaskStatusLabel(language, status)
-}
-
-function getPriorityDisplay(
-  priority: string | null | undefined,
-  language: "el" | "en"
-) {
-  const normalized = normalizePriority(priority)
-
-  if (normalized === "NORMAL") {
-    return language === "en" ? "Normal" : "Κανονική"
-  }
-
-  return getPriorityLabel(language, priority)
-}
-
-function getTaskCoverageLabel(
-  value: string | undefined,
-  language: "el" | "en",
-  texts: ReturnType<typeof getBookingsModuleTexts>
-) {
+function normalizePlatformLabel(value: string, language: "el" | "en") {
   const normalized = String(value || "").trim().toLowerCase()
-
-  if (normalized === "completed") {
-    return language === "en" ? "Completed" : "Ολοκληρώθηκε"
-  }
-
-  if (normalized === "assigned") {
-    return language === "en" ? "Assigned" : "Ανατέθηκε"
-  }
-
-  if (normalized === "created") {
-    return language === "en" ? "Created" : "Δημιουργήθηκε"
-  }
-
-  return texts.statuses.noTask
+  if (normalized === "booking") return "Booking.com"
+  if (normalized === "airbnb") return "Airbnb"
+  if (normalized === "vrbo") return "Vrbo"
+  if (normalized === "direct") return language === "en" ? "Direct" : "Άμεση"
+  if (normalized === "manual") return language === "en" ? "Manual" : "Χειροκίνητη"
+  return value || "-"
 }
 
-function getTaskCoverageBadgeClass(value: string | undefined) {
-  const normalized = String(value || "").trim().toLowerCase()
-
-  if (normalized === "completed") return getBadgeClassName("neutral")
-  if (normalized === "assigned") return getBadgeClassName("success")
-  if (normalized === "created") return getBadgeClassName("neutral")
-  return getBadgeClassName("warning")
+function formatDayLabel(date: Date, locale: string) {
+  return new Intl.DateTimeFormat(locale, {
+    weekday: "short",
+    day: "2-digit",
+    month: "2-digit",
+  }).format(date)
 }
 
-function getWindowRangeLabel(
-  booking: BookingRow,
-  locale: string,
-  texts: ReturnType<typeof getBookingsModuleTexts>
-) {
-  const start = formatDateAndTime(
-    booking.checkOutDate,
-    booking.checkOutTime,
-    locale,
-    texts.common.notAvailable
+function formatDateRangeTitle(view: CalendarView, date: Date, locale: string) {
+  if (view === "day") {
+    return new Intl.DateTimeFormat(locale, {
+      weekday: "long",
+      day: "2-digit",
+      month: "long",
+      year: "numeric",
+    }).format(date)
+  }
+
+  if (view === "week") {
+    const start = startOfWeekMonday(date)
+    const end = endOfWeekSunday(date)
+    const startText = new Intl.DateTimeFormat(locale, {
+      day: "2-digit",
+      month: "short",
+    }).format(start)
+    const endText = new Intl.DateTimeFormat(locale, {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    }).format(end)
+    return `${startText} - ${endText}`
+  }
+
+  return new Intl.DateTimeFormat(locale, {
+    month: "long",
+    year: "numeric",
+  }).format(date)
+}
+
+function formatDateTime(value: string | null | undefined, locale: string, fallback = "—") {
+  const date = parseDate(value)
+  if (!date) return fallback
+
+  return new Intl.DateTimeFormat(locale, {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date)
+}
+
+function bookingOverlapsDay(booking: BookingRow, date: Date) {
+  const start = parseDate(booking.checkInDate)
+  const end = parseDate(booking.checkOutDate)
+  if (!start || !end) return false
+
+  const dayStart = startOfDay(date).getTime()
+  const dayEnd = endOfDay(date).getTime()
+
+  return start.getTime() <= dayEnd && end.getTime() >= dayStart
+}
+
+function isSameDay(a: Date, b: Date) {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
   )
-
-  const end = booking.workWindow?.nextCheckInDate
-    ? formatDateAndTime(
-        booking.workWindow.nextCheckInDate,
-        booking.workWindow.nextCheckInTime,
-        locale,
-        texts.common.notAvailable
-      )
-    : texts.list.noNextBooking
-
-  return `${start} - ${end}`
 }
 
-function getExternalPropertyDisplay(booking: BookingRow) {
-  return [
-    booking.externalPropertyAddress,
-    booking.externalPropertyCity,
-    booking.externalPropertyRegion,
-    booking.externalPropertyPostalCode,
-    booking.externalPropertyCountry,
-  ]
-    .filter((value) => String(value || "").trim())
-    .join(" · ")
+function isCancelled(status?: string | null) {
+  return String(status || "").trim().toLowerCase() === "cancelled"
 }
 
-function getExternalPropertyCountryFallback(language: "el" | "en") {
-  return language === "en" ? "Greece" : "Ελλάδα"
+function bookingTitle(booking: BookingRow, fallback: string) {
+  return (
+    booking.property?.name ||
+    booking.externalListingName ||
+    booking.externalListingId ||
+    fallback
+  )
 }
 
-function getBookingStateBlock(booking: BookingRow, language: "el" | "en") {
-  const firstTask = booking.tasks[0] || null
-
-  if (isCancelledBooking(booking.status)) {
-    return {
-      tone: "danger",
-      title:
-        language === "en"
-          ? "This booking is cancelled"
-          : "Η κράτηση είναι ακυρωμένη",
-      description:
-        language === "en"
-          ? "This booking is no longer active. Review it only if you need history or verification."
-          : "Η κράτηση δεν είναι πλέον ενεργή. Προβάλλεται μόνο για ιστορικό ή επιβεβαίωση.",
-      nextStep:
-        language === "en" ? "Review details only" : "Μόνο προβολή λεπτομερειών",
-    }
-  }
-
-  if (booking.needsMapping) {
-    return {
-      tone: "warning",
-      title:
-        language === "en"
-          ? "Property mapping is required"
-          : "Χρειάζεται αντιστοίχιση ακινήτου",
-      description:
-        language === "en"
-          ? "This booking was imported from a platform but is not yet linked to a property in the system."
-          : "Η κράτηση εισήχθη από πλατφόρμα αλλά δεν έχει ακόμη συνδεθεί με ακίνητο στο σύστημα.",
-      helper:
-        language === "en"
-          ? "You cannot create a task before the booking is mapped to a property."
-          : "Δεν μπορείς να δημιουργήσεις εργασία πριν η κράτηση αντιστοιχιστεί με ακίνητο.",
-      nextStep:
-        language === "en"
-          ? "Map existing property or create a new one"
-          : "Αντιστοίχιση υπάρχοντος ακινήτου ή δημιουργία νέου",
-    }
-  }
-
-  if (!firstTask) {
-    return {
-      tone: "neutral",
-      title:
-        language === "en"
-          ? "Ready for task creation"
-          : "Έτοιμη για δημιουργία εργασίας",
-      description:
-        language === "en"
-          ? "The booking is already linked to a property and can now continue to operations."
-          : "Η κράτηση έχει ήδη συνδεθεί με ακίνητο και μπορεί τώρα να περάσει στη λειτουργική ροή.",
-      helper:
-        language === "en"
-          ? "Create the task using the available work window between check-out and next check-in."
-          : "Δημιούργησε την εργασία με βάση το διαθέσιμο παράθυρο μεταξύ check-out και επόμενου check-in.",
-      nextStep:
-        language === "en" ? "Create task" : "Δημιουργία εργασίας",
-    }
-  }
-
-  const normalizedTaskStatus = String(firstTask.status || "").trim().toLowerCase()
-
-  if (normalizedTaskStatus === "completed") {
-    return {
-      tone: "success",
-      title:
-        language === "en"
-          ? "A related task has been completed"
-          : "Έχει ολοκληρωθεί σχετική εργασία",
-      description:
-        language === "en"
-          ? "This booking already has a completed linked task."
-          : "Αυτή η κράτηση έχει ήδη ολοκληρωμένη συνδεδεμένη εργασία.",
-      nextStep:
-        language === "en" ? "View task" : "Προβολή εργασίας",
-    }
-  }
-
-  return {
-    tone: "success",
-    title:
-      language === "en"
-        ? "A related task already exists"
-        : "Υπάρχει ήδη συνδεδεμένη εργασία",
-    description:
-      language === "en"
-        ? "This booking is already connected to an active task."
-        : "Η κράτηση αυτή έχει ήδη συνδεθεί με ενεργή εργασία.",
-    helper:
-      language === "en"
-        ? "Open the task view to continue assignment, checklist or execution."
-        : "Άνοιξε την προβολή της εργασίας για να συνεχίσεις με ανάθεση, λίστες ή εκτέλεση.",
-    nextStep:
-      language === "en" ? "View task" : "Προβολή εργασίας",
-  }
+function bookingAddress(booking: BookingRow, fallback: string) {
+  return (
+    [
+      booking.property?.address,
+      booking.property?.city,
+      booking.property?.region,
+      booking.property?.postalCode,
+      booking.property?.country,
+    ]
+      .filter(Boolean)
+      .join(" · ") ||
+    [
+      booking.externalPropertyAddress,
+      booking.externalPropertyCity,
+      booking.externalPropertyRegion,
+      booking.externalPropertyPostalCode,
+      booking.externalPropertyCountry,
+    ]
+      .filter(Boolean)
+      .join(" · ") ||
+    fallback
+  )
 }
 
-function getLocalUiTexts(language: "el" | "en") {
+function badgeClasses(params: { cancelled?: boolean; unmapped?: boolean }) {
+  if (params.cancelled) {
+    return "border-rose-200 bg-rose-100 text-rose-700"
+  }
+
+  if (params.unmapped) {
+    return "border-amber-200 bg-amber-100 text-amber-700"
+  }
+
+  return "border-emerald-200 bg-emerald-100 text-emerald-700"
+}
+
+function getTexts(language: "el" | "en") {
   if (language === "en") {
     return {
-      pageDescription:
-        "Bookings are imported first. The system stores the external listing and external property data from the platform. If a booking has no property mapping, you must first match it to an existing property or create a new property before task creation.",
-      listDescription:
-        "Review imported bookings, see the real period from check-out to next check-in, inspect the imported property data only when needed, and continue with mapping or task creation.",
-      bookingsCalendar: "Bookings calendar",
-      bookingsCalendarHelp:
-        "Open the calendar view of booking work windows. It focuses on operational windows and not on a dense reservation dump.",
-      searchPlaceholder: "Search bookings...",
+      locale: "en-GB",
+      title: "Bookings",
+      subtitle:
+        "This page is only for booking visibility. Task execution stays in the property calendar. Here the user sees only reservations with a clean month-first calendar and optional week/day views.",
+      connectionsButton: "Platform connections",
+      connectionsHelp:
+        "Open the platform listings page to auto-create properties from imported listings and keep future imported bookings linked correctly to the property calendar.",
+      loading: "Loading bookings calendar...",
+      loadError: "Failed to load bookings calendar.",
+      refresh: "Refresh",
+      today: "Today",
+      month: "Month",
+      week: "Week",
+      day: "Day",
+      searchPlaceholder: "Search by property, guest, listing or booking code...",
       searchHelp:
-        "Search by property, guest, listing, booking code or platform.",
-      propertyFilter: "Property",
-      propertyFilterAll: "All properties",
-      propertyFilterHelp:
-        "Filter the bookings list by the mapped property.",
-      dateFrom: "From date",
-      dateTo: "To date",
-      dateRangeHelp:
-        "Filter bookings by check-out date range.",
+        "Search bookings by guest, property, imported listing identity or booking code.",
+      allProperties: "All properties",
+      allPlatforms: "All platforms",
+      allStatuses: "All statuses",
+      confirmed: "Confirmed",
+      cancelled: "Cancelled",
+      pending: "Pending",
+      importedBookings: "Imported bookings",
+      mappedBookings: "Mapped bookings",
+      unmappedBookings: "Bookings needing mapping",
+      selectedBooking: "Selected booking",
+      noSelection: "Select a booking from the calendar.",
+      noResults: "No bookings found for the current filters.",
+      noProperty: "No mapped property yet",
+      guest: "Guest",
+      platform: "Platform",
+      property: "Property",
+      bookingCode: "Booking code",
+      dateRange: "Stay",
+      importedAt: "Imported at",
+      syncStatus: "Sync status",
+      openBooking: "Open booking",
+      openProperty: "Open property",
+      openConnections: "Open platform connections",
+      bookingOnlyHint:
+        "This page intentionally shows only bookings. Task creation and operational execution continue only from the property calendar.",
+      calendarHint:
+        "Month view is the main view. Week and day stay available for denser reading without mixing operations here.",
+      monthHelp:
+        "Month view keeps the page clean and booking-first, similar to booking calendars users already know from platforms.",
+      weekHelp:
+        "Week view shows the active reservations per day for denser operational reading.",
+      dayHelp:
+        "Day view isolates a single day so the user can inspect arrivals, stays and departures more clearly.",
+      active: "Active",
+      needsMapping: "Needs mapping",
+      cancelledLabel: "Cancelled",
+      emptyDay: "No bookings",
+      importedListing: "Imported listing",
+      address: "Address",
+      notes: "Notes",
+      lastError: "Last import error",
+      checkIn: "Check-in",
+      checkOut: "Check-out",
       clearFilters: "Clear filters",
-      clearFiltersHelp:
-        "Reset search, property filter and date range.",
-      viewBooking: "View booking",
-      viewBookingHelp:
-        "Open the details page of this booking.",
-      viewTask: "View task",
-      viewTaskHelp:
-        "Open the linked task created for this booking.",
-      viewProperty: "View property",
-      viewPropertyHelp:
-        "Open the mapped property of this booking.",
-      viewPropertyTasks: "View property tasks",
-      viewPropertyTasksHelp:
-        "Open the global tasks page filtered only for this property.",
-      mapProperty: "Map property",
-      mapPropertyHelp:
-        "Match the imported booking to an existing property or create a new one.",
-      createTask: "Create task",
-      createTaskHelp:
-        "Create a new task for the available work window between check-out and next check-in.",
-      allCounterHelp:
-        "All bookings that match the current date, property and search filters.",
-      activeCounterHelp:
-        "Bookings that are still active and not cancelled.",
-      withoutTasksCounterHelp:
-        "Bookings that do not yet have a linked task.",
-      withTasksCounterHelp:
-        "Bookings that already have at least one linked task.",
-      needsMappingCounterHelp:
-        "Bookings imported from a platform that are not yet mapped to a property in the system.",
-      cancelledCounterHelp:
-        "Bookings that are already cancelled.",
-      todayCheckoutCounterHelp:
-        "Bookings whose check-out is today within the current filters.",
-      next3DaysCounterHelp:
-        "Bookings with check-out within the next three days inside the current filters.",
-      bookingIdentityHelp:
-        "Booking identity shows the system property and the relevant address for this booking.",
-      workWindowHelp:
-        "The available work window is the real time range between check-out and the next check-in.",
-      availableWindowHelp:
-        "Use this time range to create or evaluate the operational task for this booking.",
-      noPropertyTasks:
-        "The property is not mapped yet, so property actions are not available.",
     }
   }
 
   return {
-    pageDescription:
-      "Οι κρατήσεις εισάγονται πρώτα. Αν μια κράτηση δεν έχει αντιστοιχιστεί με ακίνητο, πρέπει πρώτα να συνδεθεί με υπάρχον ακίνητο ή να δημιουργηθεί νέο πριν από τη δημιουργία εργασίας.",
-    listDescription:
-      "Δες γρήγορα το ακίνητο, το check-out, το επόμενο check-in και το διαθέσιμο παράθυρο εργασίας.",
-    bookingsCalendar: "Ημερολόγιο κρατήσεων",
-    bookingsCalendarHelp:
-      "Ανοίγει την ημερολογιακή προβολή των παραθύρων εργασίας των κρατήσεων.",
-    searchPlaceholder: "Αναζήτηση κρατήσεων...",
+    locale: "el-GR",
+    title: "Κρατήσεις",
+    subtitle:
+      "Η σελίδα αυτή είναι μόνο για προβολή κρατήσεων. Η διαχείριση και εκτέλεση εργασιών μένει στο ημερολόγιο ακινήτου. Εδώ ο χρήστης βλέπει μόνο κρατήσεις με καθαρό ημερολόγιο μήνα και προαιρετικές προβολές εβδομάδας και ημέρας.",
+    connectionsButton: "Συνδέσεις πλατφορμών",
+    connectionsHelp:
+      "Άνοιγμα της σελίδας πλατφορμών για αυτόματη δημιουργία ακινήτων από imported listings και σωστή σύνδεση των μελλοντικών εισαγόμενων κρατήσεων με το ημερολόγιο ακινήτου.",
+    loading: "Φόρτωση ημερολογίου κρατήσεων...",
+    loadError: "Αποτυχία φόρτωσης ημερολογίου κρατήσεων.",
+    refresh: "Ανανέωση",
+    today: "Σήμερα",
+    month: "Μήνας",
+    week: "Εβδομάδα",
+    day: "Ημέρα",
+    searchPlaceholder: "Αναζήτηση ανά ακίνητο, επισκέπτη, listing ή κωδικό κράτησης...",
     searchHelp:
-      "Αναζήτηση με ακίνητο, επισκέπτη, listing, κωδικό κράτησης ή πλατφόρμα.",
-    propertyFilter: "Ακίνητο",
-    propertyFilterAll: "Όλα τα ακίνητα",
-    propertyFilterHelp:
-      "Φιλτράρει τη λίστα κρατήσεων με βάση το αντιστοιχισμένο ακίνητο.",
-    dateFrom: "Από",
-    dateTo: "Έως",
-    dateRangeHelp:
-      "Φιλτράρει τις κρατήσεις με βάση την ημερομηνία check-out.",
+      "Αναζήτηση κρατήσεων με βάση επισκέπτη, ακίνητο, ταυτότητα imported listing ή κωδικό κράτησης.",
+    allProperties: "Όλα τα ακίνητα",
+    allPlatforms: "Όλες οι πλατφόρμες",
+    allStatuses: "Όλες οι καταστάσεις",
+    confirmed: "Επιβεβαιωμένη",
+    cancelled: "Ακυρωμένη",
+    pending: "Σε αναμονή",
+    importedBookings: "Εισαγόμενες κρατήσεις",
+    mappedBookings: "Συνδεδεμένες κρατήσεις",
+    unmappedBookings: "Κρατήσεις που θέλουν αντιστοίχιση",
+    selectedBooking: "Επιλεγμένη κράτηση",
+    noSelection: "Επίλεξε μία κράτηση από το ημερολόγιο.",
+    noResults: "Δεν βρέθηκαν κρατήσεις για τα τρέχοντα φίλτρα.",
+    noProperty: "Δεν έχει συνδεθεί ακόμη ακίνητο",
+    guest: "Επισκέπτης",
+    platform: "Πλατφόρμα",
+    property: "Ακίνητο",
+    bookingCode: "Κωδικός κράτησης",
+    dateRange: "Διαμονή",
+    importedAt: "Ημερομηνία εισαγωγής",
+    syncStatus: "Κατάσταση συγχρονισμού",
+    openBooking: "Άνοιγμα κράτησης",
+    openProperty: "Άνοιγμα ακινήτου",
+    openConnections: "Άνοιγμα συνδέσεων πλατφορμών",
+    bookingOnlyHint:
+      "Η σελίδα αυτή δείχνει σκόπιμα μόνο κρατήσεις. Η δημιουργία εργασίας και η λειτουργική εκτέλεση συνεχίζουν μόνο από το ημερολόγιο ακινήτου.",
+    calendarHint:
+      "Η κύρια προβολή είναι ο μήνας. Η εβδομάδα και η ημέρα παραμένουν διαθέσιμες για πιο πυκνή ανάγνωση χωρίς να μπαίνει εδώ η λειτουργική εκτέλεση.",
+    monthHelp:
+      "Η προβολή μήνα κρατά τη σελίδα καθαρή και booking-first, όπως τα ημερολόγια κρατήσεων που ήδη γνωρίζει ο χρήστης από τις πλατφόρμες.",
+    weekHelp:
+      "Η προβολή εβδομάδας δείχνει τις ενεργές κρατήσεις ανά ημέρα για πιο πυκνή ανάγνωση.",
+    dayHelp:
+      "Η προβολή ημέρας απομονώνει μία μόνο ημέρα ώστε ο χρήστης να βλέπει καθαρότερα αφίξεις, διαμονές και αναχωρήσεις.",
+    active: "Ενεργή",
+    needsMapping: "Θέλει αντιστοίχιση",
+    cancelledLabel: "Ακυρωμένη",
+    emptyDay: "Χωρίς κρατήσεις",
+    importedListing: "Imported listing",
+    address: "Διεύθυνση",
+    notes: "Σημειώσεις",
+    lastError: "Τελευταίο σφάλμα εισαγωγής",
+    checkIn: "Check-in",
+    checkOut: "Check-out",
     clearFilters: "Καθαρισμός φίλτρων",
-    clearFiltersHelp:
-      "Καθαρίζει αναζήτηση, φίλτρο ακινήτου και εύρος ημερομηνιών.",
-    viewBooking: "Προβολή κράτησης",
-    viewBookingHelp:
-      "Ανοίγει τη σελίδα λεπτομερειών της συγκεκριμένης κράτησης.",
-    viewTask: "Προβολή εργασίας",
-    viewTaskHelp:
-      "Ανοίγει τη συνδεδεμένη εργασία της κράτησης.",
-    viewProperty: "Προβολή ακινήτου",
-    viewPropertyHelp:
-      "Ανοίγει το αντιστοιχισμένο ακίνητο της κράτησης.",
-    viewPropertyTasks: "Προβολή εργασιών ακινήτου",
-    viewPropertyTasksHelp:
-      "Ανοίγει τη λίστα εργασιών μόνο για το συγκεκριμένο ακίνητο.",
-    mapProperty: "Αντιστοίχιση ακινήτου",
-    mapPropertyHelp:
-      "Συνδέει την εισαγόμενη κράτηση με υπάρχον ακίνητο ή οδηγεί σε δημιουργία νέου.",
-    createTask: "Δημιουργία εργασίας",
-    createTaskHelp:
-      "Δημιουργεί νέα εργασία για το διαθέσιμο παράθυρο μεταξύ check-out και επόμενου check-in.",
-    allCounterHelp:
-      "Όλες οι κρατήσεις που ταιριάζουν στα τρέχοντα φίλτρα.",
-    activeCounterHelp:
-      "Κρατήσεις που παραμένουν ενεργές και δεν έχουν ακυρωθεί.",
-    withoutTasksCounterHelp:
-      "Κρατήσεις για τις οποίες δεν έχει δημιουργηθεί ακόμη συνδεδεμένη εργασία.",
-    withTasksCounterHelp:
-      "Κρατήσεις που έχουν ήδη τουλάχιστον μία συνδεδεμένη εργασία.",
-    needsMappingCounterHelp:
-      "Κρατήσεις από πλατφόρμα που δεν έχουν ακόμη συνδεθεί με ακίνητο στο σύστημα.",
-    cancelledCounterHelp:
-      "Κρατήσεις που έχουν ήδη ακυρωθεί.",
-    todayCheckoutCounterHelp:
-      "Κρατήσεις με check-out σήμερα.",
-    next3DaysCounterHelp:
-      "Κρατήσεις με check-out μέσα στις επόμενες τρεις ημέρες.",
-    bookingIdentityHelp:
-      "Δείχνει το ακίνητο της κράτησης και τη σχετική διεύθυνση που πρέπει να γνωρίζει ο διαχειριστής.",
-    workWindowHelp:
-      "Το διαθέσιμο παράθυρο εργασίας είναι το πραγματικό διάστημα μεταξύ check-out και επόμενου check-in.",
-    availableWindowHelp:
-      "Χρησιμοποίησε αυτό το διάστημα για να δημιουργήσεις ή να αξιολογήσεις την επιχειρησιακή εργασία.",
-    noPropertyTasks:
-      "Το ακίνητο δεν έχει ακόμη αντιστοιχιστεί, οπότε οι ενέργειες ακινήτου δεν είναι διαθέσιμες.",
   }
 }
+
+function BookingChip({
+  booking,
+  language,
+  texts,
+  isSelected,
+  onSelect,
+}: {
+  booking: BookingRow
+  language: "el" | "en"
+  texts: ReturnType<typeof getTexts>
+  isSelected: boolean
+  onSelect: () => void
+}) {
+  const cancelled = isCancelled(booking.status)
+  const chipClass = isSelected
+    ? "border-slate-900 bg-slate-900 text-white"
+    : cancelled
+      ? "border-rose-200 bg-rose-50 text-rose-700"
+      : booking.needsMapping
+        ? "border-amber-200 bg-amber-50 text-amber-700"
+        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={`w-full rounded-2xl border px-3 py-2 text-left text-xs shadow-sm transition ${chipClass}`}
+      title={booking.externalBookingId}
+    >
+      <div className="truncate font-semibold">{bookingTitle(booking, texts.noProperty)}</div>
+      <div className="mt-1 flex flex-wrap items-center gap-2 opacity-90">
+        <span>{normalizePlatformLabel(booking.sourcePlatform, language)}</span>
+        <span>•</span>
+        <span>{booking.guestName || booking.externalBookingId}</span>
+      </div>
+    </button>
+  )
+}
+
 export default function BookingsPage() {
   const { language } = useAppLanguage()
-  const texts = getBookingsModuleTexts(language)
-  const ui = getLocalUiTexts(language)
-  const locale = language === "en" ? "en-GB" : "el-GR"
+  const texts = getTexts(language)
 
-  const router = useRouter()
-  const pathname = usePathname()
-  const searchParams = useSearchParams()
-  const currentQuery = searchParams.toString()
-
+  const [view, setView] = useState<CalendarView>("month")
+  const [currentDate, setCurrentDate] = useState(new Date())
   const [bookings, setBookings] = useState<BookingRow[]>([])
-  const [properties, setProperties] = useState<PropertyOption[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState("")
-  const [search, setSearch] = useState(searchParams.get("search") || "")
-  const [activeFilter, setActiveFilter] = useState<FilterKey>(
-    (searchParams.get("filter") as FilterKey) || "active"
-  )
-  const [propertyFilterId, setPropertyFilterId] = useState(
-    searchParams.get("propertyId") || "all"
-  )
-  const [dateFrom, setDateFrom] = useState(searchParams.get("dateFrom") || "")
-  const [dateTo, setDateTo] = useState(searchParams.get("dateTo") || "")
+  const [error, setError] = useState<string | null>(null)
+  const [search, setSearch] = useState("")
+  const [propertyFilter, setPropertyFilter] = useState("all")
+  const [platformFilter, setPlatformFilter] = useState("all")
+  const [statusFilter, setStatusFilter] = useState("all")
+  const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null)
 
-  const [modal, setModal] = useState<TaskCreateModalState>({
-    open: false,
-    booking: null,
-  })
-
-  const [mappingModal, setMappingModal] = useState<MappingModalState>({
-    open: false,
-    booking: null,
-  })
-
-  const [submittingTask, setSubmittingTask] = useState(false)
-  const [submittingMapping, setSubmittingMapping] = useState(false)
-
-  const [taskType, setTaskType] = useState("cleaning")
-  const [title, setTitle] = useState("")
-  const [description, setDescription] = useState("")
-  const [scheduledDate, setScheduledDate] = useState("")
-  const [scheduledStartTime, setScheduledStartTime] = useState("")
-  const [scheduledEndTime, setScheduledEndTime] = useState("")
-  const [dueDate, setDueDate] = useState("")
-  const [priority, setPriority] = useState("normal")
-  const [notes, setNotes] = useState("")
-  const [alertEnabled, setAlertEnabled] = useState(false)
-  const [alertAt, setAlertAt] = useState("")
-  const [sendCleaningChecklist, setSendCleaningChecklist] = useState(true)
-  const [sendSuppliesChecklist, setSendSuppliesChecklist] = useState(true)
-
-  const [mappingMode, setMappingMode] = useState<"existing" | "new">("existing")
-  const [propertySearch, setPropertySearch] = useState("")
-  const [selectedPropertyId, setSelectedPropertyId] = useState("")
-  const [newPropertyName, setNewPropertyName] = useState("")
-  const [newPropertyAddress, setNewPropertyAddress] = useState("")
-  const [newPropertyCity, setNewPropertyCity] = useState("")
-  const [newPropertyRegion, setNewPropertyRegion] = useState("")
-  const [newPropertyPostalCode, setNewPropertyPostalCode] = useState("")
-  const [newPropertyCountry, setNewPropertyCountry] = useState(
-    getExternalPropertyCountryFallback(language)
-  )
-  const [newPropertyType, setNewPropertyType] = useState("apartment")
-
-  useEffect(() => {
-    setSearch(searchParams.get("search") || "")
-    setActiveFilter((searchParams.get("filter") as FilterKey) || "active")
-    setPropertyFilterId(searchParams.get("propertyId") || "all")
-    setDateFrom(searchParams.get("dateFrom") || "")
-    setDateTo(searchParams.get("dateTo") || "")
-  }, [currentQuery, searchParams])
-
-  useEffect(() => {
-    const params = new URLSearchParams()
-
-    if (search.trim()) params.set("search", search.trim())
-    if (activeFilter !== "active") params.set("filter", activeFilter)
-    if (propertyFilterId !== "all") params.set("propertyId", propertyFilterId)
-    if (dateFrom) params.set("dateFrom", dateFrom)
-    if (dateTo) params.set("dateTo", dateTo)
-
-    const nextQuery = params.toString()
-
-    if (nextQuery !== currentQuery) {
-      router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, {
-        scroll: false,
-      })
+  const range = useMemo(() => {
+    if (view === "day") {
+      return {
+        from: startOfDay(currentDate),
+        to: endOfDay(currentDate),
+      }
     }
-  }, [
-    search,
-    activeFilter,
-    propertyFilterId,
-    dateFrom,
-    dateTo,
-    pathname,
-    router,
-    currentQuery,
-  ])
+
+    if (view === "week") {
+      return {
+        from: startOfWeekMonday(currentDate),
+        to: endOfWeekSunday(currentDate),
+      }
+    }
+
+    return {
+      from: startOfWeekMonday(startOfMonth(currentDate)),
+      to: endOfWeekSunday(endOfMonth(currentDate)),
+    }
+  }, [currentDate, view])
+
+  async function loadSettings() {
+    try {
+      const res = await fetch("/api/settings", { cache: "no-store" })
+      const payload: SettingsPayload = await res.json()
+      const raw = String(payload?.calendarDefaultView || "").trim().toLowerCase()
+
+      if (raw === "week" || raw === "day" || raw === "month") {
+        setView(raw)
+      }
+    } catch (settingsError) {
+      console.error("Load settings for bookings calendar error:", settingsError)
+    }
+  }
 
   async function loadBookings() {
-    setLoading(true)
-    setError("")
-
     try {
-      const response = await fetch("/api/bookings", {
-        cache: "no-store",
+      setLoading(true)
+      setError(null)
+
+      const params = new URLSearchParams({
+        fromDate: formatDateKey(range.from),
+        toDate: formatDateKey(range.to),
       })
 
-      const data = await response.json().catch(() => null)
+      const res = await fetch(`/api/bookings/calendar?${params.toString()}`, {
+        cache: "no-store",
+      })
+      const payload = await res.json()
 
-      if (!response.ok) {
-        throw new Error(data?.error || texts.list.loadError)
+      if (!res.ok) {
+        throw new Error(payload?.error || texts.loadError)
       }
 
-      setBookings(Array.isArray(data) ? data : [])
+      setBookings(Array.isArray(payload) ? payload : [])
     } catch (err) {
-      setError(err instanceof Error ? err.message : texts.list.loadError)
+      console.error("Load bookings calendar error:", err)
+      setError(err instanceof Error ? err.message : texts.loadError)
     } finally {
       setLoading(false)
     }
   }
 
-  async function loadProperties() {
-    try {
-      const response = await fetch("/api/properties", {
-        cache: "no-store",
-      })
-
-      const data = await response.json().catch(() => null)
-
-      if (!response.ok) return
-
-      if (Array.isArray(data)) {
-        setProperties(data)
-        return
-      }
-
-      if (Array.isArray(data?.properties)) {
-        setProperties(data.properties)
-      }
-    } catch {
-      setProperties([])
-    }
-  }
+  useEffect(() => {
+    loadSettings()
+  }, [])
 
   useEffect(() => {
     loadBookings()
-    loadProperties()
-  }, [language])
-
-  function openCreateTaskModal(booking: BookingRow) {
-    setTaskType("cleaning")
-    setTitle("")
-    setDescription("")
-    setScheduledDate(toDateInputValue(booking.checkOutDate))
-    setScheduledStartTime(formatTime(booking.checkOutTime))
-    setScheduledEndTime(formatTime(booking.workWindow?.nextCheckInTime))
-    setDueDate(
-      toDateInputValue(booking.workWindow?.nextCheckInDate || booking.checkOutDate)
-    )
-    setPriority("normal")
-    setNotes(booking.notes || "")
-    setAlertEnabled(false)
-    setAlertAt(
-      toDateTimeLocalValue(
-        booking.workWindow?.nextCheckInDate || booking.checkOutDate,
-        booking.workWindow?.nextCheckInTime || booking.checkOutTime
-      )
-    )
-    setSendCleaningChecklist(true)
-    setSendSuppliesChecklist(true)
-
-    setModal({
-      open: true,
-      booking,
-    })
-  }
-
-  function closeCreateTaskModal() {
-    setModal({
-      open: false,
-      booking: null,
-    })
-  }
-
-  function openMappingModal(booking: BookingRow) {
-    setMappingMode("existing")
-    setPropertySearch("")
-    setSelectedPropertyId("")
-
-    setNewPropertyName(booking.externalListingName || booking.externalListingId || "")
-    setNewPropertyAddress(booking.externalPropertyAddress || "")
-    setNewPropertyCity(booking.externalPropertyCity || "")
-    setNewPropertyRegion(booking.externalPropertyRegion || "")
-    setNewPropertyPostalCode(booking.externalPropertyPostalCode || "")
-    setNewPropertyCountry(
-      booking.externalPropertyCountry || getExternalPropertyCountryFallback(language)
-    )
-    setNewPropertyType("apartment")
-
-    setMappingModal({
-      open: true,
-      booking,
-    })
-  }
-
-  function closeMappingModal() {
-    setMappingModal({
-      open: false,
-      booking: null,
-    })
-  }
-
-  async function handleCreateTask() {
-    if (!modal.booking) return
-
-    setSubmittingTask(true)
-
-    try {
-      const response = await fetch(`/api/bookings/${modal.booking.id}/create-task`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          language,
-          taskType,
-          title: title.trim() || undefined,
-          description: description.trim() || undefined,
-          scheduledDate,
-          scheduledStartTime: scheduledStartTime || null,
-          scheduledEndTime: scheduledEndTime || null,
-          dueDate,
-          priority,
-          notes: notes.trim() || null,
-          alertEnabled,
-          alertAt: alertEnabled ? alertAt : null,
-          sendCleaningChecklist,
-          sendSuppliesChecklist,
-        }),
-      })
-
-      const data = await response.json().catch(() => null)
-
-      if (!response.ok) {
-        throw new Error(data?.error || texts.list.createTaskError)
-      }
-
-      closeCreateTaskModal()
-      await loadBookings()
-      alert(texts.list.taskCreatedSuccess)
-    } catch (err) {
-      alert(err instanceof Error ? err.message : texts.list.createTaskError)
-    } finally {
-      setSubmittingTask(false)
-    }
-  }
-
-  async function handleConfirmMapping() {
-    if (!mappingModal.booking) return
-
-    const externalListingId = String(
-      mappingModal.booking.externalListingId || ""
-    ).trim()
-
-    if (!externalListingId) {
-      alert(
-        language === "en"
-          ? "This booking has no external listing id, so it cannot be mapped yet."
-          : "Αυτή η κράτηση δεν έχει external listing id, οπότε δεν μπορεί ακόμη να αντιστοιχιστεί."
-      )
-      return
-    }
-
-    setSubmittingMapping(true)
-
-    try {
-      let propertyIdToMap = ""
-
-      if (mappingMode === "existing") {
-        if (!selectedPropertyId) {
-          throw new Error(
-            language === "en" ? "Select a property first." : "Επίλεξε πρώτα ακίνητο."
-          )
-        }
-
-        propertyIdToMap = selectedPropertyId
-      } else {
-        if (!newPropertyName.trim()) {
-          throw new Error(
-            language === "en"
-              ? "Property name is required."
-              : "Το όνομα ακινήτου είναι υποχρεωτικό."
-          )
-        }
-
-        if (!newPropertyAddress.trim()) {
-          throw new Error(
-            language === "en"
-              ? "Address is required."
-              : "Η διεύθυνση είναι υποχρεωτική."
-          )
-        }
-
-        if (!newPropertyCity.trim()) {
-          throw new Error(
-            language === "en" ? "City is required." : "Η πόλη είναι υποχρεωτική."
-          )
-        }
-
-        if (!newPropertyRegion.trim()) {
-          throw new Error(
-            language === "en"
-              ? "Region is required."
-              : "Η περιοχή είναι υποχρεωτική."
-          )
-        }
-
-        if (!newPropertyPostalCode.trim()) {
-          throw new Error(
-            language === "en"
-              ? "Postal code is required."
-              : "Ο ταχυδρομικός κώδικας είναι υποχρεωτικός."
-          )
-        }
-
-        if (!newPropertyCountry.trim()) {
-          throw new Error(
-            language === "en" ? "Country is required." : "Η χώρα είναι υποχρεωτική."
-          )
-        }
-
-        const createPropertyResponse = await fetch("/api/properties", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            name: newPropertyName.trim(),
-            address: newPropertyAddress.trim(),
-            city: newPropertyCity.trim(),
-            region: newPropertyRegion.trim(),
-            postalCode: newPropertyPostalCode.trim(),
-            country: newPropertyCountry.trim(),
-            type: newPropertyType,
-            status: "active",
-            bedrooms: 0,
-            bathrooms: 0,
-            maxGuests: 0,
-          }),
-        })
-
-        const createPropertyData = await createPropertyResponse.json().catch(() => null)
-
-        if (!createPropertyResponse.ok) {
-          throw new Error(
-            createPropertyData?.error ||
-              (language === "en"
-                ? "Failed to create property."
-                : "Αποτυχία δημιουργίας ακινήτου.")
-          )
-        }
-
-        propertyIdToMap = String(createPropertyData?.property?.id || "").trim()
-
-        if (!propertyIdToMap) {
-          throw new Error(
-            language === "en"
-              ? "Property was created but no property id was returned."
-              : "Το ακίνητο δημιουργήθηκε αλλά δεν επιστράφηκε property id."
-          )
-        }
-      }
-
-      const mappingResponse = await fetch("/api/bookings/mappings", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          propertyId: propertyIdToMap,
-          sourcePlatform: mappingModal.booking.sourcePlatform,
-          externalListingId,
-          externalListingName: mappingModal.booking.externalListingName || null,
-          notes:
-            language === "en"
-              ? "Created from bookings page mapping flow."
-              : "Δημιουργήθηκε από τη ροή αντιστοίχισης της σελίδας κρατήσεων.",
-        }),
-      })
-
-      const mappingData = await mappingResponse.json().catch(() => null)
-
-      if (!mappingResponse.ok) {
-        throw new Error(
-          mappingData?.error ||
-            (language === "en"
-              ? "Failed to save property mapping."
-              : "Αποτυχία αποθήκευσης αντιστοίχισης ακινήτου.")
-        )
-      }
-
-      closeMappingModal()
-      await loadBookings()
-      await loadProperties()
-
-      alert(
-        language === "en"
-          ? "Property mapping completed successfully."
-          : "Η αντιστοίχιση ακινήτου ολοκληρώθηκε επιτυχώς."
-      )
-    } catch (err) {
-      alert(
-        err instanceof Error
-          ? err.message
-          : language === "en"
-            ? "Mapping failed."
-            : "Η αντιστοίχιση απέτυχε."
-      )
-    } finally {
-      setSubmittingMapping(false)
-    }
-  }
-
-  const baseVisibleBookings = useMemo(() => {
-    const normalizedSearch = search.trim().toLowerCase()
-
-    return bookings.filter((booking) => {
-      const matchesProperty =
-        propertyFilterId === "all" || booking.property?.id === propertyFilterId
-
-      const matchesDate = isDateInRange(
-        booking.checkOutDate,
-        dateFrom || undefined,
-        dateTo || undefined
-      )
-
-      const matchesSearch = !normalizedSearch
-        ? true
-        : [
-            booking.externalBookingId,
-            booking.externalListingId,
-            booking.externalListingName,
-            booking.externalPropertyAddress,
-            booking.externalPropertyCity,
-            booking.externalPropertyRegion,
-            booking.externalPropertyPostalCode,
-            booking.externalPropertyCountry,
-            booking.guestName,
-            booking.property?.name,
-            booking.property?.code,
-            booking.property?.address,
-            booking.property?.city,
-            booking.property?.region,
-            booking.sourcePlatform,
-          ]
-            .filter(Boolean)
-            .join(" ")
-            .toLowerCase()
-            .includes(normalizedSearch)
-
-      return matchesProperty && matchesDate && matchesSearch
-    })
-  }, [bookings, propertyFilterId, dateFrom, dateTo, search])
-
-  const propertyFilterOptions = useMemo(() => {
-    const map = new Map<string, PropertyOption>()
-
-    for (const property of properties) {
-      if (!property?.id) continue
-      map.set(property.id, property)
-    }
-
-    for (const booking of bookings) {
-      if (!booking.property?.id) continue
-
-      if (!map.has(booking.property.id)) {
-        map.set(booking.property.id, {
-          id: booking.property.id,
-          code: booking.property.code,
-          name: booking.property.name,
-          address: booking.property.address,
-          city: booking.property.city,
-          region: booking.property.region,
-          status: booking.property.status,
-        })
-      }
-    }
-
-    return Array.from(map.values()).sort((a, b) =>
-      String(a.name || "").localeCompare(String(b.name || ""), locale)
-    )
-  }, [bookings, locale, properties])
-
-  const counters = useMemo(() => {
-    const today = getTodayDateOnly()
-    const next3 = new Date(today)
-    next3.setDate(next3.getDate() + 3)
-
-    return {
-      all: baseVisibleBookings.length,
-      active: baseVisibleBookings.filter((booking) => isActiveBooking(booking)).length,
-      withoutTasks: baseVisibleBookings.filter(
-        (booking) => booking.tasks.length === 0 && isActiveBooking(booking)
-      ).length,
-      withTasks: baseVisibleBookings.filter(
-        (booking) => booking.tasks.length > 0 && isActiveBooking(booking)
-      ).length,
-      needsMapping: baseVisibleBookings.filter((booking) => booking.needsMapping).length,
-      cancelled: baseVisibleBookings.filter((booking) =>
-        isCancelledBooking(booking.status)
-      ).length,
-      todayCheckout: baseVisibleBookings.filter((booking) => {
-        const checkout = getDateOnly(booking.checkOutDate)
-        return checkout.getTime() === today.getTime()
-      }).length,
-      next3Days: baseVisibleBookings.filter((booking) => {
-        const checkout = getDateOnly(booking.checkOutDate)
-        return checkout >= today && checkout <= next3
-      }).length,
-    }
-  }, [baseVisibleBookings])
+  }, [view, currentDate, language])
 
   const filteredBookings = useMemo(() => {
-    const today = getTodayDateOnly()
-    const next3 = new Date(today)
-    next3.setDate(next3.getDate() + 3)
+    const q = search.trim().toLowerCase()
 
-    let result = [...baseVisibleBookings]
+    return bookings.filter((booking) => {
+      if (propertyFilter !== "all" && booking.property?.id !== propertyFilter) return false
+      if (platformFilter !== "all" && booking.sourcePlatform !== platformFilter) return false
+      if (statusFilter !== "all" && String(booking.status || "").trim().toLowerCase() !== statusFilter)
+        return false
 
-    if (activeFilter === "active") {
-      result = result.filter((booking) => isActiveBooking(booking))
-    }
+      if (!q) return true
 
-    if (activeFilter === "withoutTasks") {
-      result = result.filter(
-        (booking) => booking.tasks.length === 0 && isActiveBooking(booking)
-      )
-    }
-
-    if (activeFilter === "withTasks") {
-      result = result.filter(
-        (booking) => booking.tasks.length > 0 && isActiveBooking(booking)
-      )
-    }
-
-    if (activeFilter === "needsMapping") {
-      result = result.filter((booking) => booking.needsMapping)
-    }
-
-    if (activeFilter === "cancelled") {
-      result = result.filter((booking) => isCancelledBooking(booking.status))
-    }
-
-    if (activeFilter === "todayCheckout") {
-      result = result.filter((booking) => {
-        const checkout = getDateOnly(booking.checkOutDate)
-        return checkout.getTime() === today.getTime()
-      })
-    }
-
-    if (activeFilter === "next3Days") {
-      result = result.filter((booking) => {
-        const checkout = getDateOnly(booking.checkOutDate)
-        return checkout >= today && checkout <= next3
-      })
-    }
-
-    return result
-  }, [baseVisibleBookings, activeFilter])
-
-  const filterButtons: Array<{
-    key: FilterKey
-    label: string
-    count: number
-    help: string
-  }> = [
-    {
-      key: "all",
-      label: texts.list.all,
-      count: counters.all,
-      help: ui.allCounterHelp,
-    },
-    {
-      key: "active",
-      label: texts.list.active,
-      count: counters.active,
-      help: ui.activeCounterHelp,
-    },
-    {
-      key: "withoutTasks",
-      label: texts.list.withoutTasks,
-      count: counters.withoutTasks,
-      help: ui.withoutTasksCounterHelp,
-    },
-    {
-      key: "withTasks",
-      label: texts.list.withTasks,
-      count: counters.withTasks,
-      help: ui.withTasksCounterHelp,
-    },
-    {
-      key: "needsMapping",
-      label: texts.list.needsMapping,
-      count: counters.needsMapping,
-      help: ui.needsMappingCounterHelp,
-    },
-    {
-      key: "cancelled",
-      label: texts.list.cancelled,
-      count: counters.cancelled,
-      help: ui.cancelledCounterHelp,
-    },
-    {
-      key: "todayCheckout",
-      label: texts.list.todayCheckout,
-      count: counters.todayCheckout,
-      help: ui.todayCheckoutCounterHelp,
-    },
-    {
-      key: "next3Days",
-      label: texts.list.next3Days,
-      count: counters.next3Days,
-      help: ui.next3DaysCounterHelp,
-    },
-  ]
-
-  const filteredPropertyOptions = useMemo(() => {
-    const normalizedSearch = propertySearch.trim().toLowerCase()
-
-    if (!normalizedSearch) return properties
-
-    return properties.filter((property) => {
       const haystack = [
-        property.code,
-        property.name,
-        property.address,
-        property.city,
-        property.region,
+        booking.externalBookingId,
+        booking.guestName,
+        booking.externalListingId,
+        booking.externalListingName,
+        booking.property?.code,
+        booking.property?.name,
+        booking.externalPropertyAddress,
       ]
         .filter(Boolean)
         .join(" ")
         .toLowerCase()
 
-      return haystack.includes(normalizedSearch)
+      return haystack.includes(q)
     })
-  }, [properties, propertySearch])
+  }, [bookings, platformFilter, propertyFilter, search, statusFilter])
 
-  const calendarHref = useMemo(() => {
-    const params = new URLSearchParams()
+  const propertyOptions = useMemo(() => {
+    const map = new Map<string, { id: string; label: string }>()
 
-    if (search.trim()) params.set("search", search.trim())
-    if (propertyFilterId !== "all") params.set("propertyId", propertyFilterId)
-    if (dateFrom) params.set("dateFrom", dateFrom)
-    if (dateTo) params.set("dateTo", dateTo)
-    params.set("view", "month")
+    for (const booking of bookings) {
+      if (!booking.property?.id) continue
+      map.set(booking.property.id, {
+        id: booking.property.id,
+        label: booking.property.code
+          ? `${booking.property.code} · ${booking.property.name || ""}`
+          : booking.property.name || booking.property.id,
+      })
+    }
 
-    const query = params.toString()
-    return query ? `/bookings/calendar?${query}` : "/bookings/calendar"
-  }, [search, propertyFilterId, dateFrom, dateTo])
+    return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label, "el"))
+  }, [bookings])
 
-  const hasAnySecondaryFilter =
-    Boolean(search.trim()) ||
-    propertyFilterId !== "all" ||
-    Boolean(dateFrom) ||
-    Boolean(dateTo)
+  const platformOptions = useMemo(() => {
+    return Array.from(new Set(bookings.map((booking) => booking.sourcePlatform))).sort((a, b) =>
+      a.localeCompare(b, "el")
+    )
+  }, [bookings])
+
+  const stats = useMemo(() => {
+    return {
+      total: filteredBookings.length,
+      mapped: filteredBookings.filter((item) => !item.needsMapping).length,
+      unmapped: filteredBookings.filter((item) => item.needsMapping).length,
+    }
+  }, [filteredBookings])
+
+  useEffect(() => {
+    if (filteredBookings.length === 0) {
+      setSelectedBookingId(null)
+      return
+    }
+
+    const found = filteredBookings.find((item) => item.id === selectedBookingId)
+    if (!found) {
+      setSelectedBookingId(filteredBookings[0].id)
+    }
+  }, [filteredBookings, selectedBookingId])
+
+  const selectedBooking = filteredBookings.find((item) => item.id === selectedBookingId) || null
+
+  const monthCells = useMemo(() => {
+    const start = startOfWeekMonday(startOfMonth(currentDate))
+    return Array.from({ length: 42 }, (_, index) => addDays(start, index))
+  }, [currentDate])
+
+  const weekDays = useMemo(() => {
+    const start = startOfWeekMonday(currentDate)
+    return Array.from({ length: 7 }, (_, index) => addDays(start, index))
+  }, [currentDate])
+
+  function movePrevious() {
+    setCurrentDate((prev) => {
+      if (view === "day") return addDays(prev, -1)
+      if (view === "week") return addDays(prev, -7)
+      return addMonths(prev, -1)
+    })
+  }
+
+  function moveNext() {
+    setCurrentDate((prev) => {
+      if (view === "day") return addDays(prev, 1)
+      if (view === "week") return addDays(prev, 7)
+      return addMonths(prev, 1)
+    })
+  }
 
   return (
-    <div className="space-y-6 p-6">
-      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+    <div className="space-y-8">
+      <section className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-950">
-            {texts.list.title}
-          </h1>
-          <p className="mt-1 max-w-4xl text-sm leading-6 text-slate-600">
-            {ui.pageDescription}
-          </p>
+          <div className="text-sm font-medium text-slate-500">OPS · Bookings</div>
+          <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-950">{texts.title}</h1>
+          <p className="mt-3 max-w-4xl text-sm leading-6 text-slate-600">{texts.subtitle}</p>
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-3">
           <Link
-            href={calendarHref}
-            title={ui.bookingsCalendarHelp}
-            className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-slate-950"
+            href="/bookings/platforms"
+            title={texts.connectionsHelp}
+            className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
           >
-            {ui.bookingsCalendar}
+            {texts.connectionsButton}
           </Link>
-        </div>
-      </div>
 
-      <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+          <button
+            type="button"
+            onClick={loadBookings}
+            className="inline-flex items-center rounded-2xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800"
+          >
+            {texts.refresh}
+          </button>
+        </div>
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="text-sm text-slate-500">{texts.importedBookings}</div>
+          <div className="mt-3 text-3xl font-bold text-slate-950">{stats.total}</div>
+        </div>
+
+        <div className="rounded-3xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm">
+          <div className="text-sm text-emerald-700">{texts.mappedBookings}</div>
+          <div className="mt-3 text-3xl font-bold text-emerald-900">{stats.mapped}</div>
+        </div>
+
+        <div className="rounded-3xl border border-amber-200 bg-amber-50 p-5 shadow-sm">
+          <div className="text-sm text-amber-700">{texts.unmappedBookings}</div>
+          <div className="mt-3 text-3xl font-bold text-amber-900">{stats.unmapped}</div>
+        </div>
+      </section>
+
+      <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr),220px,220px,220px]">
           <div>
-            <div className="text-sm font-semibold text-slate-950">
-              {texts.list.title}
-            </div>
-            <p className="mt-1 text-sm text-slate-600">
-              {ui.dateRangeHelp}
-            </p>
+            <label className="mb-2 block text-sm font-medium text-slate-700">Search</label>
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={texts.searchPlaceholder}
+              title={texts.searchHelp}
+              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-slate-400"
+            />
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-            <div>
-              <label
-                className="mb-1 block text-sm font-medium text-slate-700"
-                title={ui.propertyFilterHelp}
-              >
-                {ui.propertyFilter}
-              </label>
-              <select
-                value={propertyFilterId}
-                onChange={(e) => setPropertyFilterId(e.target.value)}
-                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-slate-400"
-              >
-                <option value="all">{ui.propertyFilterAll}</option>
-                {propertyFilterOptions.map((property) => (
-                  <option key={property.id} value={property.id}>
-                    {property.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+          <div>
+            <label className="mb-2 block text-sm font-medium text-slate-700">{texts.property}</label>
+            <select
+              value={propertyFilter}
+              onChange={(e) => setPropertyFilter(e.target.value)}
+              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-slate-400"
+            >
+              <option value="all">{texts.allProperties}</option>
+              {propertyOptions.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </div>
 
-            <div>
-              <label
-                className="mb-1 block text-sm font-medium text-slate-700"
-                title={ui.dateRangeHelp}
-              >
-                {ui.dateFrom}
-              </label>
-              <input
-                type="date"
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
-                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-slate-400"
-              />
-            </div>
+          <div>
+            <label className="mb-2 block text-sm font-medium text-slate-700">{texts.platform}</label>
+            <select
+              value={platformFilter}
+              onChange={(e) => setPlatformFilter(e.target.value)}
+              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-slate-400"
+            >
+              <option value="all">{texts.allPlatforms}</option>
+              {platformOptions.map((item) => (
+                <option key={item} value={item}>
+                  {normalizePlatformLabel(item, language)}
+                </option>
+              ))}
+            </select>
+          </div>
 
-            <div>
-              <label
-                className="mb-1 block text-sm font-medium text-slate-700"
-                title={ui.dateRangeHelp}
-              >
-                {ui.dateTo}
-              </label>
-              <input
-                type="date"
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
-                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-slate-400"
-              />
-            </div>
+          <div>
+            <label className="mb-2 block text-sm font-medium text-slate-700">Status</label>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-slate-400"
+            >
+              <option value="all">{texts.allStatuses}</option>
+              <option value="confirmed">{texts.confirmed}</option>
+              <option value="pending">{texts.pending}</option>
+              <option value="cancelled">{texts.cancelled}</option>
+            </select>
+          </div>
+        </div>
 
-            <div>
-              <label
-                className="mb-1 block text-sm font-medium text-slate-700"
-                title={ui.searchHelp}
-              >
-                {language === "en" ? "Search" : "Αναζήτηση"}
-              </label>
-              <input
-                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400"
-                placeholder={ui.searchPlaceholder}
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="text-xs leading-5 text-slate-500">{texts.bookingOnlyHint}</div>
+          <button
+            type="button"
+            onClick={() => {
+              setSearch("")
+              setPropertyFilter("all")
+              setPlatformFilter("all")
+              setStatusFilter("all")
+            }}
+            className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            {texts.clearFilters}
+          </button>
+        </div>
+      </section>
 
-            <div className="flex items-end">
+      <section className="rounded-3xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-col gap-4 border-b border-slate-200 p-5 xl:flex-row xl:items-center xl:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-950">{formatDateRangeTitle(view, currentDate, texts.locale)}</h2>
+            <p className="mt-1 text-sm text-slate-500">{texts.calendarHint}</p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="inline-flex rounded-2xl border border-slate-200 bg-white p-1 shadow-sm">
               <button
                 type="button"
-                title={ui.clearFiltersHelp}
-                onClick={() => {
-                  setSearch("")
-                  setPropertyFilterId("all")
-                  setDateFrom("")
-                  setDateTo("")
-                  setActiveFilter("active")
-                }}
-                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-slate-950"
+                onClick={movePrevious}
+                className="rounded-xl px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
               >
-                {ui.clearFilters}
+                ←
+              </button>
+              <button
+                type="button"
+                onClick={() => setCurrentDate(new Date())}
+                className="rounded-xl px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+              >
+                {texts.today}
+              </button>
+              <button
+                type="button"
+                onClick={moveNext}
+                className="rounded-xl px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+              >
+                →
               </button>
             </div>
-          </div>
-        </div>
 
-        {hasAnySecondaryFilter ? (
-          <div className="mt-4 text-xs text-slate-500">
-            {language === "en"
-              ? `Filtered results: ${baseVisibleBookings.length}`
-              : `Φιλτραρισμένα αποτελέσματα: ${baseVisibleBookings.length}`}
-          </div>
-        ) : null}
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {filterButtons.map((item) => (
-          <button
-            key={item.key}
-            type="button"
-            title={item.help}
-            onClick={() => setActiveFilter(item.key)}
-            className={
-              activeFilter === item.key
-                ? "rounded-3xl border border-slate-950 bg-slate-950 p-5 text-left text-white shadow-sm transition"
-                : "rounded-3xl border border-slate-200 bg-white p-5 text-left text-slate-900 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
-            }
-          >
-            <div className="text-sm font-medium opacity-80">{item.label}</div>
-            <div className="mt-3 text-3xl font-semibold tracking-tight">
-              {item.count}
+            <div className="inline-flex rounded-2xl border border-slate-200 bg-white p-1 shadow-sm">
+              <button
+                type="button"
+                onClick={() => setView("month")}
+                title={texts.monthHelp}
+                className={`rounded-xl px-3 py-2 text-sm font-medium transition ${
+                  view === "month" ? "bg-slate-950 text-white" : "text-slate-700 hover:bg-slate-100"
+                }`}
+              >
+                {texts.month}
+              </button>
+              <button
+                type="button"
+                onClick={() => setView("week")}
+                title={texts.weekHelp}
+                className={`rounded-xl px-3 py-2 text-sm font-medium transition ${
+                  view === "week" ? "bg-slate-950 text-white" : "text-slate-700 hover:bg-slate-100"
+                }`}
+              >
+                {texts.week}
+              </button>
+              <button
+                type="button"
+                onClick={() => setView("day")}
+                title={texts.dayHelp}
+                className={`rounded-xl px-3 py-2 text-sm font-medium transition ${
+                  view === "day" ? "bg-slate-950 text-white" : "text-slate-700 hover:bg-slate-100"
+                }`}
+              >
+                {texts.day}
+              </button>
             </div>
-          </button>
-        ))}
-      </div>
-
-      <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex flex-col gap-4 border-b border-slate-200 p-5 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-slate-950">
-              {texts.list.listTitle}
-            </h2>
-            <p className="mt-1 text-sm leading-6 text-slate-600">
-              {ui.listDescription}
-            </p>
-          </div>
-
-          <div className="text-sm text-slate-500">
-            {language === "en"
-              ? `${filteredBookings.length} bookings visible`
-              : `${filteredBookings.length} κρατήσεις ορατές`}
           </div>
         </div>
 
         {loading ? (
-          <div className="p-6 text-sm text-slate-500">{texts.common.loading}</div>
+          <div className="p-6 text-sm text-slate-500">{texts.loading}</div>
         ) : error ? (
           <div className="p-6 text-sm text-rose-600">{error}</div>
         ) : filteredBookings.length === 0 ? (
-          <div className="p-6 text-sm text-slate-500">{texts.list.noBookings}</div>
+          <div className="p-6 text-sm text-slate-500">{texts.noResults}</div>
         ) : (
-          <div className="divide-y divide-slate-200">
-            {filteredBookings.map((booking) => {
-              const syncBadgeClass = booking.needsMapping
-                ? getBadgeClassName("warning")
-                : isCancelledBooking(booking.status)
-                  ? getBadgeClassName("danger")
-                  : getBadgeClassName("success")
+          <div className="grid grid-cols-1 gap-0 xl:grid-cols-[minmax(0,1fr),380px]">
+            <div className="min-w-0 border-b border-slate-200 xl:border-b-0 xl:border-r xl:border-slate-200">
+              {view === "month" ? (
+                <div>
+                  <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50">
+                    {Array.from({ length: 7 }, (_, index) => addDays(startOfWeekMonday(currentDate), index)).map((date) => (
+                      <div key={formatDateKey(date)} className="px-3 py-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        {new Intl.DateTimeFormat(texts.locale, { weekday: "short" }).format(date)}
+                      </div>
+                    ))}
+                  </div>
 
-              const taskBadgeClass = getTaskCoverageBadgeClass(booking.taskStatus)
-              const firstTask = booking.tasks[0] || null
-              const stateBlock = getBookingStateBlock(booking, language)
+                  <div className="grid grid-cols-7">
+                    {monthCells.map((date) => {
+                      const dayBookings = filteredBookings.filter((booking) => bookingOverlapsDay(booking, date))
+                      const inCurrentMonth = date.getMonth() === currentDate.getMonth()
 
-              const externalPropertyDisplay =
-                getExternalPropertyDisplay(booking) || texts.common.notAvailable
-              const propertyAddressDisplay = booking.needsMapping
-                ? externalPropertyDisplay
-                : [
-                    booking.property?.address,
-                    booking.property?.city,
-                    booking.property?.region,
-                  ]
-                    .filter(Boolean)
-                    .join(" · ") || texts.common.notAvailable
-
-              const checkOutDateTimeText = formatDateAndTime(
-                booking.checkOutDate,
-                booking.checkOutTime,
-                locale,
-                texts.common.notAvailable
-              )
-
-              const nextCheckInDateTimeText = booking.workWindow?.nextCheckInDate
-                ? formatDateAndTime(
-                    booking.workWindow.nextCheckInDate,
-                    booking.workWindow.nextCheckInTime,
-                    locale,
-                    texts.common.notAvailable
-                  )
-                : texts.list.noNextBooking
-              const windowRangeText = getWindowRangeLabel(booking, locale, texts)
-
-              return (
-                <article key={booking.id} className="p-4 sm:p-5">
-                  <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
-                    <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                      <div className="min-w-0 flex-1 space-y-3">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <div
-                            className="min-w-0 max-w-full truncate text-lg font-semibold text-slate-950"
-                            title={
-                              booking.property
-                                ? booking.property.name
-                                : booking.externalListingName ||
-                                  booking.externalListingId ||
-                                  texts.list.propertyNotMapped
-                            }
-                          >
-                            {booking.property
-                              ? booking.property.name
-                              : booking.externalListingName ||
-                                booking.externalListingId ||
-                                texts.list.propertyNotMapped}
+                      return (
+                        <div key={formatDateKey(date)} className="min-h-[160px] border-b border-r border-slate-200 p-3 align-top">
+                          <div className={`mb-3 flex items-center justify-between text-sm font-semibold ${
+                            inCurrentMonth ? "text-slate-900" : "text-slate-400"
+                          }`}>
+                            <span>{date.getDate()}</span>
+                            {isSameDay(date, new Date()) ? (
+                              <span className="rounded-full bg-slate-950 px-2 py-0.5 text-[10px] font-semibold text-white">
+                                {texts.today}
+                              </span>
+                            ) : null}
                           </div>
 
-                          <span
-                            className={getBadgeClassName("neutral")}
-                            title={language === "en" ? "Booking platform" : "Πλατφόρμα κράτησης"}
-                          >
-                            {normalizeSourcePlatform(booking.sourcePlatform, texts)}
-                          </span>
+                          <div className="space-y-2">
+                            {dayBookings.length === 0 ? (
+                              <div className="text-xs text-slate-400">{texts.emptyDay}</div>
+                            ) : (
+                              dayBookings.slice(0, 4).map((booking) => (
+                                <BookingChip
+                                  key={`${booking.id}-${formatDateKey(date)}`}
+                                  booking={booking}
+                                  language={language}
+                                  texts={texts}
+                                  isSelected={selectedBookingId === booking.id}
+                                  onSelect={() => setSelectedBookingId(booking.id)}
+                                />
+                              ))
+                            )}
 
-                          <span className={syncBadgeClass} title={ui.bookingIdentityHelp}>
-                            {getSyncLabel(booking.syncStatus, booking.needsMapping, texts)}
-                          </span>
-
-                          <span className={taskBadgeClass} title={ui.createTaskHelp}>
-                            {getTaskCoverageLabel(booking.taskStatus, language, texts)}
-                          </span>
+                            {dayBookings.length > 4 ? (
+                              <div className="text-xs font-medium text-slate-500">+{dayBookings.length - 4}</div>
+                            ) : null}
+                          </div>
                         </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              ) : null}
 
-                        <div
-                          className="text-sm text-slate-500"
-                          title={ui.bookingIdentityHelp}
-                        >
-                          {propertyAddressDisplay}
+              {view === "week" ? (
+                <div className="grid grid-cols-1 gap-0 md:grid-cols-7">
+                  {weekDays.map((date) => {
+                    const dayBookings = filteredBookings.filter((booking) => bookingOverlapsDay(booking, date))
+
+                    return (
+                      <div key={formatDateKey(date)} className="min-h-[420px] border-b border-r border-slate-200 p-4">
+                        <div className="mb-4 text-sm font-semibold text-slate-900">{formatDayLabel(date, texts.locale)}</div>
+                        <div className="space-y-2">
+                          {dayBookings.length === 0 ? (
+                            <div className="text-xs text-slate-400">{texts.emptyDay}</div>
+                          ) : (
+                            dayBookings.map((booking) => (
+                              <BookingChip
+                                key={`${booking.id}-${formatDateKey(date)}`}
+                                booking={booking}
+                                language={language}
+                                texts={texts}
+                                isSelected={selectedBookingId === booking.id}
+                                onSelect={() => setSelectedBookingId(booking.id)}
+                              />
+                            ))
+                          )}
                         </div>
                       </div>
+                    )
+                  })}
+                </div>
+              ) : null}
 
-                      <div className="flex flex-wrap gap-2">
-                        <Link
-                          href={`/bookings/${booking.id}`}
-                          title={ui.viewBookingHelp}
-                          className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-slate-950"
-                        >
-                          {ui.viewBooking}
-                        </Link>
-
-                        {booking.property ? (
-                          <Link
-                            href={`/properties/${booking.property.id}`}
-                            title={ui.viewPropertyHelp}
-                            className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-slate-950"
-                          >
-                            {ui.viewProperty}
-                          </Link>
-                        ) : null}
-
-                        {firstTask ? (
-                          <Link
-                            href={`/tasks/${firstTask.id}`}
-                            title={ui.viewTaskHelp}
-                            className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-slate-950"
-                          >
-                            {ui.viewTask}
-                          </Link>
-                        ) : booking.needsMapping ? (
-                          <button
-                            type="button"
-                            title={ui.mapPropertyHelp}
-                            onClick={() => openMappingModal(booking)}
-                            disabled={!String(booking.externalListingId || "").trim()}
-                            className="inline-flex items-center rounded-2xl bg-amber-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:bg-amber-300"
-                          >
-                            {ui.mapProperty}
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            title={ui.createTaskHelp}
-                            onClick={() => openCreateTaskModal(booking)}
-                            disabled={isCancelledBooking(booking.status)}
-                            className="inline-flex items-center rounded-2xl bg-slate-950 px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-                          >
-                            {ui.createTask}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    <div
-                      className="mt-4 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 lg:flex-row lg:items-center lg:justify-between"
-                      title={ui.workWindowHelp}
-                    >
-                      <div className="min-w-0 text-sm text-slate-700">
-                        <span className="font-semibold text-slate-950">
-                          {language === "en" ? "Check-out" : "Check-out"}:
-                        </span>{" "}
-                        {checkOutDateTimeText}
-                      </div>
-
-                      <div className="min-w-0 text-sm text-slate-700">
-                        <span className="font-semibold text-slate-950">
-                          {language === "en" ? "Next check-in" : "Επόμενο check-in"}:
-                        </span>{" "}
-                        {nextCheckInDateTimeText}
-                      </div>
-
-                      <div className="min-w-0 text-sm text-slate-700">
-                        <span className="font-semibold text-slate-950">
-                          {language === "en" ? "Window" : "Παράθυρο"}:
-                        </span>{" "}
-                        {windowRangeText}
-                        {booking.workWindow?.windowDurationCompact ? (
-                          <span className="ml-2 text-xs text-slate-500">
-                            ({booking.workWindow.windowDurationCompact})
-                          </span>
-                        ) : null}
-                      </div>
-                    </div>
-
-                    <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-4">
-                      <span
-                        className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-700"
-                        title={
-                          firstTask
-                            ? stateBlock.description
-                            : booking.needsMapping
-                              ? ui.mapPropertyHelp
-                              : ui.createTaskHelp
-                        }
-                      >
-                        {firstTask
-                          ? `${normalizeTaskTitle(firstTask.title, language)} · ${getTaskTypeDisplay(firstTask.taskType, language, texts)} · ${getTaskStatusDisplay(firstTask.status, language)}`
-                          : language === "en"
-                            ? "No task yet"
-                            : "Χωρίς εργασία ακόμη"}
-                      </span>
-
-                      <span
-                        className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${
-                          firstTask?.alertEnabled && firstTask?.alertAt
-                            ? "border border-rose-200 bg-rose-50 text-rose-700"
-                            : "border border-slate-200 bg-white text-slate-600"
-                        }`}
-                        title={
-                          firstTask?.alertEnabled && firstTask?.alertAt
-                            ? language === "en"
-                              ? "Task alert is active for this booking."
-                              : "Υπάρχει ενεργό alert για την εργασία αυτής της κράτησης."
-                            : stateBlock.title
-                        }
-                      >
-                        {firstTask
-                          ? `${getPriorityDisplay(firstTask.priority, language)}${
-                              firstTask.alertEnabled && firstTask.alertAt
-                                ? ` · Alert ${formatTime(firstTask.alertAt)}`
-                                : ""
-                            }`
-                          : stateBlock.title}
-                      </span>
-
-                      {!booking.property ? (
-                        <span
-                          className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700"
-                          title={ui.mapPropertyHelp}
-                        >
-                          {language === "en"
-                            ? "Property mapping required"
-                            : "Απαιτείται αντιστοίχιση ακινήτου"}
-                        </span>
-                      ) : null}
-                    </div>
+              {view === "day" ? (
+                <div className="p-5">
+                  <div className="mb-4 text-base font-semibold text-slate-900">{formatDateRangeTitle("day", currentDate, texts.locale)}</div>
+                  <div className="space-y-3">
+                    {filteredBookings.filter((booking) => bookingOverlapsDay(booking, currentDate)).map((booking) => (
+                      <BookingChip
+                        key={booking.id}
+                        booking={booking}
+                        language={language}
+                        texts={texts}
+                        isSelected={selectedBookingId === booking.id}
+                        onSelect={() => setSelectedBookingId(booking.id)}
+                      />
+                    ))}
                   </div>
-                </article>
-              )
-            })}
-          </div>
-        )}
-      </section>
-
-      {modal.open && modal.booking && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4">
-          <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-200 p-5">
-              <div>
-                <h3 className="text-lg font-semibold text-slate-950">
-                  {texts.modal.title}
-                </h3>
-                <p className="mt-1 text-sm text-slate-600">
-                  {modal.booking.property?.name ||
-                    modal.booking.externalListingName ||
-                    modal.booking.externalBookingId}
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={closeCreateTaskModal}
-                className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-              >
-                {texts.common.close}
-              </button>
+                </div>
+              ) : null}
             </div>
 
-            <div className="space-y-6 p-5">
-              <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
-                <div className="text-sm font-semibold text-slate-950">
-                  {texts.modal.windowTitle}
-                </div>
-
-                <div className="mt-3 grid gap-3 md:grid-cols-2">
-                  <div className="rounded-2xl bg-white p-3">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      {texts.labels.checkOut}
-                    </div>
-                    <div className="mt-1 text-sm font-medium text-slate-900">
-                      {formatDateAndTime(
-                        modal.booking.checkOutDate,
-                        modal.booking.checkOutTime,
-                        locale,
-                        texts.common.notAvailable
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl bg-white p-3">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      {texts.labels.nextCheckIn}
-                    </div>
-                    <div className="mt-1 text-sm font-medium text-slate-900">
-                      {modal.booking.workWindow?.nextCheckInDate
-                        ? formatDateAndTime(
-                            modal.booking.workWindow.nextCheckInDate,
-                            modal.booking.workWindow.nextCheckInTime,
-                            locale,
-                            texts.common.notAvailable
-                          )
-                        : texts.list.noNextBooking}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-3 rounded-2xl bg-white p-3">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    {texts.list.windowLabel}
-                  </div>
-                  <div className="mt-1 text-sm font-medium text-slate-900">
-                    {getWindowRangeLabel(modal.booking, locale, texts)}
-                  </div>
-                </div>
+            <aside className="min-w-0 bg-slate-50/60">
+              <div className="border-b border-slate-200 p-5">
+                <h3 className="text-lg font-semibold text-slate-950">{texts.selectedBooking}</h3>
+                <p className="mt-1 text-sm text-slate-500">{texts.bookingOnlyHint}</p>
               </div>
 
-              <div className="grid gap-4 md:grid-cols-2">
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                    {texts.modal.taskType}
-                  </label>
-                  <select
-                    className="w-full rounded-2xl border border-slate-200 px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-slate-400"
-                    value={taskType}
-                    onChange={(e) => setTaskType(e.target.value)}
-                  >
-                    <option value="cleaning">{texts.modal.taskTypes.cleaning}</option>
-                    <option value="inspection">{texts.modal.taskTypes.inspection}</option>
-                    <option value="maintenance">{texts.modal.taskTypes.maintenance}</option>
-                    <option value="custom">{texts.modal.taskTypes.custom}</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                    {texts.modal.priority}
-                  </label>
-                  <select
-                    className="w-full rounded-2xl border border-slate-200 px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-slate-400"
-                    value={priority}
-                    onChange={(e) => setPriority(e.target.value)}
-                  >
-                    <option value="low">{texts.modal.priorities.low}</option>
-                    <option value="normal">{texts.modal.priorities.normal}</option>
-                    <option value="high">{texts.modal.priorities.high}</option>
-                    <option value="urgent">{texts.modal.priorities.urgent}</option>
-                  </select>
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                    {texts.modal.titleLabel}
-                  </label>
-                  <input
-                    className="w-full rounded-2xl border border-slate-200 px-4 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400"
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    placeholder={texts.modal.titlePlaceholder}
-                  />
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                    {texts.modal.descriptionLabel}
-                  </label>
-                  <textarea
-                    className="min-h-[110px] w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400"
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    placeholder={texts.modal.descriptionPlaceholder}
-                  />
-                </div>
-
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                    {texts.modal.scheduledDate}
-                  </label>
-                  <input
-                    type="date"
-                    className="w-full rounded-2xl border border-slate-200 px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-slate-400"
-                    value={scheduledDate}
-                    onChange={(e) => setScheduledDate(e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                    {texts.modal.dueDate}
-                  </label>
-                  <input
-                    type="date"
-                    className="w-full rounded-2xl border border-slate-200 px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-slate-400"
-                    value={dueDate}
-                    onChange={(e) => setDueDate(e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                    {texts.modal.scheduledStartTime}
-                  </label>
-                  <input
-                    type="time"
-                    className="w-full rounded-2xl border border-slate-200 px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-slate-400"
-                    value={scheduledStartTime}
-                    onChange={(e) => setScheduledStartTime(e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                    {texts.modal.scheduledEndTime}
-                  </label>
-                  <input
-                    type="time"
-                    className="w-full rounded-2xl border border-slate-200 px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-slate-400"
-                    value={scheduledEndTime}
-                    onChange={(e) => setScheduledEndTime(e.target.value)}
-                  />
-                </div>
-
-                <TaskAlertPanel
-                  className="md:col-span-2"
-                  title={texts.modal.alertTitle}
-                  description={texts.modal.alertDescription}
-                  enabledLabel={texts.modal.alertEnabled}
-                  timeLabel={texts.modal.alertAt}
-                  enabled={alertEnabled}
-                  value={alertAt}
-                  onEnabledChange={setAlertEnabled}
-                  onValueChange={setAlertAt}
-                />
-
-                <TaskChecklistPanel
-                  className="md:col-span-2"
-                  title={texts.modal.checklistsTitle}
-                  options={[
-                    {
-                      label: texts.modal.sendCleaningChecklist,
-                      checked: sendCleaningChecklist,
-                      onChange: setSendCleaningChecklist,
-                    },
-                    {
-                      label: texts.modal.sendSuppliesChecklist,
-                      checked: sendSuppliesChecklist,
-                      onChange: setSendSuppliesChecklist,
-                    },
-                  ]}
-                />
-
-                <div className="md:col-span-2">
-                  <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                    {texts.common.internalNotes}
-                  </label>
-                  <textarea
-                    className="min-h-[100px] w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400"
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    placeholder={texts.modal.notesPlaceholder}
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-2 border-t border-slate-200 p-5">
-              <button
-                type="button"
-                onClick={closeCreateTaskModal}
-                className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-              >
-                {texts.common.cancel}
-              </button>
-
-              <button
-                type="button"
-                onClick={handleCreateTask}
-                disabled={submittingTask}
-                className="inline-flex items-center rounded-2xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-              >
-                {submittingTask ? texts.common.creating : texts.common.createTask}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {mappingModal.open && mappingModal.booking && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4">
-          <div className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-3xl border border-slate-200 bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-200 p-5">
-              <div>
-                <h3 className="text-lg font-semibold text-slate-950">
-                  {language === "en"
-                    ? "Property mapping"
-                    : "Αντιστοίχιση ακινήτου"}
-                </h3>
-                <p className="mt-1 text-sm text-slate-600">
-                  {mappingModal.booking.externalListingName ||
-                    mappingModal.booking.externalListingId ||
-                    mappingModal.booking.externalBookingId}
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={closeMappingModal}
-                className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-              >
-                {texts.common.close}
-              </button>
-            </div>
-
-            <div className="space-y-6 p-5">
-              <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="rounded-2xl bg-white p-3">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      {language === "en" ? "Listing" : "Listing"}
-                    </div>
-                    <div className="mt-1 text-sm font-medium text-slate-900">
-                      {mappingModal.booking.externalListingName ||
-                        mappingModal.booking.externalListingId ||
-                        "-"}
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl bg-white p-3">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      {texts.labels.checkOut}
-                    </div>
-                    <div className="mt-1 text-sm font-medium text-slate-900">
-                      {formatDateAndTime(
-                        mappingModal.booking.checkOutDate,
-                        mappingModal.booking.checkOutTime,
-                        locale,
-                        texts.common.notAvailable
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl bg-white p-3 md:col-span-2">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      {language === "en"
-                        ? "Imported platform property"
-                        : "Εισαγόμενο ακίνητο πλατφόρμας"}
-                    </div>
-                    <div className="mt-1 text-sm font-medium text-slate-900">
-                      {getExternalPropertyDisplay(mappingModal.booking) ||
-                        texts.common.notAvailable}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => setMappingMode("existing")}
-                  className={
-                    mappingMode === "existing"
-                      ? "rounded-2xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white"
-                      : "rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700"
-                  }
-                >
-                  {language === "en"
-                    ? "Match existing property"
-                    : "Αντιστοίχιση με υπάρχον ακίνητο"}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setMappingMode("new")}
-                  className={
-                    mappingMode === "new"
-                      ? "rounded-2xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white"
-                      : "rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700"
-                  }
-                >
-                  {language === "en"
-                    ? "Create new property"
-                    : "Δημιουργία νέου ακινήτου"}
-                </button>
-              </div>
-
-              {mappingMode === "existing" ? (
-                <div className="space-y-4">
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                      {language === "en"
-                        ? "Search property"
-                        : "Αναζήτηση ακινήτου"}
-                    </label>
-                    <input
-                      className="w-full rounded-2xl border border-slate-200 px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-slate-400"
-                      value={propertySearch}
-                      onChange={(e) => setPropertySearch(e.target.value)}
-                      placeholder={
-                        language === "en"
-                          ? "Search by code, name, address..."
-                          : "Αναζήτηση με κωδικό, όνομα, διεύθυνση..."
-                      }
-                    />
-                  </div>
-
-                  <div className="max-h-[320px] space-y-3 overflow-y-auto">
-                    {filteredPropertyOptions.length === 0 ? (
-                      <div className="rounded-2xl border border-dashed border-slate-300 p-4 text-sm text-slate-500">
-                        {language === "en"
-                          ? "No properties found."
-                          : "Δεν βρέθηκαν ακίνητα."}
-                      </div>
-                    ) : (
-                      filteredPropertyOptions.map((property) => {
-                        const isSelected = selectedPropertyId === property.id
-
-                        return (
-                          <button
-                            key={property.id}
-                            type="button"
-                            onClick={() => setSelectedPropertyId(property.id)}
-                            className={
-                              isSelected
-                                ? "w-full rounded-2xl border border-slate-950 bg-slate-950 p-4 text-left text-white"
-                                : "w-full rounded-2xl border border-slate-200 bg-white p-4 text-left hover:bg-slate-50"
-                            }
-                          >
-                            <div className="font-semibold">
-                              {property.code} · {property.name}
-                            </div>
-                            <div className="mt-1 text-sm opacity-90">
-                              {[property.address, property.city, property.region]
-                                .filter(Boolean)
-                                .join(" · ") || "-"}
-                            </div>
-                          </button>
-                        )
-                      })
-                    )}
-                  </div>
-                </div>
+              {!selectedBooking ? (
+                <div className="p-5 text-sm text-slate-500">{texts.noSelection}</div>
               ) : (
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="md:col-span-2 rounded-3xl border border-amber-200 bg-amber-50 p-4">
-                    <div className="text-sm font-semibold text-amber-900">
-                      {language === "en"
-                        ? "The form is already prefilled with the imported property data from the platform."
-                        : "Η φόρμα είναι ήδη προσυμπληρωμένη με τα εισαγόμενα στοιχεία ακινήτου από την πλατφόρμα."}
+                <div className="space-y-4 p-5">
+                  <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
+                        {normalizePlatformLabel(selectedBooking.sourcePlatform, language)}
+                      </span>
+                      <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${badgeClasses({
+                        cancelled: isCancelled(selectedBooking.status),
+                        unmapped: selectedBooking.needsMapping,
+                      })}`}>
+                        {isCancelled(selectedBooking.status)
+                          ? texts.cancelledLabel
+                          : selectedBooking.needsMapping
+                            ? texts.needsMapping
+                            : texts.active}
+                      </span>
                     </div>
-                    <div className="mt-1 text-sm text-amber-800">
-                      {language === "en"
-                        ? "Adjust anything you want before creating the new property."
-                        : "Προσάρμοσε ό,τι θέλεις πριν δημιουργήσεις το νέο ακίνητο."}
+
+                    <h4 className="mt-4 text-xl font-semibold text-slate-950">
+                      {bookingTitle(selectedBooking, texts.noProperty)}
+                    </h4>
+                    <p className="mt-2 text-sm text-slate-500">{bookingAddress(selectedBooking, "—")}</p>
+
+                    <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                        <div className="text-xs text-slate-500">{texts.bookingCode}</div>
+                        <div className="mt-1 text-sm font-semibold text-slate-950">
+                          {selectedBooking.externalBookingId}
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                        <div className="text-xs text-slate-500">{texts.guest}</div>
+                        <div className="mt-1 text-sm font-semibold text-slate-950">
+                          {selectedBooking.guestName || "—"}
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                        <div className="text-xs text-slate-500">{texts.checkIn}</div>
+                        <div className="mt-1 text-sm font-semibold text-slate-950">
+                          {formatDateTime(selectedBooking.checkInDate, texts.locale)}
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                        <div className="text-xs text-slate-500">{texts.checkOut}</div>
+                        <div className="mt-1 text-sm font-semibold text-slate-950">
+                          {formatDateTime(selectedBooking.checkOutDate, texts.locale)}
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 sm:col-span-2">
+                        <div className="text-xs text-slate-500">{texts.importedListing}</div>
+                        <div className="mt-1 text-sm font-semibold text-slate-950">
+                          {selectedBooking.externalListingName || selectedBooking.externalListingId || "—"}
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 sm:col-span-2">
+                        <div className="text-xs text-slate-500">{texts.property}</div>
+                        <div className="mt-1 text-sm font-semibold text-slate-950">
+                          {selectedBooking.property?.name
+                            ? `${selectedBooking.property.code ? `${selectedBooking.property.code} · ` : ""}${selectedBooking.property.name}`
+                            : texts.noProperty}
+                        </div>
+                      </div>
+
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 sm:col-span-2">
+                        <div className="text-xs text-slate-500">{texts.syncStatus}</div>
+                        <div className="mt-1 text-sm font-semibold text-slate-950">{selectedBooking.syncStatus}</div>
+                      </div>
+
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 sm:col-span-2">
+                        <div className="text-xs text-slate-500">{texts.importedAt}</div>
+                        <div className="mt-1 text-sm font-semibold text-slate-950">
+                          {formatDateTime(selectedBooking.importedAt, texts.locale)}
+                        </div>
+                      </div>
                     </div>
-                  </div>
 
-                  <div className="md:col-span-2">
-                    <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                      {language === "en"
-                        ? "Property name"
-                        : "Όνομα ακινήτου"}
-                    </label>
-                    <input
-                      className="w-full rounded-2xl border border-slate-200 px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-slate-400"
-                      value={newPropertyName}
-                      onChange={(e) => setNewPropertyName(e.target.value)}
-                    />
-                  </div>
+                    {selectedBooking.lastError ? (
+                      <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 p-4">
+                        <div className="text-xs font-medium uppercase tracking-wide text-rose-700">
+                          {texts.lastError}
+                        </div>
+                        <div className="mt-2 text-sm text-rose-700">{selectedBooking.lastError}</div>
+                      </div>
+                    ) : null}
 
-                  <div className="md:col-span-2">
-                    <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                      {language === "en" ? "Address" : "Διεύθυνση"}
-                    </label>
-                    <input
-                      className="w-full rounded-2xl border border-slate-200 px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-slate-400"
-                      value={newPropertyAddress}
-                      onChange={(e) => setNewPropertyAddress(e.target.value)}
-                    />
-                  </div>
+                    {selectedBooking.notes ? (
+                      <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                          {texts.notes}
+                        </div>
+                        <div className="mt-2 text-sm text-slate-700">{selectedBooking.notes}</div>
+                      </div>
+                    ) : null}
 
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                      {language === "en" ? "City" : "Πόλη"}
-                    </label>
-                    <input
-                      className="w-full rounded-2xl border border-slate-200 px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-slate-400"
-                      value={newPropertyCity}
-                      onChange={(e) => setNewPropertyCity(e.target.value)}
-                    />
-                  </div>
+                    <div className="mt-5 flex flex-wrap gap-3">
+                      <Link
+                        href={`/bookings/${selectedBooking.id}`}
+                        className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
+                      >
+                        {texts.openBooking}
+                      </Link>
 
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                      {language === "en" ? "Region" : "Περιοχή"}
-                    </label>
-                    <input
-                      className="w-full rounded-2xl border border-slate-200 px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-slate-400"
-                      value={newPropertyRegion}
-                      onChange={(e) => setNewPropertyRegion(e.target.value)}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                      {language === "en"
-                        ? "Postal code"
-                        : "Ταχυδρομικός κώδικας"}
-                    </label>
-                    <input
-                      className="w-full rounded-2xl border border-slate-200 px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-slate-400"
-                      value={newPropertyPostalCode}
-                      onChange={(e) => setNewPropertyPostalCode(e.target.value)}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                      {language === "en" ? "Country" : "Χώρα"}
-                    </label>
-                    <input
-                      className="w-full rounded-2xl border border-slate-200 px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-slate-400"
-                      value={newPropertyCountry}
-                      onChange={(e) => setNewPropertyCountry(e.target.value)}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                      {language === "en" ? "Type" : "Τύπος"}
-                    </label>
-                    <select
-                      className="w-full rounded-2xl border border-slate-200 px-4 py-2.5 text-sm text-slate-900 outline-none transition focus:border-slate-400"
-                      value={newPropertyType}
-                      onChange={(e) => setNewPropertyType(e.target.value)}
-                    >
-                      <option value="apartment">
-                        {language === "en" ? "Apartment" : "Διαμέρισμα"}
-                      </option>
-                      <option value="house">
-                        {language === "en" ? "House" : "Κατοικία"}
-                      </option>
-                      <option value="villa">
-                        {language === "en" ? "Villa" : "Βίλα"}
-                      </option>
-                      <option value="studio">
-                        {language === "en" ? "Studio" : "Στούντιο"}
-                      </option>
-                      <option value="other">
-                        {language === "en" ? "Other" : "Άλλο"}
-                      </option>
-                    </select>
+                      {selectedBooking.property?.id ? (
+                        <Link
+                          href={`/properties/${selectedBooking.property.id}`}
+                          className="inline-flex items-center rounded-2xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800"
+                        >
+                          {texts.openProperty}
+                        </Link>
+                      ) : (
+                        <Link
+                          href="/bookings/platforms"
+                          className="inline-flex items-center rounded-2xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800"
+                        >
+                          {texts.openConnections}
+                        </Link>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
-            </div>
-
-            <div className="flex items-center justify-end gap-2 border-t border-slate-200 p-5">
-              <button
-                type="button"
-                onClick={closeMappingModal}
-                className="inline-flex items-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-              >
-                {texts.common.cancel}
-              </button>
-
-              <button
-                type="button"
-                onClick={handleConfirmMapping}
-                disabled={submittingMapping}
-                className="inline-flex items-center rounded-2xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-              >
-                {submittingMapping
-                  ? language === "en"
-                    ? "Saving..."
-                    : "Αποθήκευση..."
-                  : language === "en"
-                    ? "Confirm"
-                    : "Επιβεβαίωση"}
-              </button>
-            </div>
+            </aside>
           </div>
-        </div>
-      )}
+        )}
+      </section>
     </div>
   )
 }
-
-
-
