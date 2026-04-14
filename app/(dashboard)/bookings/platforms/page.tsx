@@ -39,14 +39,14 @@ function normalizePlatformLabel(value: string, language: "el" | "en") {
   if (normalized === "booking") return "Booking.com"
   if (normalized === "airbnb") return "Airbnb"
   if (normalized === "vrbo") return "Vrbo"
-  if (normalized === "direct") return language === "en" ? "Direct" : "╬Η╬╝╬╡╧Δ╬╖"
+  if (normalized === "direct") return language === "en" ? "Direct" : "Άμεση"
   return value || "-"
 }
 
 function formatDateTime(value: string | null | undefined, locale: string) {
-  if (!value) return "έΑΦ"
+  if (!value) return "—"
   const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return "έΑΦ"
+  if (Number.isNaN(date.getTime())) return "—"
 
   return new Intl.DateTimeFormat(locale, {
     day: "2-digit",
@@ -110,50 +110,50 @@ function getTexts(language: "el" | "en") {
 
   return {
     locale: "el-GR",
-    title: "╬μ╧Ζ╬╜╬┤╬φ╧Δ╬╡╬╣╧Γ ╧Α╬╗╬▒╧Ε╧Η╬┐╧Β╬╝╧Ο╬╜ ╬║╬▒╬╣ ╬╡╬╣╧Δ╬▒╬│╧Ν╬╝╬╡╬╜╬▒ listings",
+    title: "Συνδέσεις πλατφορμών και εισαγόμενα listings",
     subtitle:
-      "╬Ω ╧Δ╬╡╬╗╬ψ╬┤╬▒ ╬╝╬φ╬╜╬╡╬╣ ╬▒╧Α╬┐╬║╬╗╬╡╬╣╧Δ╧Ε╬╣╬║╬υ ╧Δ╧Ε╬╖ ╧Β╬┐╬χ ╬║╧Β╬▒╧Ε╬χ╧Δ╬╡╧Κ╬╜. ╬Φ╬╡╬ψ╧Θ╬╜╬╡╬╣ ╧Ε╬▒ ╬╡╬╣╧Δ╬▒╬│╧Ν╬╝╬╡╬╜╬▒ listings ╬▒╧Α╧Ν ╧Α╬╗╬▒╧Ε╧Η╧Ν╧Β╬╝╬╡╧Γ, ╧Ε╬╖╬╜ ╬▒╧Ζ╧Ε╧Ν╬╝╬▒╧Ε╬╖ ╬┤╬╖╬╝╬╣╬┐╧Ζ╧Β╬│╬ψ╬▒ ╬▒╬║╬╣╬╜╬χ╧Ε╧Κ╬╜ ╬║╬▒╬╣ ╧Ε╬╖╬╜ ╬▒╬╜╧Ε╬╣╧Δ╧Ε╬┐╬ψ╧Θ╬╣╧Δ╬╖ listing έΗΤ ╬▒╬║╬ψ╬╜╬╖╧Ε╬┐ ╧Θ╧Κ╧Β╬ψ╧Γ ╬╜╬▒ ╬╝╧Α╬╗╬φ╬║╬╡╬╣ ╬╡╬┤╧Ο ╬╖ ╬╡╬║╧Ε╬φ╬╗╬╡╧Δ╬╖ ╬╡╧Β╬│╬▒╧Δ╬╣╧Ο╬╜.",
-    backToBookings: "╬Χ╧Α╬╣╧Δ╧Ε╧Β╬┐╧Η╬χ ╧Δ╧Ε╬╣╧Γ ╬║╧Β╬▒╧Ε╬χ╧Δ╬╡╬╣╧Γ",
-    autoCreate: "╬Σ╧Ζ╧Ε╧Ν╬╝╬▒╧Ε╬╖ ╬┤╬╖╬╝╬╣╬┐╧Ζ╧Β╬│╬ψ╬▒ ╬▒╬║╬╣╬╜╬χ╧Ε╧Κ╬╜ ╧Α╬┐╧Ζ ╬╗╬╡╬ψ╧Α╬┐╧Ζ╬╜",
+      "Η σελίδα μένει αποκλειστικά στη ροή κρατήσεων. Δείχνει τα εισαγόμενα listings από πλατφόρμες, την αυτόματη δημιουργία ακινήτων και την αντιστοίχιση listing → ακίνητο χωρίς να μπλέκει εδώ η εκτέλεση εργασιών.",
+    backToBookings: "Επιστροφή στις κρατήσεις",
+    autoCreate: "Αυτόματη δημιουργία ακινήτων που λείπουν",
     autoCreateHelp:
-      "╬Φ╬╖╬╝╬╣╬┐╧Ζ╧Β╬│╬╡╬ψ ╬▒╧Ζ╧Ε╧Ν╬╝╬▒╧Ε╬▒ ╬║╬▒╬╜╬┐╬╜╬╣╬║╬υ ╬▒╬║╬ψ╬╜╬╖╧Ε╬▒ OPS ╬│╬╣╬▒ ╬║╬υ╬╕╬╡ ╬╡╬╣╧Δ╬▒╬│╧Ν╬╝╬╡╬╜╬┐ listing ╧Α╬┐╧Ζ ╬┤╬╡╬╜ ╬φ╧Θ╬╡╬╣ ╬▒╬║╧Ν╬╝╬╖ ╬▒╬╜╧Ε╬╣╧Δ╧Ε╬┐╬ψ╧Θ╬╣╧Δ╬╖. ╬Ω ╬╡╧Α╬╡╬╛╬╡╧Β╬│╬▒╧Δ╬ψ╬▒ ╬▒╬║╬╣╬╜╬χ╧Ε╬┐╧Ζ ╧Δ╧Ζ╬╜╬╡╧Θ╬ψ╬╢╬╡╬╣ ╬╝╧Ν╬╜╬┐ ╬╝╬φ╧Δ╬▒ ╬▒╧Α╧Ν ╧Ε╬╖ ╧Δ╬╡╬╗╬ψ╬┤╬▒ ╬▒╬║╬╣╬╜╬χ╧Ε╬┐╧Ζ.",
-    loading: "╬ο╧Ν╧Β╧Ε╧Κ╧Δ╬╖ imported listings ╧Α╬╗╬▒╧Ε╧Η╬┐╧Β╬╝╧Ο╬╜...",
-    loadError: "╬Σ╧Α╬┐╧Ε╧Ζ╧Θ╬ψ╬▒ ╧Η╧Ν╧Β╧Ε╧Κ╧Δ╬╖╧Γ ╧Α╬╗╬▒╧Ε╧Η╬┐╧Β╬╝╧Ο╬╜ ╬║╬▒╬╣ imported listings.",
-    actionError: "╬Σ╧Α╬┐╧Ε╧Ζ╧Θ╬ψ╬▒ ╬╡╬║╧Ε╬φ╬╗╬╡╧Δ╬╖╧Γ ╬╡╬╜╬φ╧Β╬│╬╡╬╣╬▒╧Γ.",
-    actionSuccessAuto: "╬Ω ╬▒╧Ζ╧Ε╧Ν╬╝╬▒╧Ε╬╖ ╬┤╬╖╬╝╬╣╬┐╧Ζ╧Β╬│╬ψ╬▒ ╬▒╬║╬╣╬╜╬χ╧Ε╧Κ╬╜ ╬┐╬╗╬┐╬║╬╗╬╖╧Β╧Ο╬╕╬╖╬║╬╡ ╬╡╧Α╬╣╧Ε╧Ζ╧Θ╧Ο╧Γ.",
-    actionSuccessSingle: "╬ν╬┐ ╬▒╬║╬ψ╬╜╬╖╧Ε╬┐ ╬┤╬╖╬╝╬╣╬┐╧Ζ╧Β╬│╬χ╬╕╬╖╬║╬╡ ╬║╬▒╬╣ ╧Δ╧Ζ╬╜╬┤╬φ╬╕╬╖╬║╬╡ ╬╡╧Α╬╣╧Ε╧Ζ╧Θ╧Ο╧Γ.",
-    searchPlaceholder: "╬Σ╬╜╬▒╬╢╬χ╧Ε╬╖╧Δ╬╖ ╬▒╬╜╬υ ╧Α╬╗╬▒╧Ε╧Η╧Ν╧Β╬╝╬▒, listing ╬χ ╬▒╬║╬ψ╬╜╬╖╧Ε╬┐...",
+      "Δημιουργεί αυτόματα κανονικά ακίνητα OPS για κάθε εισαγόμενο listing που δεν έχει ακόμη αντιστοίχιση. Η επεξεργασία ακινήτου συνεχίζει μόνο μέσα από τη σελίδα ακινήτου.",
+    loading: "Φόρτωση imported listings πλατφορμών...",
+    loadError: "Αποτυχία φόρτωσης πλατφορμών και imported listings.",
+    actionError: "Αποτυχία εκτέλεσης ενέργειας.",
+    actionSuccessAuto: "Η αυτόματη δημιουργία ακινήτων ολοκληρώθηκε επιτυχώς.",
+    actionSuccessSingle: "Το ακίνητο δημιουργήθηκε και συνδέθηκε επιτυχώς.",
+    searchPlaceholder: "Αναζήτηση ανά πλατφόρμα, listing ή ακίνητο...",
     searchHelp:
-      "╬Σ╬╜╬▒╬╢╬χ╧Ε╬╖╧Δ╬╖ ╧Δ╧Ε╬▒ imported listings ╬╝╬╡ ╬▓╬υ╧Δ╬╖ ╧Α╬╗╬▒╧Ε╧Η╧Ν╧Β╬╝╬▒, ╬╡╬╛╧Κ╧Ε╬╡╧Β╬╣╬║╧Ν listing id, ╧Ν╬╜╬┐╬╝╬▒ listing ╬χ ╧Δ╧Ζ╬╜╬┤╬╡╬┤╬╡╬╝╬φ╬╜╬┐ ╬▒╬║╬ψ╬╜╬╖╧Ε╬┐.",
-    allPlatforms: "╬Ν╬╗╬╡╧Γ ╬┐╬╣ ╧Α╬╗╬▒╧Ε╧Η╧Ν╧Β╬╝╬╡╧Γ",
-    importedListings: "╬Χ╬╣╧Δ╬▒╬│╧Ν╬╝╬╡╬╜╬▒ listings",
+      "Αναζήτηση στα imported listings με βάση πλατφόρμα, εξωτερικό listing id, όνομα listing ή συνδεδεμένο ακίνητο.",
+    allPlatforms: "Όλες οι πλατφόρμες",
+    importedListings: "Εισαγόμενα listings",
     importedListingsHelp:
-      "╬γ╬υ╬╕╬╡ ╬│╧Β╬▒╬╝╬╝╬χ ╬╡╬ψ╬╜╬▒╬╣ ╬╝╬ψ╬▒ ╧Ε╬▒╧Ζ╧Ε╧Ν╧Ε╬╖╧Ε╬▒ listing ╧Α╬╗╬▒╧Ε╧Η╧Ν╧Β╬╝╬▒╧Γ ╧Α╬┐╧Ζ ╧Α╧Β╬┐╬║╧Ξ╧Α╧Ε╬╡╬╣ ╬▒╧Α╧Ν ╬╡╬╣╧Δ╬▒╬│╧Ν╬╝╬╡╬╜╬╡╧Γ ╬║╧Β╬▒╧Ε╬χ╧Δ╬╡╬╣╧Γ. ╬Φ╬╡╬╜ ╬╡╬ψ╬╜╬▒╬╣ ╬╡╧Β╬│╬▒╧Δ╬ψ╬▒ ╬║╬▒╬╣ ╧Α╧Β╬φ╧Α╬╡╬╣ ╬╜╬▒ ╧Δ╧Ζ╬╜╬┤╬φ╬╡╧Ε╬▒╬╣ ╬╝╬╡ ╬φ╬╜╬▒ ╬▒╬║╬ψ╬╜╬╖╧Ε╬┐ OPS.",
-    mapped: "╬Σ╬╜╧Ε╬╣╧Δ╧Ε╬┐╬╣╧Θ╬╣╧Δ╬╝╬φ╬╜╬▒",
-    unmapped: "╬π╧Κ╧Β╬ψ╧Γ ╬▒╬╜╧Ε╬╣╧Δ╧Ε╬┐╬ψ╧Θ╬╣╧Δ╬╖",
-    totalBookings: "╬Χ╬╣╧Δ╬▒╬│╧Ν╬╝╬╡╬╜╬╡╧Γ ╬║╧Β╬▒╧Ε╬χ╧Δ╬╡╬╣╧Γ",
-    empty: "╬Φ╬╡╬╜ ╬▓╧Β╬φ╬╕╬╖╬║╬▒╬╜ imported listings ╧Α╬╗╬▒╧Ε╧Η╬┐╧Β╬╝╧Ο╬╜.",
-    linkedProperty: "╬μ╧Ζ╬╜╬┤╬╡╬┤╬╡╬╝╬φ╬╜╬┐ ╬▒╬║╬ψ╬╜╬╖╧Ε╬┐",
-    createProperty: "╬Φ╬╖╬╝╬╣╬┐╧Ζ╧Β╬│╬ψ╬▒ ╬▒╬║╬╣╬╜╬χ╧Ε╬┐╧Ζ",
+      "Κάθε γραμμή είναι μία ταυτότητα listing πλατφόρμας που προκύπτει από εισαγόμενες κρατήσεις. Δεν είναι εργασία και πρέπει να συνδέεται με ένα ακίνητο OPS.",
+    mapped: "Αντιστοιχισμένα",
+    unmapped: "Χωρίς αντιστοίχιση",
+    totalBookings: "Εισαγόμενες κρατήσεις",
+    empty: "Δεν βρέθηκαν imported listings πλατφορμών.",
+    linkedProperty: "Συνδεδεμένο ακίνητο",
+    createProperty: "Δημιουργία ακινήτου",
     createPropertyHelp:
-      "╬Φ╬╖╬╝╬╣╬┐╧Ζ╧Β╬│╬╡╬ψ ╬║╬▒╬╜╬┐╬╜╬╣╬║╧Ν ╬▒╬║╬ψ╬╜╬╖╧Ε╬┐ OPS ╬▒╧Α╧Ν ╬▒╧Ζ╧Ε╧Ν ╧Ε╬┐ imported listing ╬║╬▒╬╣ ╧Δ╧Ζ╬╜╬┤╬φ╬╡╬╣ ╬υ╬╝╬╡╧Δ╬▒ ╧Δ╬╡ ╬▒╧Ζ╧Ε╧Ν ╧Ε╬╣╧Γ ╧Ζ╧Α╬υ╧Β╧Θ╬┐╧Ζ╧Δ╬╡╧Γ ╬║╬▒╬╣ ╬╝╬╡╬╗╬╗╬┐╬╜╧Ε╬╣╬║╬φ╧Γ ╬║╧Β╬▒╧Ε╬χ╧Δ╬╡╬╣╧Γ.",
-    openProperty: "╬Η╬╜╬┐╬╣╬│╬╝╬▒ ╬▒╬║╬╣╬╜╬χ╧Ε╬┐╧Ζ",
-    openBookingPage: "╬Η╬╜╬┐╬╣╬│╬╝╬▒ ╬║╧Β╬▒╧Ε╬χ╧Δ╬╡╧Κ╬╜",
+      "Δημιουργεί κανονικό ακίνητο OPS από αυτό το imported listing και συνδέει άμεσα σε αυτό τις υπάρχουσες και μελλοντικές κρατήσεις.",
+    openProperty: "Άνοιγμα ακινήτου",
+    openBookingPage: "Άνοιγμα κρατήσεων",
     propertyAutoText:
-      "╬ν╬▒ ╬▒╬║╬ψ╬╜╬╖╧Ε╬▒ ╧Α╬┐╧Ζ ╬┤╬╖╬╝╬╣╬┐╧Ζ╧Β╬│╬┐╧Ξ╬╜╧Ε╬▒╬╣ ╬▒╧Ζ╧Ε╧Ν╬╝╬▒╧Ε╬▒ ╬│╬ψ╬╜╬┐╬╜╧Ε╬▒╬╣ ╬║╬▒╬╜╬┐╬╜╬╣╬║╬υ ╬▒╬║╬ψ╬╜╬╖╧Ε╬▒ ╧Ε╬┐╧Ζ ╧Δ╧Ζ╧Δ╧Ε╬χ╬╝╬▒╧Ε╬┐╧Γ ╬║╬▒╬╣ ╬╝╬╡╧Ε╬υ ╬╡╧Α╬╡╬╛╬╡╧Β╬│╬υ╬╢╬┐╬╜╧Ε╬▒╬╣ ╬╝╧Ν╬╜╬┐ ╬▒╧Α╧Ν ╧Ε╬╖ ╧Δ╬╡╬╗╬ψ╬┤╬▒ ╬▒╬║╬╣╬╜╬χ╧Ε╬┐╧Ζ.",
-    listingIdentity: "╬ν╬▒╧Ζ╧Ε╧Ν╧Ε╬╖╧Ε╬▒ listing",
+      "Τα ακίνητα που δημιουργούνται αυτόματα γίνονται κανονικά ακίνητα του συστήματος και μετά επεξεργάζονται μόνο από τη σελίδα ακινήτου.",
+    listingIdentity: "Ταυτότητα listing",
     listingIdentityHelp:
-      "╬Ω ╬╡╬╛╧Κ╧Ε╬╡╧Β╬╣╬║╬χ ╧Ε╬▒╧Ζ╧Ε╧Ν╧Ε╬╖╧Ε╬▒ ╬φ╧Β╧Θ╬╡╧Ε╬▒╬╣ ╬▒╧Α╧Ν ╧Ε╬╖╬╜ ╧Α╬╗╬▒╧Ε╧Η╧Ν╧Β╬╝╬▒ ╬║╧Β╬▒╧Ε╬χ╧Δ╬╡╧Κ╬╜ ╬║╬▒╬╣ ╧Θ╧Β╬╖╧Δ╬╣╬╝╬┐╧Α╬┐╬╣╬╡╬ψ╧Ε╬▒╬╣ ╬│╬╣╬▒ ╧Δ╧Ε╬▒╬╕╬╡╧Β╬χ ╬▒╬╜╧Ε╬╣╧Δ╧Ε╬┐╬ψ╧Θ╬╣╧Δ╬╖ ╧Δ╬╡ ╬φ╬╜╬▒ ╬▒╬║╬ψ╬╜╬╖╧Ε╬┐.",
-    latestImport: "╬ν╬╡╬╗╬╡╧Ζ╧Ε╬▒╬ψ╬▒ ╬╡╬╣╧Δ╬▒╬│╧Κ╬│╬χ",
-    syncStatus: "╬γ╬▒╧Ε╬▒╧Δ╧Ε╬υ╧Δ╬╡╬╣╧Γ ╧Δ╧Ζ╬│╧Θ╧Β╬┐╬╜╬╣╧Δ╬╝╬┐╧Ξ",
-    bookingCount: "╬γ╧Β╬▒╧Ε╬χ╧Δ╬╡╬╣╧Γ",
-    activeBookingCount: "╬Χ╬╜╬╡╧Β╬│╬φ╧Γ ╬║╧Β╬▒╧Ε╬χ╧Δ╬╡╬╣╧Γ",
-    noListingId: "╬π╧Κ╧Β╬ψ╧Γ ╬╡╬╛╧Κ╧Ε╬╡╧Β╬╣╬║╧Ν listing id",
-    mappingNeeded: "╬π╧Β╬╡╬╣╬υ╬╢╬╡╧Ε╬▒╬╣ ╬▒╬╜╧Ε╬╣╧Δ╧Ε╬┐╬ψ╧Θ╬╣╧Δ╬╖",
-    alreadyMapped: "╬Κ╬┤╬╖ ╧Δ╧Ζ╬╜╬┤╬╡╬┤╬╡╬╝╬φ╬╜╬┐",
-    importedAddress: "╬Χ╬╣╧Δ╬▒╬│╧Ν╬╝╬╡╬╜╬╖ ╬┤╬╣╬╡╧Ξ╬╕╧Ζ╬╜╧Δ╬╖",
+      "Η εξωτερική ταυτότητα έρχεται από την πλατφόρμα κρατήσεων και χρησιμοποιείται για σταθερή αντιστοίχιση σε ένα ακίνητο.",
+    latestImport: "Τελευταία εισαγωγή",
+    syncStatus: "Καταστάσεις συγχρονισμού",
+    bookingCount: "Κρατήσεις",
+    activeBookingCount: "Ενεργές κρατήσεις",
+    noListingId: "Χωρίς εξωτερικό listing id",
+    mappingNeeded: "Χρειάζεται αντιστοίχιση",
+    alreadyMapped: "Ήδη συνδεδεμένο",
+    importedAddress: "Εισαγόμενη διεύθυνση",
     importedAddressHelp:
-      "╬Ω ╬╡╬╣╧Δ╬▒╬│╧Ν╬╝╬╡╬╜╬╖ ╬┤╬╣╬╡╧Ξ╬╕╧Ζ╬╜╧Δ╬╖ ╬╡╬ψ╬╜╬▒╬╣ ╬▓╬┐╬╖╬╕╬╖╧Ε╬╣╬║╬χ ╧Α╬╗╬╖╧Β╬┐╧Η╬┐╧Β╬ψ╬▒ ╧Ο╧Δ╧Ε╬╡ ╬┐ ╧Θ╧Β╬χ╧Δ╧Ε╬╖╧Γ ╬╜╬▒ ╬╡╧Α╬╣╬▓╬╡╬▓╬▒╬╣╧Ο╬╜╬╡╬╣ ╧Ν╧Ε╬╣ ╧Ε╬┐ listing ╬▒╬╜╧Ε╬╣╧Δ╧Ε╬┐╬╣╧Θ╬╡╬ψ ╧Δ╧Ε╬┐ ╧Δ╧Κ╧Δ╧Ε╧Ν ╬▒╬║╬ψ╬╜╬╖╧Ε╬┐ ╧Α╧Β╬╣╬╜ ╧Ε╬╖ ╬┤╬╖╬╝╬╣╬┐╧Ζ╧Β╬│╬ψ╬▒.",
+      "Η εισαγόμενη διεύθυνση είναι βοηθητική πληροφορία ώστε ο χρήστης να επιβεβαιώνει ότι το listing αντιστοιχεί στο σωστό ακίνητο πριν τη δημιουργία.",
   }
 }
 
@@ -308,7 +308,7 @@ export default function BookingPlatformsPage() {
     <div className="space-y-8">
       <section className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <div className="text-sm font-medium text-slate-500">OPS ┬╖ Bookings</div>
+          <div className="text-sm font-medium text-slate-500">OPS · Bookings</div>
           <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-950">
             {texts.title}
           </h1>
@@ -469,7 +469,7 @@ export default function BookingPlatformsPage() {
                               item.externalPropertyCountry,
                             ]
                               .filter(Boolean)
-                              .join(" ┬╖ ") || "έΑΦ"}
+                              .join(" · ") || "—"}
                           </div>
                         </div>
 
@@ -506,7 +506,7 @@ export default function BookingPlatformsPage() {
                                   </span>
                                 ))
                               ) : (
-                                <span className="text-sm text-slate-500">έΑΦ</span>
+                                <span className="text-sm text-slate-500">—</span>
                               )}
                             </div>
                           </div>
@@ -518,7 +518,7 @@ export default function BookingPlatformsPage() {
                           </div>
                           <div className="mt-1 text-sm text-slate-700">
                             {item.propertyId
-                              ? `${item.propertyCode ? `${item.propertyCode} ┬╖ ` : ""}${item.propertyName || "έΑΦ"}`
+                              ? `${item.propertyCode ? `${item.propertyCode} · ` : ""}${item.propertyName || "—"}`
                               : texts.mappingNeeded}
                           </div>
                         </div>

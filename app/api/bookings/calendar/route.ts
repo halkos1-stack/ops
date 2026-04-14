@@ -190,7 +190,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json(
       {
-        error: "╬Σ╧Α╬┐╧Ε╧Ζ╧Θ╬ψ╬▒ ╧Η╧Ν╧Β╧Ε╧Κ╧Δ╬╖╧Γ ╬╖╬╝╬╡╧Β╬┐╬╗╬┐╬│╬ψ╬┐╧Ζ ╬║╧Β╬▒╧Ε╬χ╧Δ╬╡╧Κ╬╜.",
+        error: "Αποτυχία φόρτωσης ημερολογίου κρατήσεων.",
       },
       { status: 500 }
     )
