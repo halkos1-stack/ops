@@ -1,17 +1,6 @@
-﻿import { NextRequest, NextResponse } from "next/server"
+import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { buildTenantWhere, requireApiAppAccess } from "@/lib/route-access"
-
-type BookingTaskRow = {
-  id: string
-  title: string
-  status: string
-  taskType: string
-  priority: string
-  scheduledDate: Date
-  scheduledStartTime: string | null
-  scheduledEndTime: string | null
-}
 
 function parseDateParam(value: string | null) {
   if (!value) return null
@@ -29,19 +18,6 @@ function endOfDay(date: Date) {
   const next = new Date(date)
   next.setHours(23, 59, 59, 999)
   return next
-}
-
-function deriveTaskStatus(tasks: BookingTaskRow[]) {
-  const firstTask = tasks[0] || null
-  if (!firstTask) return "no_task"
-
-  const normalized = String(firstTask.status || "").trim().toLowerCase()
-
-  if (normalized === "completed") return "completed"
-  if (normalized === "accepted" || normalized === "in_progress") return "assigned"
-  if (normalized === "assigned" || normalized === "pending") return "created"
-
-  return "created"
 }
 
 export async function GET(req: NextRequest) {
@@ -135,56 +111,11 @@ export async function GET(req: NextRequest) {
             nextCheckInAt: true,
           },
         },
-        tasks: {
-          select: {
-            id: true,
-            title: true,
-            status: true,
-            taskType: true,
-            priority: true,
-            scheduledDate: true,
-            scheduledStartTime: true,
-            scheduledEndTime: true,
-          },
-          orderBy: [{ scheduledDate: "desc" }, { createdAt: "desc" }],
-          take: 3,
-        },
       },
       orderBy: [{ checkInDate: "asc" }, { checkOutDate: "asc" }, { createdAt: "desc" }],
     })
 
-    return NextResponse.json(
-      bookings.map((booking) => ({
-        id: booking.id,
-        propertyId: booking.propertyId,
-        sourcePlatform: booking.sourcePlatform,
-        externalBookingId: booking.externalBookingId,
-        externalListingId: booking.externalListingId,
-        externalListingName: booking.externalListingName,
-        externalPropertyAddress: booking.externalPropertyAddress,
-        externalPropertyCity: booking.externalPropertyCity,
-        externalPropertyRegion: booking.externalPropertyRegion,
-        externalPropertyPostalCode: booking.externalPropertyPostalCode,
-        externalPropertyCountry: booking.externalPropertyCountry,
-        guestName: booking.guestName,
-        guestPhone: booking.guestPhone,
-        guestEmail: booking.guestEmail,
-        checkInDate: booking.checkInDate,
-        checkOutDate: booking.checkOutDate,
-        checkInTime: booking.checkInTime,
-        checkOutTime: booking.checkOutTime,
-        status: booking.status,
-        syncStatus: booking.syncStatus,
-        needsMapping: booking.needsMapping,
-        importedAt: booking.importedAt,
-        lastProcessedAt: booking.lastProcessedAt,
-        lastError: booking.lastError,
-        notes: booking.notes,
-        taskStatus: deriveTaskStatus(booking.tasks as BookingTaskRow[]),
-        property: booking.property,
-        tasks: booking.tasks,
-      }))
-    )
+    return NextResponse.json(bookings)
   } catch (error) {
     console.error("GET /api/bookings/calendar error:", error)
 
