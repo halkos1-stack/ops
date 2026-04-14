@@ -252,6 +252,25 @@ async function buildResponse(propertyId: string) {
   }
 }
 
+async function syncPropertySupplyTemplateSafely(input: {
+  propertyId: string
+  organizationId: string
+}) {
+  try {
+    await syncPropertySupplyTemplate(input)
+  } catch (error) {
+    console.error("Property supply template sync warning:", error)
+  }
+}
+
+async function refreshPropertyReadinessSafely(propertyId: string) {
+  try {
+    await refreshPropertyReadiness(propertyId)
+  } catch (error) {
+    console.error("Property readiness refresh warning:", error)
+  }
+}
+
 export async function GET(_request: NextRequest, context: RouteContext) {
   try {
     const access = await requireApiAppAccess()
@@ -388,11 +407,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
         })
       }
 
-      await syncPropertySupplyTemplate({
+      await syncPropertySupplyTemplateSafely({
         propertyId: property.id,
         organizationId: property.organizationId,
       })
-      await refreshPropertyReadiness(property.id)
+      await refreshPropertyReadinessSafely(property.id)
 
       const payload = await buildResponse(property.id)
       return NextResponse.json(payload)
@@ -470,11 +489,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
         })
       }
 
-      await syncPropertySupplyTemplate({
+      await syncPropertySupplyTemplateSafely({
         propertyId: property.id,
         organizationId: property.organizationId,
       })
-      await refreshPropertyReadiness(property.id)
+      await refreshPropertyReadinessSafely(property.id)
 
       const payload = await buildResponse(property.id)
       return NextResponse.json(payload)

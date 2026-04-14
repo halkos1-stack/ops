@@ -68,6 +68,8 @@ export const taskDetailsInclude = {
       sourcePlatform: true,
       checkInDate: true,
       checkOutDate: true,
+      checkInTime: true,
+      checkOutTime: true,
       status: true,
     },
   },

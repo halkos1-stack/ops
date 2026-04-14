@@ -5,6 +5,7 @@ import {
   filterCanonicalOperationalTasks,
   getOperationalTaskValidity,
 } from "@/lib/tasks/ops-task-contract";
+import { buildTaskWorkWindowMap } from "@/lib/tasks/task-work-window";
 import {
   computePropertyReadiness,
   getReadinessStatusLabel,
@@ -1125,9 +1126,20 @@ async function getFullProperty(id: string) {
 
   if (!property) return null;
 
-  const allNormalizedTasks = safeArray(property.tasks).map((task) =>
-    mapTaskForPropertyPage(task)
+  const taskWorkWindowMap = buildTaskWorkWindowMap(
+    safeArray(property.tasks),
+    safeArray(property.bookings)
   );
+
+  const allNormalizedTasks = safeArray(property.tasks).map((task) => {
+    const normalizedTask = mapTaskForPropertyPage(task);
+    const taskId = toNullableString(task.id);
+
+    return {
+      ...normalizedTask,
+      workWindow: taskId ? taskWorkWindowMap[taskId] ?? null : null,
+    };
+  });
   const normalizedTasks = filterCanonicalOperationalTasks(allNormalizedTasks);
   const invalidOperationalTasks = allNormalizedTasks.filter(
     (task) => getOperationalTaskValidity(task).isCanonicalOperational !== true
