@@ -214,6 +214,22 @@ function panelTextClass(tone: "neutral" | "success" | "warning") {
   return "mt-1 text-sm text-slate-700"
 }
 
+function getCardClasses(
+  active: boolean,
+  tone: "default" | "blue" | "red" | "amber" | "orange" | "sky"
+) {
+  if (active) {
+    if (tone === "blue") return "border-blue-500 bg-blue-50 shadow-blue-100"
+    if (tone === "red") return "border-red-500 bg-red-50 shadow-red-100"
+    if (tone === "amber") return "border-amber-500 bg-amber-50 shadow-amber-100"
+    if (tone === "orange") return "border-orange-500 bg-orange-50 shadow-orange-100"
+    if (tone === "sky") return "border-sky-500 bg-sky-50 shadow-sky-100"
+    return "border-slate-900 bg-slate-50 shadow-slate-200"
+  }
+
+  return "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
+}
+
 export default function DashboardPage() {
   const { language } = useAppLanguage()
   const texts = getTexts(language)

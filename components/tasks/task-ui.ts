@@ -138,7 +138,7 @@ function getCanonicalTaskTexts(language: CanonicalTaskCardLanguage) {
         "The partner currently responsible for the latest execution assignment of this task.",
       unassigned: "Unassigned",
       noWindow: "No booking window available",
-      openEndedWindow: "Open window",
+      openEndedWindow: "No next check-in",
     }
   }
 
@@ -154,7 +154,7 @@ function getCanonicalTaskTexts(language: CanonicalTaskCardLanguage) {
       "Ο συνεργάτης που έχει σήμερα την τελευταία ενεργή ανάθεση εκτέλεσης αυτής της εργασίας.",
     unassigned: "Χωρίς ανάθεση",
     noWindow: "Δεν υπάρχει διαθέσιμο παράθυρο",
-    openEndedWindow: "Ανοιχτό παράθυρο",
+    openEndedWindow: "Δεν υπάρχει επόμενο check-in",
   }
 }
 
