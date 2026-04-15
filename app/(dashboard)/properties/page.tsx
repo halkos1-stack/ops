@@ -16,10 +16,6 @@ import {
 } from "@/lib/i18n/normalizers"
 import { getPropertiesPageTexts } from "@/lib/i18n/translations"
 import {
-  getReadinessBadgeClasses,
-  getReadinessLabel as getReadinessLabelUI,
-  getOperationalStatusBadgeClasses,
-  getOperationalStatusLabel,
   normalizeReadinessForUI,
 } from "@/lib/readiness/readiness-ui"
 import {
@@ -83,7 +79,6 @@ type PropertyIssueListItem = {
   createdAt?: string | null
   updatedAt?: string | null
   resolvedAt?: string | null
-  dismissedAt?: string | null
 }
 
 type PropertyConditionListItem = {
@@ -697,7 +692,6 @@ function buildPropertyTodaySection(property: PropertyListItem, today: Date): Pro
       createdAt: issue.createdAt ?? null,
       updatedAt: issue.updatedAt ?? null,
       resolvedAt: issue.resolvedAt ?? null,
-      dismissedAt: issue.dismissedAt ?? null,
       requiresImmediateAction: Boolean(issue.requiresImmediateAction),
       affectsHosting: issue.affectsHosting ?? null,
     })),
@@ -931,6 +925,72 @@ function TodaySnapshotPanel({
   )
 }
 
+// ─── SVG Icons ────────────────────────────────────────────────────────────────
+
+function BedIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 7v13M21 7v13" />
+      <path d="M3 13h18" />
+      <path d="M3 7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2" />
+      <rect x="7" y="7" width="4" height="3" rx="0.5" />
+    </svg>
+  )
+}
+
+function BroomIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M17 3a2.83 2.83 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+    </svg>
+  )
+}
+
+function SupplyBarsIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden="true">
+      <line x1="4" y1="20" x2="4" y2="14" />
+      <line x1="12" y1="20" x2="12" y2="8" />
+      <line x1="20" y1="20" x2="20" y2="4" />
+    </svg>
+  )
+}
+
+function WrenchIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76Z" />
+    </svg>
+  )
+}
+
+function cn(...classes: (string | undefined | false | null)[]) {
+  return classes.filter(Boolean).join(" ")
+}
+
+/**
+ * Επιστρέφει border + background classes για το card ακινήτου
+ * βάσει της υπάρχουσας κατάστασης snapshot — χωρίς νέα λογική.
+ */
+function getPropertyCardClasses(
+  snapshot: PropertyCalendarDaySnapshot | null,
+  shortageCount: number,
+  issueCount: number
+) {
+  if (!snapshot) return "border-slate-200 bg-white"
+
+  if (snapshot.issues.state === "critical" || snapshot.tasks.state === "problem") {
+    return "border-red-200 bg-red-50/60"
+  }
+  if (snapshot.issues.state === "warning" || shortageCount > 0 || issueCount > 0) {
+    return "border-amber-200 bg-amber-50/50"
+  }
+  if (snapshot.tasks.state !== "none" && snapshot.tasks.state !== "completed") {
+    return "border-sky-200 bg-sky-50/40"
+  }
+  return "border-slate-200 bg-white"
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function PropertiesPage() {
@@ -943,6 +1003,7 @@ export default function PropertiesPage() {
   const [error, setError] = useState<string | null>(null)
 
   const [search, setSearch] = useState("")
+  const [propertyIdFilter, setPropertyIdFilter] = useState("")
   const [typeFilter, setTypeFilter] = useState("all")
   const [cityFilter, setCityFilter] = useState("all")
   const [sortBy, setSortBy] = useState("updatedAt_desc")
@@ -964,6 +1025,11 @@ export default function PropertiesPage() {
         fetch("/api/properties", { cache: "no-store" }),
         fetch("/api/partners", { cache: "no-store" }),
       ])
+
+      if (!propertiesRes.ok) {
+        const errJson = await propertiesRes.json().catch(() => null)
+        throw new Error(errJson?.error || `HTTP ${propertiesRes.status}`)
+      }
 
       const propertiesJson = await propertiesRes.json().catch(() => [])
       const partnersJson = await partnersRes.json().catch(() => [])
@@ -1245,6 +1311,7 @@ export default function PropertiesPage() {
 
   function resetFilters() {
     setSearch("")
+    setPropertyIdFilter("")
     setTypeFilter("all")
     setCityFilter("all")
     setSortBy("updatedAt_desc")
@@ -1275,102 +1342,126 @@ export default function PropertiesPage() {
           </div>
         </div>
 
-        {/* ─── Metric cards: readiness-based counters ─────────────────────────
-            Κάθε κάρτα αντιστοιχεί σε ξεχωριστή canonical κατάσταση.
-            BORDERLINE και NOT_READY εμφανίζονται ξεχωριστά. */}
-        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        {/* ─── Metric pills ───────────────────────────────────────────────── */}
+        <div className="flex flex-wrap gap-2">
+          {/* Όλα */}
           <button
             type="button"
             onClick={() => setMetricFilter("all")}
-            className="hidden"
+            className={cn(
+              "inline-flex items-center gap-2 rounded-2xl border px-3 py-2 text-sm font-medium transition hover:scale-[1.02]",
+              metricFilter === "all"
+                ? "border-slate-300 bg-slate-50 text-slate-700 ring-2 ring-slate-300/40 shadow-sm"
+                : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+            )}
           >
-            <div className="text-sm text-slate-500">
-              {localizeText(language, "Όλα τα ακίνητα", "All properties")}
-            </div>
-            <div className="mt-2 text-2xl font-bold text-slate-900">
-              {todaySections.length}
-            </div>
+            <span className="text-[11px] font-bold leading-none">✓</span>
+            <span>{localizeText(language, "Όλα", "All")}</span>
+            <span className={cn(
+              "inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-bold",
+              metricFilter === "all" ? "bg-slate-200 text-slate-700" : "bg-slate-100 text-slate-500"
+            )}>{todaySections.length}</span>
           </button>
 
+          {/* Κρατήσεις */}
           <button
             type="button"
-            onClick={() => setMetricFilter("bookings")}
-            className={`rounded-2xl border p-5 text-left shadow-sm transition ${getMetricCardClasses(
+            onClick={() => setMetricFilter(metricFilter === "bookings" ? "all" : "bookings")}
+            className={cn(
+              "inline-flex items-center gap-2 rounded-2xl border px-3 py-2 text-sm font-medium transition hover:scale-[1.02]",
               metricFilter === "bookings"
-            )}`}
+                ? "border-sky-200 bg-sky-50 text-sky-700 ring-2 ring-sky-200/50 shadow-sm"
+                : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+            )}
           >
-            <div className="text-sm text-slate-500">
-              {localizeText(language, "Κρατήσεις", "Bookings")}
-            </div>
-            <div className="mt-2 text-2xl font-bold text-blue-700">
-              {todaySummary.bookings}
-            </div>
+            <BedIcon className={cn("h-3.5 w-3.5", metricFilter !== "bookings" && "opacity-50")} />
+            <span>{localizeText(language, "Κρατήσεις", "Bookings")}</span>
+            <span className={cn(
+              "inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-bold",
+              metricFilter === "bookings" ? "bg-sky-100 text-sky-700" : "bg-slate-100 text-slate-500"
+            )}>{todaySummary.bookings}</span>
           </button>
 
+          {/* Εργασίες */}
           <button
             type="button"
-            onClick={() => setMetricFilter("tasks")}
-            className={`rounded-2xl border p-5 text-left shadow-sm transition ${getMetricCardClasses(
+            onClick={() => setMetricFilter(metricFilter === "tasks" ? "all" : "tasks")}
+            className={cn(
+              "inline-flex items-center gap-2 rounded-2xl border px-3 py-2 text-sm font-medium transition hover:scale-[1.02]",
               metricFilter === "tasks"
-            )}`}
+                ? "border-amber-200 bg-amber-50 text-amber-700 ring-2 ring-amber-200/50 shadow-sm"
+                : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+            )}
           >
-            <div className="text-sm text-slate-500">
-              {localizeText(language, "Εργασίες", "Tasks")}
-            </div>
-            <div className="mt-2 text-2xl font-bold text-slate-900">
-              {todaySummary.tasks}
-            </div>
+            <BroomIcon className={cn("h-3.5 w-3.5", metricFilter !== "tasks" && "opacity-50")} />
+            <span>{localizeText(language, "Εργασίες", "Tasks")}</span>
+            <span className={cn(
+              "inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-bold",
+              metricFilter === "tasks" ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500"
+            )}>{todaySummary.tasks}</span>
           </button>
 
+          {/* Alerts */}
           <button
             type="button"
-            onClick={() => setMetricFilter("alerts")}
-            className={`rounded-2xl border p-5 text-left shadow-sm transition ${getMetricCardClasses(
+            onClick={() => setMetricFilter(metricFilter === "alerts" ? "all" : "alerts")}
+            className={cn(
+              "inline-flex items-center gap-2 rounded-2xl border px-3 py-2 text-sm font-medium transition hover:scale-[1.02]",
               metricFilter === "alerts"
-            )}`}
+                ? "border-red-200 bg-red-50 text-red-700 ring-2 ring-red-200/50 shadow-sm"
+                : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+            )}
           >
-            <div className="text-sm text-slate-500">
-              {localizeText(language, "Ενεργά alert", "Active alerts")}
-            </div>
-            <div className="mt-2 text-2xl font-bold text-red-700">
-              {todaySummary.alerts}
-            </div>
+            <span className={cn("text-sm leading-none", metricFilter !== "alerts" && "opacity-50")}>⚠</span>
+            <span>{localizeText(language, "Ενεργά alert", "Active alerts")}</span>
+            <span className={cn(
+              "inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-bold",
+              metricFilter === "alerts" ? "bg-red-100 text-red-700" : "bg-slate-100 text-slate-500"
+            )}>{todaySummary.alerts}</span>
           </button>
 
+          {/* Ελλείψεις */}
           <button
             type="button"
-            onClick={() => setMetricFilter("shortages")}
-            className={`rounded-2xl border p-5 text-left shadow-sm transition ${getMetricCardClasses(
+            onClick={() => setMetricFilter(metricFilter === "shortages" ? "all" : "shortages")}
+            className={cn(
+              "inline-flex items-center gap-2 rounded-2xl border px-3 py-2 text-sm font-medium transition hover:scale-[1.02]",
               metricFilter === "shortages"
-            )}`}
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700 ring-2 ring-emerald-200/50 shadow-sm"
+                : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+            )}
           >
-            <div className="text-sm text-slate-500">
-              {localizeText(language, "Ακίνητα με ελλείψεις", "Properties with shortages")}
-            </div>
-            <div className="mt-2 text-2xl font-bold text-red-700">
-              {todaySummary.shortages}
-            </div>
+            <SupplyBarsIcon className={cn("h-3.5 w-3.5", metricFilter !== "shortages" && "opacity-50")} />
+            <span>{localizeText(language, "Με ελλείψεις", "Shortages")}</span>
+            <span className={cn(
+              "inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-bold",
+              metricFilter === "shortages" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"
+            )}>{todaySummary.shortages}</span>
           </button>
 
+          {/* Βλάβες */}
           <button
             type="button"
-            onClick={() => setMetricFilter("issues")}
-            className={`rounded-2xl border p-5 text-left shadow-sm transition ${getMetricCardClasses(
+            onClick={() => setMetricFilter(metricFilter === "issues" ? "all" : "issues")}
+            className={cn(
+              "inline-flex items-center gap-2 rounded-2xl border px-3 py-2 text-sm font-medium transition hover:scale-[1.02]",
               metricFilter === "issues"
-            )}`}
+                ? "border-red-200 bg-red-50 text-red-700 ring-2 ring-red-200/50 shadow-sm"
+                : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+            )}
           >
-            <div className="text-sm text-slate-500">
-              {localizeText(language, "Ακίνητα με βλάβες", "Properties with issues")}
-            </div>
-            <div className="mt-2 text-2xl font-bold text-red-700">
-              {todaySummary.issues}
-            </div>
+            <WrenchIcon className={cn("h-3.5 w-3.5", metricFilter !== "issues" && "opacity-50")} />
+            <span>{localizeText(language, "Βλάβες / Ζημιές", "Issues / Damages")}</span>
+            <span className={cn(
+              "inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-bold",
+              metricFilter === "issues" ? "bg-red-100 text-red-700" : "bg-slate-100 text-slate-500"
+            )}>{todaySummary.issues}</span>
           </button>
-        </section>
+        </div>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-            <div className="xl:col-span-2">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+            <div className="sm:col-span-2">
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
                 {texts.search}
               </label>
@@ -1380,6 +1471,22 @@ export default function PropertiesPage() {
                 placeholder={texts.searchPlaceholder}
                 className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-slate-900"
               />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {localizeText(language, "Ακίνητο", "Property")}
+              </label>
+              <select
+                value={propertyIdFilter}
+                onChange={(e) => setPropertyIdFilter(e.target.value)}
+                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-slate-900"
+              >
+                <option value="">{localizeText(language, "Όλα τα ακίνητα", "All properties")}</option>
+                {properties.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
             </div>
 
             <div>
@@ -1450,36 +1557,32 @@ export default function PropertiesPage() {
           </div>
         </div>
 
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-200 px-4 py-4 sm:px-6">
-            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h2 className="text-base font-semibold text-slate-900">
-                  {localizeText(language, "Σημερινή εικόνα ακινήτων", "Today's property overview")}
-                </h2>
-                <p className="text-sm text-slate-500">
-                  {filteredSections.length} / {todaySections.length}
-                </p>
-                {metricFilter !== "all" ? (
-                  <p className="mt-1 text-xs text-slate-500">
-                    {localizeText(language, "Ενεργό φίλτρο:", "Active filter:")}{" "}
-                    {metricCards.find((card) => card.key === metricFilter)?.label}
-                  </p>
-                ) : null}
-              </div>
-            </div>
+        <div>
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-sm text-slate-500">
+              {filteredSections.filter(s => !propertyIdFilter || s.property.id === propertyIdFilter).length}
+              {" / "}
+              {todaySections.length}{" "}
+              {localizeText(language, "ακίνητα", "properties")}
+              {metricFilter !== "all" ? (
+                <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
+                  {metricCards.find((card) => card.key === metricFilter)?.label}
+                </span>
+              ) : null}
+            </p>
           </div>
 
           {loading ? (
-            <div className="p-6 text-sm text-slate-500">{texts.loading}</div>
+            <div className="py-8 text-center text-sm text-slate-500">{texts.loading}</div>
           ) : error ? (
-            <div className="p-6 text-sm text-red-600">{error}</div>
-          ) : filteredSections.length === 0 ? (
-            <div className="p-6 text-sm text-slate-500">{texts.noResults}</div>
+            <div className="py-8 text-center text-sm text-red-600">{error}</div>
+          ) : filteredSections.filter(s => !propertyIdFilter || s.property.id === propertyIdFilter).length === 0 ? (
+            <div className="py-8 text-center text-sm text-slate-500">{texts.noResults}</div>
           ) : (
-            <>
-              <div className="space-y-4 p-4 sm:p-6">
-                {filteredSections.map((section) => {
+            <div className="space-y-3">
+              {filteredSections
+                .filter(s => !propertyIdFilter || s.property.id === propertyIdFilter)
+                .map((section) => {
                   const { property, snapshot, nextBooking, location } = section
                   const shortageCount = section.counts.shortages
                   const issueCount = section.counts.issues
@@ -1487,490 +1590,144 @@ export default function PropertiesPage() {
                   return (
                     <section
                       key={property.id}
-                      className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"
+                      className={cn("rounded-2xl border p-4 shadow-sm transition hover:shadow-md", getPropertyCardClasses(snapshot, shortageCount, issueCount))}
                     >
-                      <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                      {/* ── Header: όνομα + διεύθυνση + link ────────────────── */}
+                      <div className="flex items-start justify-between gap-4">
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
-                            <h3 className="text-xl font-semibold text-slate-900">
+                            <Link
+                              href={`/properties/${property.id}`}
+                              className="text-base font-semibold text-slate-900 hover:underline"
+                            >
                               {property.name}
-                            </h3>
-                            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
+                            </Link>
+                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">
                               {property.code}
                             </span>
-                          </div>
-
-                          <p className="mt-2 text-sm text-slate-700">
-                            {location || "—"}
-                          </p>
-
-                          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                            <span>{getPropertyTypeLabel(language, property.type)}</span>
-                            <span>•</span>
-                            <span>{getPropertyStatusLabel(language, property.status)}</span>
-                            <span>•</span>
-                            <span>
-                              {formatCountText(
-                                property.maxGuests || 0,
-                                language,
-                                "επισκέπτης",
-                                "επισκέπτες",
-                                "guest",
-                                "guests"
-                              )}
+                            <span className="text-xs text-slate-400">
+                              {getPropertyTypeLabel(language, property.type)}
                             </span>
                           </div>
+                          <p className="mt-0.5 text-sm text-slate-500">{location || "—"}</p>
                         </div>
-
-                        <div className="flex flex-col items-start gap-3 lg:items-end">
-                          <span
-                            className={`inline-flex rounded-full px-3 py-1.5 text-xs font-semibold ${getOperationalStatusBadgeClasses(
-                              snapshot?.readiness.state ?? "unknown"
-                            )}`}
-                          >
-                            {getOperationalStatusLabel(
-                              language,
-                              snapshot?.readiness.state ?? "unknown"
-                            )}
-                          </span>
-
-                          <div className="max-w-sm text-sm text-slate-600 lg:text-right">
-                            {getTodayReadinessReason(language, snapshot)}
-                          </div>
-
+                        <div className="flex shrink-0 items-center">
                           <Link
                             href={`/properties/${property.id}`}
-                            className="inline-flex items-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                            className="rounded-xl border border-slate-200 bg-white/70 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-white"
                           >
                             {texts.view}
                           </Link>
                         </div>
                       </div>
 
-                      <div className="mt-5 grid gap-4 xl:grid-cols-4">
-                        <TodaySnapshotPanel
-                          title={localizeText(language, "Κρατήσεις σήμερα", "Bookings today")}
-                          badge={
-                            <span
-                              className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${getTodayOccupancyBadgeClasses(
-                                snapshot?.occupancy.state ?? "vacant"
-                              )}`}
-                            >
-                              {getTodayOccupancyLabel(
-                                language,
-                                snapshot?.occupancy.state ?? "vacant"
-                              )}
+                      {/* ── 4 στήλες κατάστασης ──────────────────────────────── */}
+                      <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                        {/* Κρατήσεις */}
+                        <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+                              <BedIcon className="h-4 w-4" />
+                              {localizeText(language, "Κρατήσεις", "Bookings")}
+                            </div>
+                            <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${getTodayOccupancyBadgeClasses(snapshot?.occupancy.state ?? "vacant")}`}>
+                              {getTodayOccupancyLabel(language, snapshot?.occupancy.state ?? "vacant")}
                             </span>
-                          }
-                        >
-                          <p className="font-medium text-slate-900">
-                            {formatCountText(
-                              section.counts.bookings,
-                              language,
-                              "κράτηση",
-                              "κρατήσεις",
-                              "booking",
-                              "bookings"
-                            )}
-                          </p>
-                          <p>
-                            {snapshot?.occupancy.primaryGuestName
-                              ? localizeText(
-                                  language,
-                                  `Κύριος επισκέπτης: ${snapshot.occupancy.primaryGuestName}`,
-                                  `Main guest: ${snapshot.occupancy.primaryGuestName}`
-                                )
-                              : localizeText(
-                                  language,
-                                  "Δεν υπάρχει κύριος επισκέπτης για σήμερα.",
-                                  "No primary guest for today."
-                                )}
-                          </p>
-                          <p>
-                            {formatTaskTimeRange(
-                              language,
-                              snapshot?.occupancy.fromTime,
-                              snapshot?.occupancy.toTime
-                            )}
-                          </p>
-                        </TodaySnapshotPanel>
+                          </div>
+                          <div className="mt-2 text-sm font-medium text-slate-900">
+                            {section.counts.bookings > 0
+                              ? formatCountText(section.counts.bookings, language, "κράτηση", "κρατήσεις", "booking", "bookings")
+                              : localizeText(language, "Καμία σήμερα", "None today")}
+                          </div>
+                          {snapshot?.occupancy.primaryGuestName ? (
+                            <div className="mt-0.5 truncate text-xs text-slate-500">{snapshot.occupancy.primaryGuestName}</div>
+                          ) : null}
+                        </div>
 
-                        <TodaySnapshotPanel
-                          title={localizeText(language, "Εργασίες σήμερα", "Tasks today")}
-                          badge={
-                            <span
-                              className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${getTodayTaskBadgeClasses(
-                                snapshot?.tasks.state ?? "none"
-                              )}`}
-                            >
+                        {/* Εργασίες */}
+                        <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+                              <BroomIcon className="h-4 w-4" />
+                              {localizeText(language, "Εργασίες", "Tasks")}
+                            </div>
+                            <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${getTodayTaskBadgeClasses(snapshot?.tasks.state ?? "none")}`}>
                               {getTodayTaskLabel(language, snapshot?.tasks.state ?? "none")}
                             </span>
-                          }
-                        >
-                          <p className="font-medium text-slate-900">
-                            {formatCountText(
-                              section.counts.tasks,
-                              language,
-                              "εργασία",
-                              "εργασίες",
-                              "task",
-                              "tasks"
-                            )}
-                          </p>
-                          <p>
-                            {localizeText(language, "Ενεργά alert:", "Active alerts:")}{" "}
-                            {snapshot?.tasks.activeAlertCount ?? 0}
-                          </p>
-                          <p>
-                            {localizeText(language, "Προβλήματα / καθυστερήσεις:", "Problems / overdue:")}{" "}
-                            {snapshot?.tasks.problemCount ?? 0}
-                          </p>
-                        </TodaySnapshotPanel>
+                          </div>
+                          <div className="mt-2 text-sm font-medium text-slate-900">
+                            {section.counts.tasks > 0
+                              ? formatCountText(section.counts.tasks, language, "εργασία", "εργασίες", "task", "tasks")
+                              : localizeText(language, "Καμία σήμερα", "None today")}
+                          </div>
+                          {(snapshot?.tasks.activeAlertCount ?? 0) > 0 ? (
+                            <div className="mt-0.5 text-xs text-red-600">
+                              ⚠ {snapshot?.tasks.activeAlertCount} {localizeText(language, "alert", "alerts")}
+                            </div>
+                          ) : null}
+                        </div>
 
-                        <TodaySnapshotPanel
-                          title={localizeText(language, "Αναλώσιμα σήμερα", "Supplies today")}
-                          badge={
-                            <span
-                              className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${getTodaySupplyBadgeClasses(
-                                shortageCount
-                              )}`}
-                            >
+                        {/* Αναλώσιμα */}
+                        <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+                              <SupplyBarsIcon className="h-4 w-4" />
+                              {localizeText(language, "Αναλώσιμα", "Supplies")}
+                            </div>
+                            <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${getTodaySupplyBadgeClasses(shortageCount)}`}>
                               {getTodaySupplyLabel(language, shortageCount)}
                             </span>
-                          }
-                        >
-                          <p className="font-medium text-slate-900">
+                          </div>
+                          <div className="mt-2 text-sm font-medium text-slate-900">
                             {shortageCount > 0
-                              ? localizeText(
-                                  language,
-                                  `${shortageCount} ελλείψεις`,
-                                  `${shortageCount} shortages`
-                                )
-                              : localizeText(language, "Χωρίς ελλείψεις", "No shortages")}
-                          </p>
-                          <p>
-                            {localizeText(language, "Κρίσιμες ελλείψεις:", "Critical shortages:")}{" "}
-                            {snapshot?.supplies.criticalShortageCount ?? 0}
-                          </p>
-                          <p>
-                            {localizeText(language, "Πλήρη / μεσαία / ελλείψεις:", "Full / medium / missing:")}{" "}
-                            {snapshot?.supplies.segments.find((segment) => segment.state === "full")?.count ?? 0}
-                            {" / "}
-                            {snapshot?.supplies.segments.find((segment) => segment.state === "medium")?.count ?? 0}
-                            {" / "}
-                            {shortageCount}
-                          </p>
-                        </TodaySnapshotPanel>
+                              ? localizeText(language, `${shortageCount} ελλείψεις`, `${shortageCount} shortages`)
+                              : localizeText(language, "Πλήρη", "Covered")}
+                          </div>
+                          {(snapshot?.supplies.criticalShortageCount ?? 0) > 0 ? (
+                            <div className="mt-0.5 text-xs text-red-600">
+                              {snapshot?.supplies.criticalShortageCount} {localizeText(language, "κρίσιμες", "critical")}
+                            </div>
+                          ) : null}
+                        </div>
 
-                        <TodaySnapshotPanel
-                          title={localizeText(language, "Θέματα και βλάβες", "Issues and damages")}
-                          badge={
-                            <span
-                              className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${getTodayIssuesBadgeClasses(
-                                snapshot?.issues.state ?? "clear"
-                              )}`}
-                            >
+                        {/* Βλάβες / Ζημιές */}
+                        <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+                              <WrenchIcon className="h-4 w-4" />
+                              {localizeText(language, "Βλάβες / Ζημιές", "Issues")}
+                            </div>
+                            <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${getTodayIssuesBadgeClasses(snapshot?.issues.state ?? "clear")}`}>
                               {getTodayIssuesLabel(language, snapshot?.issues.state ?? "clear")}
                             </span>
-                          }
-                        >
-                          <p className="font-medium text-slate-900">
-                            {formatCountText(
-                              issueCount,
-                              language,
-                              "θέμα",
-                              "θέματα",
-                              "item",
-                              "items"
-                            )}
-                          </p>
-                          <p>
-                            {localizeText(language, "Blocking:", "Blocking:")}{" "}
-                            {snapshot?.issues.blockingCount ?? 0}
-                          </p>
-                          <p>
-                            {localizeText(language, "Warnings:", "Warnings:")}{" "}
-                            {snapshot?.issues.warningCount ?? 0}
-                          </p>
-                        </TodaySnapshotPanel>
-                      </div>
-
-                      <div className="mt-5 grid gap-4 border-t border-slate-200 pt-4 md:grid-cols-3">
-                        <div>
-                          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            {localizeText(language, "Επόμενο check-in", "Next check-in")}
                           </div>
-                          <div className="mt-1 text-sm text-slate-900">
-                            {nextBooking?.checkInAt
-                              ? formatDisplayDateTime(nextBooking.checkInAt, texts.locale)
-                              : "—"}
+                          <div className="mt-2 text-sm font-medium text-slate-900">
+                            {issueCount > 0
+                              ? formatCountText(issueCount, language, "θέμα", "θέματα", "item", "items")
+                              : localizeText(language, "Καθαρό", "Clear")}
                           </div>
-                          <div className="mt-1 text-xs text-slate-500">
-                            {nextBooking?.guestName ||
-                              localizeText(language, "Δεν υπάρχει επόμενη άφιξη.", "No upcoming arrival.")}
-                          </div>
-                        </div>
-
-                        <div>
-                          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            {localizeText(language, "Σημερινή ημερομηνία", "Today's date")}
-                          </div>
-                          <div className="mt-1 text-sm text-slate-900">
-                            {formatDisplayDate(todayReference, texts.locale)}
-                          </div>
-                          <div className="mt-1 text-xs text-slate-500">
-                            {localizeText(
-                              language,
-                              "Εικόνα ημέρας από το calendar snapshot.",
-                              "Day view based on the calendar snapshot."
-                            )}
-                          </div>
-                        </div>
-
-                        <div>
-                          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            {texts.updated}
-                          </div>
-                          <div className="mt-1 text-sm text-slate-900">
-                            {formatDisplayDateTime(property.updatedAt, texts.locale)}
-                          </div>
-                          <div className="mt-1 text-xs text-slate-500">
-                            {localizeText(
-                              language,
-                              "Τελευταία ενημέρωση εγγραφής ακινήτου.",
-                              "Latest property record update."
-                            )}
-                          </div>
+                          {(snapshot?.issues.blockingCount ?? 0) > 0 ? (
+                            <div className="mt-0.5 text-xs text-red-600">
+                              {snapshot?.issues.blockingCount} {localizeText(language, "blocking", "blocking")}
+                            </div>
+                          ) : null}
                         </div>
                       </div>
+
+                      {/* ── Footer: επόμενο check-in ─────────────────────────── */}
+                      {nextBooking ? (
+                        <div className="mt-3 flex items-center gap-2 border-t border-slate-100 pt-3 text-xs text-slate-500">
+                          <span className="font-medium text-slate-700">
+                            {localizeText(language, "Επόμενο check-in:", "Next check-in:")}
+                          </span>
+                          <span>{formatDisplayDateTime(nextBooking.checkInAt, texts.locale)}</span>
+                          {nextBooking.guestName ? <span>· {nextBooking.guestName}</span> : null}
+                        </div>
+                      ) : null}
                     </section>
                   )
                 })}
-              </div>
-              {/* ─── Desktop table ──────────────────────────────────────────── */}
-              <div className="hidden">
-                <table className="min-w-full text-left text-sm">
-                  <thead className="bg-slate-50 text-slate-600">
-                    <tr>
-                      <th className="px-4 py-3 font-semibold">{texts.property}</th>
-                      <th className="px-4 py-3 font-semibold">{texts.address}</th>
-                      <th className="px-4 py-3 font-semibold">{texts.readiness}</th>
-                      <th className="px-4 py-3 font-semibold">
-                        {language === "en" ? "Next check-in" : "Επόμενο check-in"}
-                      </th>
-                      <th className="px-4 py-3 font-semibold">
-                        {language === "en"
-                          ? "Operational counters"
-                          : "Επιχειρησιακοί μετρητές"}
-                      </th>
-                      <th className="px-4 py-3 font-semibold">{texts.updated}</th>
-                      <th className="px-4 py-3 text-right font-semibold">
-                        {texts.actions}
-                      </th>
-                    </tr>
-                  </thead>
-
-                  <tbody className="divide-y divide-slate-100">
-                    {filteredProperties.map((property) => {
-                      const readiness = normalizeReadinessForUI(property.readinessStatus)
-                      const readinessExplanation = getReadinessExplanation(property, language)
-                      const counts = getOperationalCountsForToday(property, todayReference)
-                      const nextBooking = getNextUpcomingBooking(property)
-                      const location = formatLocation(property)
-
-                      return (
-                        <tr key={property.id} className="hover:bg-slate-50/70">
-                          <td className="px-4 py-4 align-top">
-                            <div className="font-semibold text-slate-900">
-                              {property.name}
-                            </div>
-                            <div className="mt-1 text-xs text-slate-500">
-                              {property.code}
-                            </div>
-                            <div className="mt-1 text-xs text-slate-500">
-                              {getPropertyTypeLabel(language, property.type)} ·{" "}
-                              {getPropertyStatusLabel(language, property.status)}
-                            </div>
-                          </td>
-
-                          <td className="px-4 py-4 align-top">
-                            <div className="text-slate-900">
-                              {location || "—"}
-                            </div>
-                          </td>
-
-                          <td className="px-4 py-4 align-top">
-                            <div className="flex max-w-xs flex-col gap-2">
-                              <span
-                                className={`inline-flex w-fit rounded-full px-2.5 py-1 text-xs font-semibold ${getReadinessBadgeClasses(
-                                  readiness
-                                )}`}
-                              >
-                                {getReadinessLabelUI(language, readiness)}
-                              </span>
-
-                              <div className="text-xs leading-5 text-slate-500">
-                                {readinessExplanation}
-                              </div>
-                            </div>
-                          </td>
-
-                          <td className="px-4 py-4 align-top">
-                            {nextBooking ? (
-                              <div>
-                                <div className="text-sm font-medium text-slate-900">
-                                  {formatDateTime(
-                                    nextBooking.checkInAt?.toISOString(),
-                                    texts.locale
-                                  )}
-                                </div>
-                                <div className="mt-1 text-xs text-slate-500">
-                                  {language === "en"
-                                    ? "Upcoming confirmed or pending arrival"
-                                    : "Επόμενη επιβεβαιωμένη ή εκκρεμής άφιξη"}
-                                </div>
-                              </div>
-                            ) : (
-                              <div className="text-sm text-slate-500">—</div>
-                            )}
-                          </td>
-
-                          <td className="px-4 py-4 align-top">
-                            <div className="flex flex-wrap gap-2">
-                              {counterConfigs.map((config) => {
-                                const count = counts[config.key]
-                                return (
-                                  <ListTooltip key={config.key} label={config.description}>
-                                    <span
-                                      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${getCounterToneClasses(count)}`}
-                                    >
-                                      {config.label}: {count}
-                                    </span>
-                                  </ListTooltip>
-                                )
-                              })}
-                            </div>
-                          </td>
-
-                          <td className="px-4 py-4 align-top">
-                            <div className="text-sm text-slate-900">
-                              {formatDateTime(property.updatedAt, texts.locale)}
-                            </div>
-                          </td>
-
-                          <td className="px-4 py-4 align-top text-right">
-                            <Link
-                              href={`/properties/${property.id}`}
-                              className="inline-flex items-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                            >
-                              {texts.view}
-                            </Link>
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* ─── Mobile cards ───────────────────────────────────────────── */}
-              <div className="hidden">
-                {filteredProperties.map((property) => {
-                  const readiness = normalizeReadinessForUI(property.readinessStatus)
-                  const readinessExplanation = getReadinessExplanation(property, language)
-                  const counts = getOperationalCountsForToday(property, todayReference)
-                  const nextBooking = getNextUpcomingBooking(property)
-                  const location = formatLocation(property)
-
-                  return (
-                    <div
-                      key={property.id}
-                      className="rounded-2xl border border-slate-200 p-4 shadow-sm"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="text-base font-semibold text-slate-900">
-                            {property.name}
-                          </div>
-                          <div className="mt-1 text-xs text-slate-500">
-                            {property.code}
-                          </div>
-                          <div className="mt-1 text-xs text-slate-500">
-                            {getPropertyTypeLabel(language, property.type)} ·{" "}
-                            {getPropertyStatusLabel(language, property.status)}
-                          </div>
-                        </div>
-
-                        <span
-                          className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${getReadinessBadgeClasses(
-                            readiness
-                          )}`}
-                        >
-                          {getReadinessLabelUI(language, readiness)}
-                        </span>
-                      </div>
-
-                      <div className="mt-4 text-sm text-slate-900">
-                        {location || "—"}
-                      </div>
-
-                      <div className="mt-3 text-xs leading-5 text-slate-500">
-                        {readinessExplanation}
-                      </div>
-
-                      <div className="mt-4 flex flex-wrap gap-2">
-                        {counterConfigs.map((config) => {
-                          const count = counts[config.key]
-                          return (
-                            <ListTooltip key={config.key} label={config.description}>
-                              <span
-                                className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${getCounterToneClasses(count)}`}
-                              >
-                                {config.label}: {count}
-                              </span>
-                            </ListTooltip>
-                          )
-                        })}
-                      </div>
-
-                      <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                        <div>
-                          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            {language === "en" ? "Next check-in" : "Επόμενο check-in"}
-                          </div>
-                          <div className="mt-1 text-sm text-slate-900">
-                            {nextBooking
-                              ? formatDateTime(
-                                  nextBooking.checkInAt?.toISOString(),
-                                  texts.locale
-                                )
-                              : "—"}
-                          </div>
-                        </div>
-
-                        <div>
-                          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            {texts.updated}
-                          </div>
-                          <div className="mt-1 text-sm text-slate-900">
-                            {formatDateTime(property.updatedAt, texts.locale)}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="mt-4">
-                        <Link
-                          href={`/properties/${property.id}`}
-                          className="inline-flex w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                        >
-                          {texts.view}
-                        </Link>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </>
+            </div>
           )}
         </div>
       </div>

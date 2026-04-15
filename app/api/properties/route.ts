@@ -221,7 +221,6 @@ async function getFullPropertyList(where: Record<string, unknown>) {
           createdAt: true,
           updatedAt: true,
           resolvedAt: true,
-          dismissedAt: true,
         },
         orderBy: {
           createdAt: "desc",

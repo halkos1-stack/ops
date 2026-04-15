@@ -1197,19 +1197,17 @@ function BedIcon({ className }: { className?: string }) {
 function BroomIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M3 22l9-9" />
-      <path d="M12 13l7-7a2 2 0 0 0-3-3l-7 7 3 3Z" />
-      <path d="M3 22l2.5-1 5.5-5.5-3-3-5.5 5.5L3 22Z" />
+      <path d="M17 3a2.83 2.83 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
     </svg>
   )
 }
 
 function SupplyBarsIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <rect x="2" y="15" width="4" height="7" rx="0.5" />
-      <rect x="10" y="9" width="4" height="13" rx="0.5" />
-      <rect x="18" y="3" width="4" height="19" rx="0.5" />
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden="true">
+      <line x1="4" y1="20" x2="4" y2="14" />
+      <line x1="12" y1="20" x2="12" y2="8" />
+      <line x1="20" y1="20" x2="20" y2="4" />
     </svg>
   )
 }
@@ -1411,15 +1409,52 @@ function CalendarCell({
   const barBase =
     "flex h-[22px] w-full items-center gap-1.5 rounded-lg px-2 text-xs font-medium cursor-pointer select-none transition hover:opacity-80"
 
+  // ── Gap day attention logic ────────────────────────────────────────────────
+  // Χρησιμοποιεί αποκλειστικά υπάρχοντα fields — χωρίς νέα λογική.
+  const todayMidnight = new Date()
+  todayMidnight.setHours(0, 0, 0, 0)
+  const entryMidnight = new Date(entry.date)
+  entryMidnight.setHours(0, 0, 0, 0)
+
+  const isGapDay =
+    entry.workWindow !== null && entry.workWindow.nextBooking !== null
+  const isFutureOrToday =
+    entryMidnight.getTime() >= todayMidnight.getTime()
+  const taskIsDone =
+    entry.taskForCalendar != null &&
+    normalizeTaskStatus(entry.taskForCalendar.status) === "completed"
+  const hasSupplyShortage =
+    entry.supplyRecords.some((r) => r.state === "missing")
+  const hasOpenIssue = entry.issueRecords.length > 0
+
+  const gapNeedsAttention =
+    isGapDay && isFutureOrToday && (!taskIsDone || hasSupplyShortage || hasOpenIssue)
+
+  const gapAttentionReasons: string[] = []
+  if (gapNeedsAttention) {
+    if (!entry.taskForCalendar)
+      gapAttentionReasons.push(language === "el" ? "Δεν υπάρχει εργασία κάλυψης" : "No coverage task scheduled")
+    else if (!taskIsDone)
+      gapAttentionReasons.push(language === "el" ? "Εργασία δεν έχει ολοκληρωθεί" : "Task not yet completed")
+    if (hasSupplyShortage)
+      gapAttentionReasons.push(language === "el" ? "Ελλείψεις αναλωσίμων" : "Supply shortages")
+    if (hasOpenIssue)
+      gapAttentionReasons.push(language === "el" ? "Ανοιχτές βλάβες / ζημιές" : "Open issues or damages")
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
   return (
     <button
       type="button"
       onClick={onOpenDay}
+      title={gapNeedsAttention ? gapAttentionReasons.join(" · ") : undefined}
       className={cn(
         "flex flex-col rounded-2xl border p-3 text-left transition hover:-translate-y-0.5 hover:shadow-sm",
-        entry.isCurrentMonth || granularity !== "month"
-          ? "border-slate-200 bg-white"
-          : "border-slate-100 bg-slate-50/70",
+        gapNeedsAttention
+          ? "border-amber-300 bg-amber-50"
+          : entry.isCurrentMonth || granularity !== "month"
+            ? "border-slate-200 bg-white"
+            : "border-slate-100 bg-slate-50/70",
         entry.isToday && "ring-2 ring-slate-900/10"
       )}
     >
@@ -1471,7 +1506,7 @@ function CalendarCell({
                 )
               })
             : (
-              <div title={t.filterBookings} className="flex h-[22px] w-full items-center rounded-lg px-1.5 text-slate-400 opacity-40 transition hover:opacity-100 hover:bg-sky-50 hover:text-sky-500">
+              <div title={t.filterBookings} className="flex h-[22px] w-full items-center rounded-lg px-1.5 text-slate-400 opacity-20 transition hover:opacity-100 hover:text-sky-500 hover:bg-sky-50">
                 <BedIcon className="h-3 w-3" />
               </div>
             )
@@ -1493,7 +1528,7 @@ function CalendarCell({
               <span className="truncate">{getTaskStatusLabel(language, entry.taskForCalendar.status)}</span>
             </div>
           ) : (
-            <div title={t.filterTasks} className="flex h-[22px] w-full items-center rounded-lg px-1.5 text-slate-400 opacity-40 transition hover:opacity-100 hover:bg-amber-50 hover:text-amber-500">
+            <div title={t.filterTasks} className="flex h-[22px] w-full items-center rounded-lg px-1.5 text-slate-400 opacity-20 transition hover:opacity-100 hover:text-amber-500 hover:bg-amber-50">
               <BroomIcon className="h-3 w-3" />
             </div>
           )}
@@ -1524,7 +1559,7 @@ function CalendarCell({
               <span className="truncate">{t.supplies}: {entry.supplyRecords.length}</span>
             </div>
           ) : (
-            <div title={t.filterSupplies} className="flex h-[22px] w-full items-center rounded-lg px-1.5 text-slate-400 opacity-40 transition hover:opacity-100 hover:bg-emerald-50 hover:text-emerald-500">
+            <div title={t.filterSupplies} className="flex h-[22px] w-full items-center rounded-lg px-1.5 text-slate-400 opacity-20 transition hover:opacity-100 hover:text-emerald-500 hover:bg-emerald-50">
               <SupplyBarsIcon className="h-3 w-3" />
             </div>
           )}
@@ -1555,7 +1590,7 @@ function CalendarCell({
               <span className="truncate">{t.issues}: {entry.issueRecords.length}</span>
             </div>
           ) : (
-            <div title={t.filterIssues} className="flex h-[22px] w-full items-center rounded-lg px-1.5 text-slate-400 opacity-40 transition hover:opacity-100 hover:bg-red-50 hover:text-red-500">
+            <div title={t.filterIssues} className="flex h-[22px] w-full items-center rounded-lg px-1.5 text-slate-400 opacity-20 transition hover:opacity-100 hover:text-red-500 hover:bg-red-50">
               <WrenchIcon className="h-3 w-3" />
             </div>
           )}
