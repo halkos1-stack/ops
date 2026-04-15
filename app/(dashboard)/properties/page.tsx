@@ -11,7 +11,6 @@ import {
 import {
   normalizeBookingStatus,
   normalizeIssueStatus,
-  normalizePropertyStatus,
   normalizeTaskStatus,
 } from "@/lib/i18n/normalizers"
 import { getPropertiesPageTexts } from "@/lib/i18n/translations"
@@ -519,23 +518,10 @@ function formatLocation(property: PropertyListItem) {
  * Το borderline έχει ξεχωριστό φίλτρο.
  */
 function matchesMetricFilter(
-  property: PropertyListItem,
+  _property: PropertyListItem,
   metricFilter: MetricFilter
 ) {
-  const propertyStatus = normalizePropertyStatus(property.status)
-  const readiness = normalizeReadinessForUI(property.readinessStatus)
-
   switch (metricFilter) {
-    case "active":
-      return propertyStatus === "ACTIVE"
-    case "inactive":
-      return propertyStatus === "INACTIVE"
-    case "ready":
-      return readiness === "ready"
-    case "borderline":
-      return readiness === "borderline"
-    case "not_ready":
-      return readiness === "not_ready"
     case "all":
     default:
       return true

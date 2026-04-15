@@ -816,7 +816,7 @@ function buildSupplyRows(language: Language, property: PropertyDetail | null): S
   }))
 }
 
-function buildWorkWindows(bookings: PropertyBookingLite[], tasks: PropertyTaskLite[]) {
+function buildWorkWindows(bookings: PropertyBookingLite[], tasks: PropertyTaskLite[]): WorkWindow[] {
   const activeBookings = safeArray(bookings)
     .filter((booking) => !isBookingCancelled(booking.status))
     .filter((booking) => Boolean(booking.id && booking.checkOutDate))
