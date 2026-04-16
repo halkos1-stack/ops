@@ -3,26 +3,38 @@
 import Link from "next/link"
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
 import { useAppLanguage } from "@/components/i18n/LanguageProvider"
-import { isTaskAlertActive } from "@/components/tasks/task-ui"
 import {
   getPropertyStatusLabel,
   getPropertyTypeLabel,
 } from "@/lib/i18n/labels"
-import {
-  normalizeBookingStatus,
-  normalizeIssueStatus,
-  normalizeTaskStatus,
-} from "@/lib/i18n/normalizers"
 import { getPropertiesPageTexts } from "@/lib/i18n/translations"
 import {
-  normalizeReadinessForUI,
-} from "@/lib/readiness/readiness-ui"
-import {
-  buildPropertyCalendarDaySnapshot,
+  type PropertyListItem,
+  type MetricFilter,
+  type PropertyTodaySection,
+  type CounterConfig,
   type PropertyCalendarDaySnapshot,
-} from "@/lib/properties/property-calendar"
+  localizeText,
+  formatDisplayDateTime,
+  formatCountText,
+  getCounterConfigs,
+  getPropertyCardClasses,
+  getTodayOccupancyBadgeClasses,
+  getTodayOccupancyLabel,
+  getTodayTaskBadgeClasses,
+  getTodayTaskLabel,
+  getTodaySupplyBadgeClasses,
+  getTodaySupplyLabel,
+  getTodayIssuesBadgeClasses,
+  getTodayIssuesLabel,
+  buildPropertyTodaySection,
+  matchesMetricFilter,
+  matchesTodayMetricFilter,
+  normalizeCountryForCreate,
+  getDefaultCountry,
+} from "@/lib/properties/property-list-helpers"
 
-// ─── Τοπικοί τύποι ────────────────────────────────────────────────────────────
+// ─── Τοπικοί τύποι (μόνο page-specific) ──────────────────────────────────────
 
 type PartnerOption = {
   id: string
@@ -31,130 +43,6 @@ type PartnerOption = {
   email: string
   specialty: string
   status: string
-}
-
-type PropertySupplyListItem = {
-  id: string
-  isActive?: boolean
-  /** Canonical derived state — παρέχεται ήδη από shapePropertyForOperationalViews στο API. */
-  derivedState?: string | null
-  fillLevel?: string | null
-  stateMode?: string | null
-  currentStock?: number | null
-  mediumThreshold?: number | null
-  fullThreshold?: number | null
-  minimumThreshold?: number | null
-  reorderThreshold?: number | null
-  warningThreshold?: number | null
-  targetLevel?: number | null
-  targetStock?: number | null
-  trackingMode?: string | null
-  /** Παράγεται από το API (shapePropertyForOperationalViews). Χρησιμοποιείται απευθείας. */
-  isShortage?: boolean | null
-  isCritical?: boolean
-  updatedAt?: string | null
-  lastUpdatedAt?: string | null
-  supplyItem?: {
-    id: string
-    code: string
-    name: string
-    nameEl?: string | null
-    nameEn?: string | null
-    category?: string | null
-    unit?: string | null
-    minimumStock?: number | null
-    isActive?: boolean
-  } | null
-}
-
-type PropertyIssueListItem = {
-  id: string
-  title?: string | null
-  status: string
-  severity?: string | null
-  issueType?: string | null
-  requiresImmediateAction?: boolean
-  affectsHosting?: boolean | null
-  createdAt?: string | null
-  updatedAt?: string | null
-  resolvedAt?: string | null
-}
-
-type PropertyConditionListItem = {
-  id: string
-  title?: string | null
-  status?: string | null
-  blockingStatus?: string | null
-  severity?: string | null
-  createdAt?: string | null
-  updatedAt?: string | null
-  resolvedAt?: string | null
-  dismissedAt?: string | null
-}
-
-type PropertyTaskListItem = {
-  id: string
-  title: string
-  status: string
-  priority?: string | null
-  taskType?: string | null
-  scheduledDate?: string | null
-  scheduledStartTime?: string | null
-  scheduledEndTime?: string | null
-  dueDate?: string | null
-  completedAt?: string | null
-  alertEnabled?: boolean
-  alertAt?: string | null
-}
-
-type PropertyBookingListItem = {
-  id: string
-  status: string
-  guestName?: string | null
-  checkInDate: string
-  checkOutDate: string
-  checkInTime?: string | null
-  checkOutTime?: string | null
-}
-
-type PropertyListItem = {
-  id: string
-  code: string
-  name: string
-  address: string
-  city: string
-  region: string
-  postalCode: string
-  country: string
-  type: string
-  status: string
-  bedrooms: number
-  bathrooms: number
-  maxGuests: number
-  notes?: string | null
-  defaultPartnerId?: string | null
-  /** DB readiness field. Σημ: η λίστα API δεν παράγει ακόμα live readiness — διαβάζεται ως-είναι. */
-  readinessStatus?: string | null
-  readinessUpdatedAt?: string | null
-  readinessReasonsText?: string | null
-  nextCheckInAt?: string | null
-  createdAt: string
-  updatedAt: string
-  defaultPartner?: {
-    id: string
-    code: string
-    name: string
-    email: string
-    phone?: string | null
-    specialty: string
-    status: string
-  } | null
-  bookings?: PropertyBookingListItem[]
-  tasks?: PropertyTaskListItem[]
-  /** Legacy Issue model — χρησιμοποιείται μόνο για operational counters, όχι ως readiness truth. */
-  issues?: PropertyIssueListItem[]
-  conditions?: PropertyConditionListItem[]
-  propertySupplies?: PropertySupplyListItem[]
 }
 
 type CreatePropertyFormState = {
@@ -173,28 +61,6 @@ type CreatePropertyFormState = {
   notes: string
 }
 
-type MetricFilter =
-  | "all"
-  | "bookings"
-  | "tasks"
-  | "alerts"
-  | "shortages"
-  | "issues"
-
-type PropertyTodaySection = {
-  property: PropertyListItem
-  snapshot: PropertyCalendarDaySnapshot | null
-  location: string
-  nextBooking: (PropertyBookingListItem & { checkInAt: Date | null }) | null
-  counts: {
-    bookings: number
-    tasks: number
-    alerts: number
-    shortages: number
-    issues: number
-  }
-}
-
 type MetricCard = {
   key: Exclude<MetricFilter, "all">
   label: string
@@ -203,21 +69,7 @@ type MetricCard = {
   valueClassName: string
 }
 
-type PropertyOperationalCounts = {
-  todayOpenTasks: number
-  activeAlerts: number
-  /** Operational counter από legacy Issue model. Δεν είναι readiness truth. */
-  openIssues: number
-  /** Operational counter από legacy Issue model. Δεν είναι readiness truth. */
-  openDamages: number
-  supplyShortages: number
-}
-
-type CounterConfig = {
-  key: keyof PropertyOperationalCounts
-  label: string
-  description: string
-}
+// ─── Τοπικές σταθερές ─────────────────────────────────────────────────────────
 
 const PROPERTY_TYPE_OPTIONS = [
   "apartment",
@@ -228,323 +80,6 @@ const PROPERTY_TYPE_OPTIONS = [
   "loft",
   "other",
 ] as const
-
-// ─── Utility helpers ──────────────────────────────────────────────────────────
-
-function safeArray<T>(value: T[] | undefined | null): T[] {
-  return Array.isArray(value) ? value : []
-}
-
-function normalizeDate(value?: string | null) {
-  if (!value) return null
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return null
-  return date
-}
-
-function formatDateTime(value: string | null | undefined, locale: string) {
-  const date = normalizeDate(value)
-  if (!date) return "—"
-
-  return new Intl.DateTimeFormat(locale, {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date)
-}
-
-function combineCheckInDateTime(
-  checkInDate?: string | null,
-  checkInTime?: string | null
-) {
-  const date = normalizeDate(checkInDate)
-  if (!date) return null
-
-  if (checkInTime && /^\d{2}:\d{2}$/.test(checkInTime)) {
-    const [hours, minutes] = checkInTime.split(":").map(Number)
-    const merged = new Date(date)
-    merged.setHours(hours, minutes, 0, 0)
-    return merged
-  }
-
-  const merged = new Date(date)
-  merged.setHours(15, 0, 0, 0)
-  return merged
-}
-
-function isSameCalendarDay(left: Date, right: Date) {
-  return (
-    left.getFullYear() === right.getFullYear() &&
-    left.getMonth() === right.getMonth() &&
-    left.getDate() === right.getDate()
-  )
-}
-
-function normalizeLooseText(value: unknown) {
-  return String(value ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, "_")
-    .replace(/-+/g, "_")
-}
-
-function getMetricCardClasses(active: boolean) {
-  if (active) {
-    return "border-slate-900 bg-slate-900 text-white"
-  }
-
-  return "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
-}
-
-// ─── Operational counter helpers ──────────────────────────────────────────────
-// Αυτοί οι helpers παράγουν operational πληροφορία για την ημέρα.
-// ΔΕΝ είναι source of truth για readiness — αυτή έρχεται από property.readinessStatus.
-
-function isTodayOpenTask(task: PropertyTaskListItem, now: Date) {
-  const scheduledDate = normalizeDate(task.scheduledDate)
-  if (!scheduledDate) return false
-
-  const taskStatus = normalizeTaskStatus(task.status)
-  const isOpenStatus = [
-    "PENDING",
-    "ASSIGNED",
-    "WAITING_ACCEPTANCE",
-    "ACCEPTED",
-    "IN_PROGRESS",
-    "NEW",
-  ].includes(taskStatus)
-
-  if (!isOpenStatus) {
-    return false
-  }
-
-  return isSameCalendarDay(scheduledDate, now)
-}
-
-function isOpenIssue(issue: PropertyIssueListItem) {
-  const issueStatus = normalizeIssueStatus(issue.status)
-  return issueStatus === "OPEN" || issueStatus === "IN_PROGRESS"
-}
-
-function isDamageIssue(issue: PropertyIssueListItem) {
-  const normalizedType = normalizeLooseText(issue.issueType)
-  return normalizedType.includes("damage") || normalizedType.includes("ζημια")
-}
-
-/**
- * Επιστρέφει αν το supply έχει shortage.
- * Διαβάζει πρώτα το `isShortage` field που ήδη παράγει το list API
- * (shapePropertyForOperationalViews → buildCanonicalSupplySnapshot).
- * Fallback σε derivedState/fillLevel αν το isShortage δεν υπάρχει ακόμα.
- */
-function isSupplyShortage(supply: PropertySupplyListItem) {
-  if (!supply.isActive) return false
-  if (typeof supply.isShortage === "boolean") return supply.isShortage
-  const state = String(supply.derivedState ?? supply.fillLevel ?? "").toLowerCase()
-  return state === "missing" || state === "empty" || state === "low"
-}
-
-function getOperationalCountsForToday(
-  property: PropertyListItem,
-  now: Date
-): PropertyOperationalCounts {
-  return {
-    todayOpenTasks: safeArray(property.tasks).filter((task) =>
-      isTodayOpenTask(task, now)
-    ).length,
-    activeAlerts: safeArray(property.tasks).filter((task) =>
-      isTaskAlertActive(task)
-    ).length,
-    openIssues: safeArray(property.issues).filter(
-      (issue) => isOpenIssue(issue) && !isDamageIssue(issue)
-    ).length,
-    openDamages: safeArray(property.issues).filter(
-      (issue) => isOpenIssue(issue) && isDamageIssue(issue)
-    ).length,
-    supplyShortages: safeArray(property.propertySupplies).filter((supply) =>
-      isSupplyShortage(supply)
-    ).length,
-  }
-}
-
-// ─── Readiness helpers ────────────────────────────────────────────────────────
-// Η σελίδα καταναλώνει readinessStatus ως canonical field από το property object.
-// Δεν ξαναϋπολογίζει readiness — απλώς κανονικοποιεί και εμφανίζει.
-
-/**
- * Επιστρέφει την εξήγηση readiness.
- * Προτεραιότητα: readinessReasonsText από backend → fallback labels.
- */
-function getReadinessExplanation(
-  property: PropertyListItem,
-  language: "el" | "en"
-) {
-  const storedReason = String(property.readinessReasonsText || "").trim()
-  if (storedReason) return storedReason
-
-  const status = normalizeReadinessForUI(property.readinessStatus)
-
-  if (status === "ready") {
-    return language === "en"
-      ? "No active conditions affecting readiness."
-      : "Δεν υπάρχουν ενεργές συνθήκες που να επηρεάζουν την ετοιμότητα."
-  }
-
-  if (status === "not_ready") {
-    return language === "en"
-      ? "Active conditions are blocking readiness."
-      : "Ενεργές συνθήκες μπλοκάρουν την ετοιμότητα."
-  }
-
-  if (status === "borderline") {
-    return language === "en"
-      ? "Active conditions keep the property in a borderline state."
-      : "Ενεργές συνθήκες κρατούν το ακίνητο σε οριακή κατάσταση."
-  }
-
-  return language === "en"
-    ? "Readiness status is not yet available."
-    : "Η κατάσταση ετοιμότητας δεν είναι ακόμα διαθέσιμη."
-}
-
-function getNextUpcomingBooking(property: PropertyListItem) {
-  const now = Date.now()
-
-  return safeArray(property.bookings)
-    .map((booking) => {
-      const checkInAt = combineCheckInDateTime(
-        booking.checkInDate,
-        booking.checkInTime || null
-      )
-
-      return {
-        ...booking,
-        checkInAt,
-      }
-    })
-    .filter((booking) => {
-      const status = normalizeBookingStatus(booking.status)
-      return (
-        booking.checkInAt &&
-        booking.checkInAt.getTime() >= now &&
-        (status === "CONFIRMED" || status === "PENDING")
-      )
-    })
-    .sort((a, b) => {
-      return (
-        (a.checkInAt?.getTime() || Number.MAX_SAFE_INTEGER) -
-        (b.checkInAt?.getTime() || Number.MAX_SAFE_INTEGER)
-      )
-    })[0]
-}
-
-// ─── Filter helpers ───────────────────────────────────────────────────────────
-
-function getCounterToneClasses(count: number) {
-  return count > 0
-    ? "bg-red-50 text-red-700 ring-red-200"
-    : "bg-slate-100 text-slate-700 ring-slate-200"
-}
-
-/**
- * Inline CSS hover tooltip. Χρησιμοποιείται σε κάθε status chip / counter badge.
- */
-function ListTooltip({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <span className="group relative inline-flex">
-      {children}
-      <span className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 w-64 -translate-x-1/2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs leading-relaxed text-slate-700 shadow-xl opacity-0 transition-opacity duration-150 group-hover:opacity-100">
-        {label}
-        <span className="absolute left-1/2 top-full h-0 w-0 -translate-x-1/2 border-x-4 border-t-4 border-x-transparent border-t-slate-200" />
-      </span>
-    </span>
-  )
-}
-
-function getCounterConfigs(language: "el" | "en"): CounterConfig[] {
-  return [
-    {
-      key: "todayOpenTasks",
-      label: language === "en" ? "Tasks" : "Εργ.",
-      description:
-        language === "en"
-          ? "Open tasks scheduled for today."
-          : "Ανοιχτές εργασίες με σημερινή ημερομηνία.",
-    },
-    {
-      key: "activeAlerts",
-      label: language === "en" ? "Alerts" : "Alert",
-      description:
-        language === "en"
-          ? "Active alerts on open tasks."
-          : "Ενεργά alert σε ανοιχτές εργασίες.",
-    },
-    {
-      key: "openIssues",
-      label: language === "en" ? "Issues" : "Βλαβ.",
-      description:
-        language === "en"
-          ? "Open non-damage issues (operational info only)."
-          : "Ανοιχτές βλάβες (επιχειρησιακή πληροφορία).",
-    },
-    {
-      key: "openDamages",
-      label: language === "en" ? "Damages" : "Ζημ.",
-      description:
-        language === "en"
-          ? "Open damage records (operational info only)."
-          : "Ανοιχτές ζημίες (επιχειρησιακή πληροφορία).",
-    },
-    {
-      key: "supplyShortages",
-      label: language === "en" ? "Supply" : "Ελλ.",
-      description:
-        language === "en"
-          ? "Supply shortages."
-          : "Ελλείψεις αναλωσίμων.",
-    },
-  ]
-}
-
-function formatLocation(property: PropertyListItem) {
-  return [property.address, property.city, property.region].filter(Boolean).join(", ")
-}
-
-/**
- * Φίλτρα metric cards.
- * ΚΑΝΟΝΑΣ: "not_ready" αντιστοιχεί αυστηρά σε not_ready — χωρίς borderline.
- * Το borderline έχει ξεχωριστό φίλτρο.
- */
-function matchesMetricFilter(
-  _property: PropertyListItem,
-  metricFilter: MetricFilter
-) {
-  switch (metricFilter) {
-    case "all":
-    default:
-      return true
-  }
-}
-
-function normalizeCountryForCreate(value: string, language: "el" | "en") {
-  const normalized = value.trim().toLowerCase()
-
-  if (language === "en") {
-    if (normalized === "ελλάδα" || normalized === "ελλαδα") return "Greece"
-    return value
-  }
-
-  if (normalized === "greece") return "Ελλάδα"
-  return value
-}
-
-function getDefaultCountry(language: "el" | "en") {
-  return language === "en" ? "Greece" : "Ελλάδα"
-}
-
-// ─── Αρχικές τιμές form ───────────────────────────────────────────────────────
 
 const initialCreateForm: CreatePropertyFormState = {
   name: "",
@@ -562,333 +97,21 @@ const initialCreateForm: CreatePropertyFormState = {
   notes: "",
 }
 
-function localizeText(language: "el" | "en", el: string, en: string) {
-  return language === "en" ? en : el
-}
+// ─── Τοπικά React components ──────────────────────────────────────────────────
 
-function formatDisplayDateTime(
-  value: string | Date | null | undefined,
-  locale: string,
-  options?: Intl.DateTimeFormatOptions
-) {
-  const date =
-    value instanceof Date
-      ? value
-      : normalizeDate(value)
-  if (!date) return "—"
-
-  return new Intl.DateTimeFormat(locale, {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    ...options,
-  }).format(date)
-}
-
-function formatDisplayDate(value: string | Date | null | undefined, locale: string) {
-  const date =
-    value instanceof Date
-      ? value
-      : normalizeDate(value)
-  if (!date) return "—"
-
-  return new Intl.DateTimeFormat(locale, {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).format(date)
-}
-
-function formatTimeDisplay(value?: string | null) {
-  const text = String(value || "").trim()
-  if (!text) return null
-  const match = text.match(/^(\d{2}:\d{2})/)
-  return match ? match[1] : null
-}
-
-function formatTaskTimeRange(
-  language: "el" | "en",
-  start?: string | null,
-  end?: string | null
-) {
-  const from = formatTimeDisplay(start)
-  const to = formatTimeDisplay(end)
-  if (from && to) return `${from} - ${to}`
-  if (from) return localizeText(language, `Από ${from}`, `From ${from}`)
-  if (to) return localizeText(language, `Έως ${to}`, `Until ${to}`)
-  return localizeText(language, "Δεν έχει οριστεί ώρα", "No time set")
-}
-
-function formatCountText(
-  count: number,
-  language: "el" | "en",
-  singularEl: string,
-  pluralEl: string,
-  singularEn: string,
-  pluralEn: string
-) {
-  const label =
-    language === "en"
-      ? count === 1
-        ? singularEn
-        : pluralEn
-      : count === 1
-        ? singularEl
-        : pluralEl
-
-  return `${count} ${label}`
-}
-
-function getTodayMissingSuppliesCount(snapshot: PropertyCalendarDaySnapshot | null) {
-  if (!snapshot) return 0
-  return snapshot.supplies.segments.find((segment) => segment.state === "missing")?.count ?? 0
-}
-
-function buildPropertyTodaySection(property: PropertyListItem, today: Date): PropertyTodaySection {
-  const snapshot = buildPropertyCalendarDaySnapshot({
-    date: today,
-    bookings: safeArray(property.bookings).map((booking) => ({
-      id: booking.id,
-      status: booking.status,
-      guestName: booking.guestName ?? null,
-      checkInDate: booking.checkInDate,
-      checkOutDate: booking.checkOutDate,
-      checkInTime: booking.checkInTime ?? null,
-      checkOutTime: booking.checkOutTime ?? null,
-    })),
-    tasks: safeArray(property.tasks).map((task) => ({
-      id: task.id,
-      title: task.title || "",
-      status: task.status,
-      scheduledDate: task.scheduledDate ?? null,
-      scheduledStartTime: task.scheduledStartTime ?? null,
-      scheduledEndTime: task.scheduledEndTime ?? null,
-      dueDate: task.dueDate ?? null,
-      completedAt: task.completedAt ?? null,
-      alertEnabled: Boolean(task.alertEnabled),
-      alertAt: task.alertAt ?? null,
-    })),
-    issues: safeArray(property.issues).map((issue) => ({
-      id: issue.id,
-      title: issue.title || "",
-      status: issue.status,
-      severity: issue.severity ?? null,
-      createdAt: issue.createdAt ?? null,
-      updatedAt: issue.updatedAt ?? null,
-      resolvedAt: issue.resolvedAt ?? null,
-      requiresImmediateAction: Boolean(issue.requiresImmediateAction),
-      affectsHosting: issue.affectsHosting ?? null,
-    })),
-    conditions: safeArray(property.conditions).map((condition) => ({
-      id: condition.id,
-      title: condition.title || "",
-      status: condition.status ?? null,
-      blockingStatus: condition.blockingStatus ?? null,
-      severity: condition.severity ?? null,
-      createdAt: condition.createdAt ?? null,
-      updatedAt: condition.updatedAt ?? null,
-      resolvedAt: condition.resolvedAt ?? null,
-      dismissedAt: condition.dismissedAt ?? null,
-    })),
-    propertySupplies: safeArray(property.propertySupplies).map((supply) => ({
-      id: supply.id,
-      currentStock: supply.currentStock ?? null,
-      stateMode: supply.stateMode ?? null,
-      fillLevel: supply.fillLevel ?? null,
-      derivedState: supply.derivedState ?? null,
-      mediumThreshold: supply.mediumThreshold ?? null,
-      fullThreshold: supply.fullThreshold ?? null,
-      minimumThreshold: supply.minimumThreshold ?? null,
-      reorderThreshold: supply.reorderThreshold ?? null,
-      warningThreshold: supply.warningThreshold ?? null,
-      targetLevel: supply.targetLevel ?? null,
-      targetStock: supply.targetStock ?? null,
-      trackingMode: supply.trackingMode ?? null,
-      isCritical: supply.isCritical ?? null,
-      updatedAt: supply.updatedAt ?? null,
-      lastSeenUpdate: supply.lastUpdatedAt ?? null,
-      supplyItem: {
-        minimumStock: supply.supplyItem?.minimumStock ?? null,
-      },
-    })),
-  })
-
-  return {
-    property,
-    snapshot,
-    location: formatLocation(property),
-    nextBooking: getNextUpcomingBooking(property) ?? null,
-    counts: {
-      bookings: snapshot?.occupancy.bookingCount ?? 0,
-      tasks: snapshot?.tasks.count ?? 0,
-      alerts: snapshot?.tasks.activeAlertCount ?? 0,
-      shortages: getTodayMissingSuppliesCount(snapshot),
-      issues: snapshot?.issues.count ?? 0,
-    },
-  }
-}
-
-function matchesTodayMetricFilter(section: PropertyTodaySection, metricFilter: MetricFilter) {
-  switch (metricFilter) {
-    case "bookings":
-      return section.counts.bookings > 0
-    case "tasks":
-      return section.counts.tasks > 0
-    case "alerts":
-      return section.counts.alerts > 0
-    case "shortages":
-      return section.counts.shortages > 0
-    case "issues":
-      return section.counts.issues > 0
-    case "all":
-    default:
-      return true
-  }
-}
-
-function getTodayOccupancyBadgeClasses(state: PropertyCalendarDaySnapshot["occupancy"]["state"]) {
-  switch (state) {
-    case "turnover":
-      return "bg-violet-50 text-violet-700 ring-1 ring-violet-200"
-    case "check_in":
-      return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
-    case "check_out":
-      return "bg-amber-50 text-amber-700 ring-1 ring-amber-200"
-    case "occupied":
-      return "bg-blue-50 text-blue-700 ring-1 ring-blue-200"
-    case "vacant":
-    default:
-      return "bg-slate-100 text-slate-700 ring-1 ring-slate-200"
-  }
-}
-
-function getTodayOccupancyLabel(
-  language: "el" | "en",
-  state: PropertyCalendarDaySnapshot["occupancy"]["state"]
-) {
-  switch (state) {
-    case "turnover":
-      return localizeText(language, "Αναχώρηση + άφιξη", "Turnover")
-    case "check_in":
-      return localizeText(language, "Άφιξη σήμερα", "Check-in today")
-    case "check_out":
-      return localizeText(language, "Αναχώρηση σήμερα", "Check-out today")
-    case "occupied":
-      return localizeText(language, "Με διαμονή", "Occupied")
-    case "vacant":
-    default:
-      return localizeText(language, "Κενό σήμερα", "Vacant today")
-  }
-}
-
-function getTodayTaskBadgeClasses(state: PropertyCalendarDaySnapshot["tasks"]["state"]) {
-  switch (state) {
-    case "problem":
-      return "bg-red-50 text-red-700 ring-1 ring-red-200"
-    case "in_progress":
-      return "bg-sky-50 text-sky-700 ring-1 ring-sky-200"
-    case "accepted":
-      return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
-    case "assigned":
-      return "bg-amber-50 text-amber-700 ring-1 ring-amber-200"
-    case "scheduled":
-      return "bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200"
-    case "completed":
-      return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
-    case "none":
-    default:
-      return "bg-slate-100 text-slate-700 ring-1 ring-slate-200"
-  }
-}
-
-function getTodayTaskLabel(
-  language: "el" | "en",
-  state: PropertyCalendarDaySnapshot["tasks"]["state"]
-) {
-  switch (state) {
-    case "problem":
-      return localizeText(language, "Χρειάζεται ενέργεια", "Needs action")
-    case "in_progress":
-      return localizeText(language, "Σε εξέλιξη", "In progress")
-    case "accepted":
-      return localizeText(language, "Αποδεκτή", "Accepted")
-    case "assigned":
-      return localizeText(language, "Ανατεθειμένη", "Assigned")
-    case "scheduled":
-      return localizeText(language, "Προγραμματισμένη", "Scheduled")
-    case "completed":
-      return localizeText(language, "Ολοκληρωμένη", "Completed")
-    case "none":
-    default:
-      return localizeText(language, "Χωρίς εργασία", "No task")
-  }
-}
-
-function getTodayIssuesBadgeClasses(state: PropertyCalendarDaySnapshot["issues"]["state"]) {
-  switch (state) {
-    case "critical":
-      return "bg-red-50 text-red-700 ring-1 ring-red-200"
-    case "warning":
-      return "bg-amber-50 text-amber-700 ring-1 ring-amber-200"
-    case "clear":
-    default:
-      return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
-  }
-}
-
-function getTodayIssuesLabel(
-  language: "el" | "en",
-  state: PropertyCalendarDaySnapshot["issues"]["state"]
-) {
-  switch (state) {
-    case "critical":
-      return localizeText(language, "Κρίσιμα θέματα", "Critical issues")
-    case "warning":
-      return localizeText(language, "Ανοιχτά θέματα", "Open issues")
-    case "clear":
-    default:
-      return localizeText(language, "Καθαρό", "Clear")
-  }
-}
-
-function getTodaySupplyBadgeClasses(shortages: number) {
-  if (shortages > 0) return "bg-red-50 text-red-700 ring-1 ring-red-200"
-  return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
-}
-
-function getTodaySupplyLabel(language: "el" | "en", shortages: number) {
-  return shortages > 0
-    ? localizeText(language, "Με ελλείψεις", "Shortages detected")
-    : localizeText(language, "Πλήρες", "Covered")
-}
-
-function getTodayReadinessReason(
-  language: "el" | "en",
-  snapshot: PropertyCalendarDaySnapshot | null
-) {
-  if (!snapshot) {
-    return localizeText(language, "Δεν υπάρχουν αρκετά δεδομένα για σήμερα.", "Not enough data for today.")
-  }
-
-  switch (snapshot.readiness.blockingReason) {
-    case "occupied":
-      return localizeText(language, "Το ακίνητο έχει ενεργή διαμονή σήμερα.", "The property has an active stay today.")
-    case "turnover_without_task":
-      return localizeText(language, "Υπάρχει κίνηση κράτησης αλλά δεν υπάρχει εργασία κάλυψης.", "There is booking movement today without task coverage.")
-    case "turnover_task_pending":
-      return localizeText(language, "Η σημερινή εργασία είναι ακόμη ανοιχτή ή σε εξέλιξη.", "Today's task is still open or in progress.")
-    case "issues":
-      return localizeText(language, "Υπάρχουν ενεργά ζητήματα ή βλάβες που μπλοκάρουν τη μέρα.", "Active issues or damages are blocking the day.")
-    case "conditions":
-      return localizeText(language, "Υπάρχουν ενεργές προειδοποιήσεις που θέλουν παρακολούθηση.", "Active warnings need attention.")
-    case "clear":
-      return localizeText(language, "Η σημερινή εικόνα είναι καθαρή.", "Today's picture is clear.")
-    case "unknown":
-    default:
-      return localizeText(language, "Η σημερινή κατάσταση δεν είναι ακόμη διαθέσιμη.", "Today's status is not yet available.")
-  }
+/**
+ * Inline CSS hover tooltip. Χρησιμοποιείται σε status chips / counter badges.
+ */
+function ListTooltip({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <span className="group relative inline-flex">
+      {children}
+      <span className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 w-64 -translate-x-1/2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs leading-relaxed text-slate-700 shadow-xl opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+        {label}
+        <span className="absolute left-1/2 top-full h-0 w-0 -translate-x-1/2 border-x-4 border-t-4 border-x-transparent border-t-slate-200" />
+      </span>
+    </span>
+  )
 }
 
 function TodaySnapshotPanel({
@@ -952,41 +175,6 @@ function WrenchIcon({ className }: { className?: string }) {
 
 function cn(...classes: (string | undefined | false | null)[]) {
   return classes.filter(Boolean).join(" ")
-}
-
-/**
- * Επιστρέφει border + background classes για το card ακινήτου
- * βάσει της υπάρχουσας κατάστασης snapshot — χωρίς νέα λογική.
- */
-function getPropertyCardClasses(
-  snapshot: PropertyCalendarDaySnapshot | null,
-  shortageCount: number,
-  issueCount: number
-) {
-  if (!snapshot) return "border-slate-200 bg-white"
-
-  // Άφιξη σήμερα + ανοιχτά ζητήματα → κόκκινο (υψηλότερη προτεραιότητα)
-  const hasArrivalToday = snapshot.occupancy.hasCheckIn
-  const arrivalNotReady =
-    hasArrivalToday &&
-    (snapshot.tasks.count === 0 ||
-      (snapshot.tasks.state !== "completed" && snapshot.tasks.state !== "none") ||
-      shortageCount > 0 ||
-      issueCount > 0)
-  if (arrivalNotReady) {
-    return "border-red-300 bg-red-50"
-  }
-
-  if (snapshot.issues.state === "critical" || snapshot.tasks.state === "problem") {
-    return "border-red-200 bg-red-50/60"
-  }
-  if (snapshot.issues.state === "warning" || shortageCount > 0 || issueCount > 0) {
-    return "border-amber-200 bg-amber-50/50"
-  }
-  if (snapshot.tasks.state !== "none" && snapshot.tasks.state !== "completed") {
-    return "border-sky-200 bg-sky-50/40"
-  }
-  return "border-slate-200 bg-white"
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -1221,7 +409,7 @@ export default function PropertiesPage() {
     () =>
       filteredSections
         .map((section) => section.property)
-        .filter((property) => matchesMetricFilter(property, "all")),
+        .filter(() => matchesMetricFilter("all")),
     [filteredSections]
   )
 
