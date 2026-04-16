@@ -384,14 +384,7 @@ export async function POST(req: NextRequest) {
 
     // ─── Readiness refresh ────────────────────────────────────────────────────
     // Νέα εργασία → αλλάζει το operational status του ακινήτου.
-    // refreshPropertyReadiness ενημερώνει canonical DB state (turnover coverage κ.λπ.)
-    try {
-      await refreshPropertyReadiness(propertyId)
-    } catch (readinessError) {
-      // Μη-critical: το task δημιουργήθηκε επιτυχώς.
-      // Το readiness θα ανανεωθεί την επόμενη φορά που θα κληθεί.
-      console.warn("Task POST: readiness refresh failed (non-critical):", readinessError)
-    }
+    await refreshPropertyReadiness(propertyId)
 
     // ─── Response ─────────────────────────────────────────────────────────────
     const fullTask = await prisma.task.findUnique({

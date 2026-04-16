@@ -383,11 +383,7 @@ export async function PUT(request: NextRequest, context: RouteContext) {
     })
 
     // Assignment status → task status → operational readiness change
-    try {
-      await refreshPropertyReadiness(existingAssignment.task.propertyId)
-    } catch (readinessError) {
-      console.warn("PUT task-assignment: readiness refresh failed (non-critical):", readinessError)
-    }
+    await refreshPropertyReadiness(existingAssignment.task.propertyId)
 
     const updatedAssignment = await buildAssignmentResponse(id, request)
 
@@ -458,11 +454,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     })
 
     // Διαγραφή ανάθεσης → task επιστρέφει σε pending → operational state αλλάζει
-    try {
-      await refreshPropertyReadiness(existingAssignment.task.propertyId)
-    } catch (readinessError) {
-      console.warn("DELETE task-assignment: readiness refresh failed (non-critical):", readinessError)
-    }
+    await refreshPropertyReadiness(existingAssignment.task.propertyId)
 
     return NextResponse.json({ success: true })
   } catch (error) {

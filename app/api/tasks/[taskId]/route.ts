@@ -1605,11 +1605,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       sendIssuesChecklist: finalSendIssuesChecklist,
     })
 
-    try {
-      await refreshPropertyReadiness(existingTask.propertyId)
-    } catch (readinessError) {
-      console.warn("Task PATCH: readiness refresh failed (non-critical):", readinessError)
-    }
+    await refreshPropertyReadiness(existingTask.propertyId)
 
     const payload = await getTaskPayload(taskId, access.auth)
 

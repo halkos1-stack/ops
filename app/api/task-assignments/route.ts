@@ -825,11 +825,7 @@ export async function POST(request: NextRequest) {
     })
 
     // Νέα ανάθεση → task status "assigned" → operational readiness αλλάζει
-    try {
-      await refreshPropertyReadiness(task.propertyId)
-    } catch (readinessError) {
-      console.warn("POST task-assignment: readiness refresh failed (non-critical):", readinessError)
-    }
+    await refreshPropertyReadiness(task.propertyId)
 
     const partnerEmail = toNullableString(partner.email)
     const propertyName = toNullableString(task.property?.name) || "—"

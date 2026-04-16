@@ -747,17 +747,10 @@ export async function POST(req: NextRequest) {
       },
     })
 
-    try {
-      await refreshPropertyReadinessSnapshot({
-        propertyId: created.id,
-        organizationId,
-      })
-    } catch (readinessError) {
-      console.error(
-        "Properties POST readiness snapshot refresh error:",
-        readinessError
-      )
-    }
+    await refreshPropertyReadinessSnapshot({
+      propertyId: created.id,
+      organizationId,
+    })
 
     const property = await prisma.property.findUnique({
       where: {
