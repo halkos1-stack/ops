@@ -862,7 +862,7 @@ function buildWorkWindows(bookings: PropertyBookingLite[], tasks: PropertyTaskLi
         linkedTask,
       } satisfies WorkWindow
     })
-    .filter((window): window is WorkWindow => Boolean(window))
+    .filter(Boolean) as WorkWindow[]
 }
 
 function workWindowTouchesDay(window: WorkWindow, day: Date) {
@@ -1382,6 +1382,8 @@ function CalendarCell({
   language,
   locale,
   activeFilter,
+  allSupplyRows,
+  allOpenIssues,
   onOpenDay,
   onOpenIssues,
   onOpenSupplies,
@@ -1391,6 +1393,8 @@ function CalendarCell({
   language: Language
   locale: string
   activeFilter: CalendarFilter
+  allSupplyRows: SupplyRow[]
+  allOpenIssues: PropertyIssueLite[]
   onOpenDay: () => void
   onOpenIssues: () => void
   onOpenSupplies: () => void
@@ -1409,37 +1413,48 @@ function CalendarCell({
   const barBase =
     "flex h-[22px] w-full items-center gap-1.5 rounded-lg px-2 text-xs font-medium cursor-pointer select-none transition hover:opacity-80"
 
-  // ── Gap day attention logic ────────────────────────────────────────────────
-  // Χρησιμοποιεί αποκλειστικά υπάρχοντα fields — χωρίς νέα λογική.
+  // ── Arrival day attention logic ───────────────────────────────────────────
+  // Κόκκινο φόντο στην ημέρα άφιξης (check-in) όταν το προηγούμενο gap δεν
+  // είναι έτοιμο: δεν υπάρχει / δεν ολοκληρώθηκε εργασία, ή υπάρχουν
+  // ελλείψεις αναλωσίμων, ή ανοιχτές βλάβες/ζημιές.
   const todayMidnight = new Date()
   todayMidnight.setHours(0, 0, 0, 0)
   const entryMidnight = new Date(entry.date)
   entryMidnight.setHours(0, 0, 0, 0)
+  const isFutureOrToday = entryMidnight.getTime() >= todayMidnight.getTime()
 
-  const isGapDay =
-    entry.workWindow !== null && entry.workWindow.nextBooking !== null
-  const isFutureOrToday =
-    entryMidnight.getTime() >= todayMidnight.getTime()
-  const taskIsDone =
-    entry.taskForCalendar != null &&
-    normalizeTaskStatus(entry.taskForCalendar.status) === "completed"
-  const hasSupplyShortage =
-    entry.supplyRecords.some((r) => r.state === "missing")
-  const hasOpenIssue = entry.issueRecords.length > 0
+  // Ημέρα άφιξης: υπάρχει κράτηση που ξεκινά σήμερα ΚΑΙ υπάρχει gap window
+  // που τελειώνει εδώ (δηλ. nextBooking check-in = σήμερα).
+  const isArrivalDay =
+    entry.arrivals.length > 0 &&
+    entry.workWindow !== null &&
+    entry.workWindow.nextBooking !== null &&
+    normalizeDateOnly(entry.workWindow.nextBooking.checkInDate) === entry.key
 
-  const gapNeedsAttention =
-    isGapDay && isFutureOrToday && (!taskIsDone || hasSupplyShortage || hasOpenIssue)
+  // Εργασία του gap: linkedTask στο workWindow (όχι taskForCalendar που είναι day-specific)
+  const gapTask = isArrivalDay ? entry.workWindow!.linkedTask : null
+  const gapTaskDone =
+    gapTask != null && normalizeTaskStatus(gapTask.status) === "completed"
 
-  const gapAttentionReasons: string[] = []
-  if (gapNeedsAttention) {
-    if (!entry.taskForCalendar)
-      gapAttentionReasons.push(language === "el" ? "Δεν υπάρχει εργασία κάλυψης" : "No coverage task scheduled")
-    else if (!taskIsDone)
-      gapAttentionReasons.push(language === "el" ? "Εργασία δεν έχει ολοκληρωθεί" : "Task not yet completed")
-    if (hasSupplyShortage)
-      gapAttentionReasons.push(language === "el" ? "Ελλείψεις αναλωσίμων" : "Supply shortages")
-    if (hasOpenIssue)
-      gapAttentionReasons.push(language === "el" ? "Ανοιχτές βλάβες / ζημιές" : "Open issues or damages")
+  // Property-wide shortages και open issues
+  const propertyHasShortage = allSupplyRows.some((r) => r.state === "missing")
+  const propertyHasOpenIssue = allOpenIssues.some(isOpenIssue)
+
+  const arrivalNeedsAttention =
+    isArrivalDay &&
+    isFutureOrToday &&
+    (!gapTaskDone || propertyHasShortage || propertyHasOpenIssue)
+
+  const arrivalAttentionReasons: string[] = []
+  if (arrivalNeedsAttention) {
+    if (!gapTask)
+      arrivalAttentionReasons.push(language === "el" ? "Δεν υπάρχει εργασία κάλυψης" : "No coverage task scheduled")
+    else if (!gapTaskDone)
+      arrivalAttentionReasons.push(language === "el" ? "Εργασία δεν έχει ολοκληρωθεί" : "Task not yet completed")
+    if (propertyHasShortage)
+      arrivalAttentionReasons.push(language === "el" ? "Ελλείψεις αναλωσίμων" : "Supply shortages")
+    if (propertyHasOpenIssue)
+      arrivalAttentionReasons.push(language === "el" ? "Ανοιχτές βλάβες / ζημιές" : "Open issues or damages")
   }
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -1447,11 +1462,11 @@ function CalendarCell({
     <button
       type="button"
       onClick={onOpenDay}
-      title={gapNeedsAttention ? gapAttentionReasons.join(" · ") : undefined}
+      title={arrivalNeedsAttention ? arrivalAttentionReasons.join(" · ") : undefined}
       className={cn(
         "flex flex-col rounded-2xl border p-3 text-left transition hover:-translate-y-0.5 hover:shadow-sm",
-        gapNeedsAttention
-          ? "border-amber-300 bg-amber-50"
+        arrivalNeedsAttention
+          ? "border-red-300 bg-red-50"
           : entry.isCurrentMonth || granularity !== "month"
             ? "border-slate-200 bg-white"
             : "border-slate-100 bg-slate-50/70",
@@ -2221,6 +2236,8 @@ export default function PropertyDetailPage() {
                     language={language}
                     locale={locale}
                     activeFilter={activeFilter}
+                    allSupplyRows={supplyRows}
+                    allOpenIssues={safeArray(property?.issues)}
                     onOpenDay={() => {
                       setAnchorDate(entry.date)
                       setGranularity("day")
@@ -2250,6 +2267,8 @@ export default function PropertyDetailPage() {
                     language={language}
                     locale={locale}
                     activeFilter={activeFilter}
+                    allSupplyRows={supplyRows}
+                    allOpenIssues={safeArray(property?.issues)}
                     onOpenDay={() => {
                       setAnchorDate(entry.date)
                       setGranularity("day")

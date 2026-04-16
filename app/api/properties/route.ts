@@ -413,6 +413,7 @@ function shapePropertyForOperationalViews(property: FullPropertyRow) {
       status: b.status ?? null,
       checkInDate: b.checkInDate ?? null,
       checkOutDate: b.checkOutDate ?? null,
+      guestName: (b as { guestName?: string | null }).guestName ?? null,
     })),
     tasks: canonicalTasks.map((t) => {
       const task = t as LooseRecord
@@ -779,9 +780,11 @@ export async function POST(req: NextRequest) {
           select: {
             id: true,
             status: true,
+            guestName: true,
             checkInDate: true,
             checkOutDate: true,
             checkInTime: true,
+            checkOutTime: true,
           },
           orderBy: {
             checkInDate: "desc",
@@ -799,6 +802,9 @@ export async function POST(req: NextRequest) {
             taskType: true,
             title: true,
             scheduledDate: true,
+            scheduledStartTime: true,
+            scheduledEndTime: true,
+            dueDate: true,
             completedAt: true,
             alertEnabled: true,
             alertAt: true,
@@ -850,10 +856,15 @@ export async function POST(req: NextRequest) {
         issues: {
           select: {
             id: true,
+            title: true,
             status: true,
             severity: true,
             issueType: true,
             requiresImmediateAction: true,
+            affectsHosting: true,
+            createdAt: true,
+            updatedAt: true,
+            resolvedAt: true,
           },
           orderBy: {
             createdAt: "desc",
@@ -909,6 +920,10 @@ export async function POST(req: NextRequest) {
             severity: true,
             managerDecision: true,
             title: true,
+            createdAt: true,
+            updatedAt: true,
+            resolvedAt: true,
+            dismissedAt: true,
           },
           take: 50,
         },

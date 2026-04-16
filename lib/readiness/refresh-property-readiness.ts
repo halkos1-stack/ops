@@ -53,7 +53,7 @@ export async function refreshPropertyReadiness(propertyId: string) {
   }
 
   const [nextBooking, recentBookings, dbConditions, dbTasks] = await Promise.all([
-    // Επόμενη κράτηση (για conditions readiness)
+    // Επόμενη κράτηση (για conditions readiness + activeTarget στο operational status)
     prisma.booking.findFirst({
       where: {
         organizationId: property.organizationId,
@@ -61,7 +61,7 @@ export async function refreshPropertyReadiness(propertyId: string) {
         checkInDate: { gte: now },
       },
       orderBy: { checkInDate: "asc" },
-      select: { id: true, checkInDate: true },
+      select: { id: true, checkInDate: true, checkOutDate: true, guestName: true, status: true },
     }),
 
     // Πρόσφατες κρατήσεις για operational status (active stay + turnover window)
@@ -195,16 +195,33 @@ export async function refreshPropertyReadiness(propertyId: string) {
   const snapshot = buildPropertyConditionSnapshot(rawConditions)
 
   // ─── Operational status (occupancy + turnover window + task proof) ────────
-  const operationalStatusResult = computePropertyOperationalStatus({
-    now,
-    readinessStatus: null, // θα χρησιμοποιηθεί μόνο αν δεν υπάρχει turnover window
-    bookings: recentBookings.map((b) => ({
+  // Συνδυάζουμε recentBookings (active stay / recent checkout) +
+  // nextBooking (future check-in) ώστε το activeTarget να υπολογιστεί σωστά.
+  const bookingsForOperationalStatus = [
+    ...recentBookings.map((b) => ({
       id: b.id,
       status: b.status ?? null,
       checkInDate: b.checkInDate ?? null,
       checkOutDate: b.checkOutDate ?? null,
       guestName: b.guestName ?? null,
     })),
+    ...(nextBooking && nextBooking.checkInDate
+      ? [
+          {
+            id: nextBooking.id,
+            status: nextBooking.status ?? null,
+            checkInDate: nextBooking.checkInDate,
+            checkOutDate: nextBooking.checkOutDate ?? null,
+            guestName: nextBooking.guestName ?? null,
+          },
+        ]
+      : []),
+  ]
+
+  const operationalStatusResult = computePropertyOperationalStatus({
+    now,
+    readinessStatus: null, // θα χρησιμοποιηθεί μόνο αν δεν υπάρχει turnover window
+    bookings: bookingsForOperationalStatus,
     tasks: dbTasks.map((t) => ({
       id: String(t.id),
       title: String(t.title ?? ""),

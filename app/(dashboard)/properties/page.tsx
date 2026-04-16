@@ -965,6 +965,18 @@ function getPropertyCardClasses(
 ) {
   if (!snapshot) return "border-slate-200 bg-white"
 
+  // Άφιξη σήμερα + ανοιχτά ζητήματα → κόκκινο (υψηλότερη προτεραιότητα)
+  const hasArrivalToday = snapshot.occupancy.hasCheckIn
+  const arrivalNotReady =
+    hasArrivalToday &&
+    (snapshot.tasks.count === 0 ||
+      (snapshot.tasks.state !== "completed" && snapshot.tasks.state !== "none") ||
+      shortageCount > 0 ||
+      issueCount > 0)
+  if (arrivalNotReady) {
+    return "border-red-300 bg-red-50"
+  }
+
   if (snapshot.issues.state === "critical" || snapshot.tasks.state === "problem") {
     return "border-red-200 bg-red-50/60"
   }

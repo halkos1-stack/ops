@@ -222,6 +222,8 @@ type ParsedTaskResponse = {
   error?: string
   message?: string
   task?: TaskDetails
+  assignmentEmailSent?: boolean
+  assignmentEmailSendReason?: string
 }
 
 type EditableChecklistItem = {
