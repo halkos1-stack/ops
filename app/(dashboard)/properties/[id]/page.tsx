@@ -57,7 +57,6 @@ import {
   type CalendarGranularity,
   type DayEntry,
   type Language,
-  type PropertyBookingLite,
   type PropertyDetail,
   type PropertyFormState,
   type PropertyIssueLite,
@@ -167,60 +166,6 @@ function WrenchIcon({ className }: { className?: string }) {
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76Z" />
     </svg>
-  )
-}
-
-function SignalButton({
-  title,
-  tone,
-  onClick,
-  children,
-}: {
-  title: string
-  tone: Tone
-  onClick?: () => void
-  children: ReactNode
-}) {
-  const classes = getToneClasses(tone)
-
-  return (
-    <button
-      type="button"
-      title={title}
-      onClick={(event) => {
-        event.stopPropagation()
-        onClick?.()
-      }}
-      className={cn(
-        "inline-flex h-9 min-w-9 items-center justify-center rounded-xl border px-2 transition hover:scale-[1.03]",
-        classes.soft
-      )}
-    >
-      {children}
-    </button>
-  )
-}
-
-function SmallCircleIcon({ label }: { label: string }) {
-  return (
-    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-current text-[10px] font-bold">
-      {label}
-    </span>
-  )
-}
-
-function SupplySegmentsIcon({ rows }: { rows: SupplyRow[] }) {
-  const missing = rows.filter((row) => row.state === "missing").length
-  const medium = rows.filter((row) => row.state === "medium").length
-  const full = rows.filter((row) => row.state === "full").length
-  const total = rows.length || 1
-
-  return (
-    <div className="flex h-2.5 w-10 overflow-hidden rounded-full bg-slate-200">
-      <div className="bg-red-500" style={{ width: `${(missing / total) * 100}%` }} />
-      <div className="bg-amber-500" style={{ width: `${(medium / total) * 100}%` }} />
-      <div className="bg-emerald-500" style={{ width: `${(full / total) * 100}%` }} />
-    </div>
   )
 }
 

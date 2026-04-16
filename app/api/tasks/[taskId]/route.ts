@@ -23,6 +23,7 @@ import {
   type ReadinessConditionInput,
 } from "@/lib/readiness/compute-property-readiness"
 import { computePropertyOperationalStatus } from "@/lib/readiness/property-operational-status"
+import { refreshPropertyReadiness } from "@/lib/readiness/refresh-property-readiness"
 
 type RouteContext = {
   params: Promise<{
@@ -1603,6 +1604,12 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       propertyId: existingTask.propertyId,
       sendIssuesChecklist: finalSendIssuesChecklist,
     })
+
+    try {
+      await refreshPropertyReadiness(existingTask.propertyId)
+    } catch (readinessError) {
+      console.warn("Task PATCH: readiness refresh failed (non-critical):", readinessError)
+    }
 
     const payload = await getTaskPayload(taskId, access.auth)
 
