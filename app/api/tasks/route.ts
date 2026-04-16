@@ -22,6 +22,9 @@ import {
   taskDetailsInclude,
   shapeTaskForResponse,
 } from "@/lib/tasks/task-response-builder"
+import { refreshPropertyReadiness } from "@/lib/readiness/refresh-property-readiness"
+
+// ─── Local parsing helpers ────────────────────────────────────────────────────
 
 function toNullableString(value: unknown) {
   if (value === undefined || value === null) return null
@@ -32,45 +35,28 @@ function toNullableString(value: unknown) {
 function toNullableTime(value: unknown) {
   const text = toNullableString(value)
   if (!text) return null
-
   const normalized = text.slice(0, 5)
-  const isValid = /^([01]\d|2[0-3]):([0-5]\d)$/.test(normalized)
-
-  if (!isValid) return null
-  return normalized
+  return /^([01]\d|2[0-3]):([0-5]\d)$/.test(normalized) ? normalized : null
 }
 
 function toOptionalDate(value: unknown) {
   const text = toNullableString(value)
   if (!text) return null
-
   const date = new Date(text)
-  if (Number.isNaN(date.getTime())) return null
-
-  return date
-}
-
-function toRequiredDate(value: unknown) {
-  const text = toNullableString(value)
-  if (!text) return null
-
-  const date = new Date(text)
-  if (Number.isNaN(date.getTime())) return null
-
-  return date
+  return Number.isNaN(date.getTime()) ? null : date
 }
 
 function startOfDay(value: string) {
   const date = new Date(`${value}T00:00:00`)
-  if (Number.isNaN(date.getTime())) return null
-  return date
+  return Number.isNaN(date.getTime()) ? null : date
 }
 
 function endOfDay(value: string) {
   const date = new Date(`${value}T23:59:59.999`)
-  if (Number.isNaN(date.getTime())) return null
-  return date
+  return Number.isNaN(date.getTime()) ? null : date
 }
+
+// ─── Query builder ────────────────────────────────────────────────────────────
 
 function buildTaskWhere(
   auth: RouteAccessContext,
@@ -88,13 +74,8 @@ function buildTaskWhere(
   const dateFrom = searchParams.get("dateFrom")?.trim()
   const dateTo = searchParams.get("dateTo")?.trim()
 
-  if (propertyId) {
-    where.propertyId = propertyId
-  }
-
-  if (bookingId) {
-    where.bookingId = bookingId
-  }
+  if (propertyId) where.propertyId = propertyId
+  if (bookingId) where.bookingId = bookingId
 
   if (status) {
     where.status = status
@@ -113,22 +94,21 @@ function buildTaskWhere(
 
   if (dateFrom || dateTo) {
     const scheduledDate: Prisma.DateTimeFilter = {}
-
     if (dateFrom) {
       const from = startOfDay(dateFrom)
       if (from) scheduledDate.gte = from
     }
-
     if (dateTo) {
       const to = endOfDay(dateTo)
       if (to) scheduledDate.lte = to
     }
-
     where.scheduledDate = scheduledDate
   }
 
   return where
 }
+
+// ─── GET ──────────────────────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
   try {
@@ -166,13 +146,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(canonicalTasks)
   } catch (error) {
     console.error("Tasks GET error:", error)
-
     return NextResponse.json(
       { error: "Αποτυχία φόρτωσης εργασιών." },
       { status: 500 }
     )
   }
 }
+
+// ─── POST ─────────────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
   try {
@@ -185,6 +166,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json()
     const auth = access.auth
 
+    // ─── Organization access ─────────────────────────────────────────────────
     const organizationId =
       toNullableString(body.organizationId) || auth.organizationId || null
 
@@ -202,12 +184,13 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // ─── Required fields ──────────────────────────────────────────────────────
     const propertyId = String(body.propertyId || "").trim()
     const bookingId = toNullableString(body.bookingId)
     const taskSource = (toNullableString(body.source) || "manual").toLowerCase()
     const title = String(body.title || "").trim()
     const taskType = String(body.taskType || "").trim()
-    const scheduledDateValue = toRequiredDate(body.scheduledDate)
+    const scheduledDateValue = toOptionalDate(body.scheduledDate)
 
     if (!propertyId) {
       return NextResponse.json(
@@ -240,16 +223,16 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    if (String(taskSource).trim().toLowerCase() === "booking" && !bookingId) {
+    if (taskSource === "booking" && !bookingId) {
       return NextResponse.json(
         {
-          error:
-            'Οι εργασίες με source "booking" απαιτούν έγκυρο bookingId.',
+          error: 'Οι εργασίες με source "booking" απαιτούν έγκυρο bookingId.',
         },
         { status: 400 }
       )
     }
 
+    // ─── Checklist flags ──────────────────────────────────────────────────────
     const requiresPhotos = Boolean(body.requiresPhotos)
     const requiresApproval = Boolean(body.requiresApproval)
 
@@ -257,26 +240,19 @@ export async function POST(req: NextRequest) {
       body.sendCleaningChecklist === undefined
         ? true
         : Boolean(body.sendCleaningChecklist)
-
     const sendSuppliesChecklist = Boolean(body.sendSuppliesChecklist)
     const sendIssuesChecklist = Boolean(body.sendIssuesChecklist)
 
-    const usesCustomizedCleaningChecklist = Boolean(
-      body.usesCustomizedCleaningChecklist
-    )
-    const usesCustomizedSuppliesChecklist = Boolean(
-      body.usesCustomizedSuppliesChecklist
-    )
-    const usesCustomizedIssuesChecklist = Boolean(
-      body.usesCustomizedIssuesChecklist
-    )
+    const usesCustomizedCleaningChecklist = Boolean(body.usesCustomizedCleaningChecklist)
+    const usesCustomizedSuppliesChecklist = Boolean(body.usesCustomizedSuppliesChecklist)
+    const usesCustomizedIssuesChecklist = Boolean(body.usesCustomizedIssuesChecklist)
 
+    // ─── Alert ────────────────────────────────────────────────────────────────
     const alertEnabled = Boolean(body.alertEnabled)
     let alertAt: Date | null = null
 
     if (alertEnabled) {
       alertAt = toOptionalDate(body.alertAt)
-
       if (!alertAt) {
         return NextResponse.json(
           {
@@ -288,15 +264,10 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ─── Entity validation ────────────────────────────────────────────────────
     const property = await prisma.property.findFirst({
-      where: {
-        id: propertyId,
-        organizationId,
-      },
-      select: {
-        id: true,
-        defaultPartnerId: true,
-      },
+      where: { id: propertyId, organizationId },
+      select: { id: true, defaultPartnerId: true },
     })
 
     if (!property) {
@@ -308,14 +279,8 @@ export async function POST(req: NextRequest) {
 
     if (bookingId) {
       const booking = await prisma.booking.findFirst({
-        where: {
-          id: bookingId,
-          organizationId,
-          propertyId,
-        },
-        select: {
-          id: true,
-        },
+        where: { id: bookingId, organizationId, propertyId },
+        select: { id: true },
       })
 
       if (!booking) {
@@ -329,17 +294,12 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ─── Checklist prerequisite validation ───────────────────────────────────
     if (sendCleaningChecklist) {
-      const primaryTemplate = await findPrimaryCleaningTemplate(
-        organizationId,
-        propertyId
-      )
-
+      const primaryTemplate = await findPrimaryCleaningTemplate(organizationId, propertyId)
       if (!primaryTemplate) {
         return NextResponse.json(
-          {
-            error: "Το ακίνητο δεν έχει ενεργή βασική λίστα καθαριότητας.",
-          },
+          { error: "Το ακίνητο δεν έχει ενεργή βασική λίστα καθαριότητας." },
           { status: 400 }
         )
       }
@@ -347,7 +307,6 @@ export async function POST(req: NextRequest) {
 
     if (sendSuppliesChecklist) {
       const activeSuppliesCount = await countActivePropertySupplies(propertyId)
-
       if (activeSuppliesCount === 0) {
         return NextResponse.json(
           {
@@ -360,22 +319,18 @@ export async function POST(req: NextRequest) {
     }
 
     if (sendIssuesChecklist) {
-      const primaryIssueTemplate = await findPrimaryIssueTemplate(
-        organizationId,
-        propertyId
-      )
-
+      const primaryIssueTemplate = await findPrimaryIssueTemplate(organizationId, propertyId)
       if (!primaryIssueTemplate) {
         return NextResponse.json(
           {
-            error:
-              "Το ακίνητο δεν έχει ενεργή βασική λίστα βλαβών / ζημιών.",
+            error: "Το ακίνητο δεν έχει ενεργή βασική λίστα βλαβών / ζημιών.",
           },
           { status: 400 }
         )
       }
     }
 
+    // ─── Task creation ────────────────────────────────────────────────────────
     const task = await prisma.task.create({
       data: {
         organizationId,
@@ -406,6 +361,7 @@ export async function POST(req: NextRequest) {
       },
     })
 
+    // ─── Sync checklist runs ──────────────────────────────────────────────────
     await syncTaskChecklistRun({
       taskId: task.id,
       organizationId,
@@ -426,25 +382,31 @@ export async function POST(req: NextRequest) {
       sendIssuesChecklist,
     })
 
+    // ─── Readiness refresh ────────────────────────────────────────────────────
+    // Νέα εργασία → αλλάζει το operational status του ακινήτου.
+    // refreshPropertyReadiness ενημερώνει canonical DB state (turnover coverage κ.λπ.)
+    try {
+      await refreshPropertyReadiness(propertyId)
+    } catch (readinessError) {
+      // Μη-critical: το task δημιουργήθηκε επιτυχώς.
+      // Το readiness θα ανανεωθεί την επόμενη φορά που θα κληθεί.
+      console.warn("Task POST: readiness refresh failed (non-critical):", readinessError)
+    }
+
+    // ─── Response ─────────────────────────────────────────────────────────────
     const fullTask = await prisma.task.findUnique({
-      where: {
-        id: task.id,
-      },
+      where: { id: task.id },
       include: taskDetailsInclude,
     })
 
     const shapedTask = fullTask ? shapeTaskForResponse(fullTask) : null
 
     return NextResponse.json(
-      {
-        success: true,
-        task: shapedTask,
-      },
+      { success: true, task: shapedTask },
       { status: 201 }
     )
   } catch (error) {
     console.error("Tasks POST error:", error)
-
     return NextResponse.json(
       { error: "Αποτυχία δημιουργίας εργασίας." },
       { status: 500 }

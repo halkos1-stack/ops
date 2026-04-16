@@ -6,6 +6,7 @@ import {
 } from "@/lib/route-access"
 import { createExpiryDate, createSecureToken } from "@/lib/tokens"
 import { sendMailSafe } from "@/lib/mailer"
+import { refreshPropertyReadiness } from "@/lib/readiness/refresh-property-readiness"
 
 function toNullableString(value: unknown) {
   if (value === undefined || value === null) return null
@@ -822,6 +823,13 @@ export async function POST(request: NextRequest) {
 
       return assignment
     })
+
+    // Νέα ανάθεση → task status "assigned" → operational readiness αλλάζει
+    try {
+      await refreshPropertyReadiness(task.propertyId)
+    } catch (readinessError) {
+      console.warn("POST task-assignment: readiness refresh failed (non-critical):", readinessError)
+    }
 
     const partnerEmail = toNullableString(partner.email)
     const propertyName = toNullableString(task.property?.name) || "—"

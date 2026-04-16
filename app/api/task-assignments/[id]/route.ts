@@ -4,6 +4,7 @@ import {
   requireApiAppAccess,
   canAccessOrganization,
 } from "@/lib/route-access"
+import { refreshPropertyReadiness } from "@/lib/readiness/refresh-property-readiness"
 
 type RouteContext = {
   params: Promise<{
@@ -381,6 +382,13 @@ export async function PUT(request: NextRequest, context: RouteContext) {
       })
     })
 
+    // Assignment status → task status → operational readiness change
+    try {
+      await refreshPropertyReadiness(existingAssignment.task.propertyId)
+    } catch (readinessError) {
+      console.warn("PUT task-assignment: readiness refresh failed (non-critical):", readinessError)
+    }
+
     const updatedAssignment = await buildAssignmentResponse(id, request)
 
     return NextResponse.json(updatedAssignment)
@@ -448,6 +456,13 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
         },
       })
     })
+
+    // Διαγραφή ανάθεσης → task επιστρέφει σε pending → operational state αλλάζει
+    try {
+      await refreshPropertyReadiness(existingAssignment.task.propertyId)
+    } catch (readinessError) {
+      console.warn("DELETE task-assignment: readiness refresh failed (non-critical):", readinessError)
+    }
 
     return NextResponse.json({ success: true })
   } catch (error) {
