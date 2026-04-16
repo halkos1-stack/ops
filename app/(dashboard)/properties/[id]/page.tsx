@@ -1,5 +1,3 @@
-// app/(dashboard)/properties/[id]/page.tsx
-// ΜΕΡΟΣ 1 / 4
 
 "use client"
 

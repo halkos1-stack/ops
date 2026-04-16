@@ -120,6 +120,9 @@ type PropertyBookingRecord = LooseRecord & {
   status?: string | null;
   checkInDate?: Date | string | null;
   checkOutDate?: Date | string | null;
+  checkInTime?: string | null;
+  checkOutTime?: string | null;
+  sourcePlatform?: string | null;
   tasks?: Array<{ id: string }> | null;
 };
 
@@ -156,6 +159,11 @@ type PropertyReadinessSource = {
   bookings?: PropertyBookingRecord[] | null;
   conditions?: PropertyConditionDbRecord[] | null;
   nextCheckInAt?: Date | string | null;
+};
+
+type ReadinessOperationalContextInput = {
+  derivedReadinessStatus: "ready" | "borderline" | "not_ready" | "unknown";
+  operationalReason?: string | null;
 };
 
 function safeArray<T>(value: T[] | null | undefined): T[] {
@@ -220,7 +228,7 @@ function isIssueOpen(status: unknown): boolean {
 
 function isActiveBookingStatus(status: unknown): boolean {
   const text = String(status ?? "").trim().toLowerCase();
-  return text !== "cancelled";
+  return text !== "cancelled" && text !== "canceled";
 }
 
 function isBookingPendingTaskCreation(
@@ -363,6 +371,114 @@ function mapIssueForPropertyPage(issue: PropertyIssueRecord) {
   };
 }
 
+function normalizeConditionType(value: unknown): "supply" | "issue" | "damage" {
+  if (value === "supply" || value === "issue" || value === "damage") {
+    return value;
+  }
+
+  return "issue";
+}
+
+function normalizeConditionStatus(
+  value: unknown
+): "open" | "monitoring" | "resolved" | "dismissed" {
+  if (
+    value === "open" ||
+    value === "monitoring" ||
+    value === "resolved" ||
+    value === "dismissed"
+  ) {
+    return value;
+  }
+
+  return "open";
+}
+
+function normalizeConditionBlockingStatus(
+  value: unknown
+): "blocking" | "non_blocking" | "warning" {
+  if (
+    value === "blocking" ||
+    value === "non_blocking" ||
+    value === "warning"
+  ) {
+    return value;
+  }
+
+  return "warning";
+}
+
+function normalizeConditionSeverity(
+  value: unknown
+): "low" | "medium" | "high" | "critical" {
+  if (
+    value === "low" ||
+    value === "medium" ||
+    value === "high" ||
+    value === "critical"
+  ) {
+    return value;
+  }
+
+  return "medium";
+}
+
+function normalizeConditionManagerDecision(
+  value: unknown
+):
+  | "allow_with_issue"
+  | "block_until_resolved"
+  | "monitor"
+  | "resolved"
+  | "dismissed"
+  | null {
+  if (
+    value === "allow_with_issue" ||
+    value === "block_until_resolved" ||
+    value === "monitor" ||
+    value === "resolved" ||
+    value === "dismissed"
+  ) {
+    return value;
+  }
+
+  return null;
+}
+
+function mapRawConditionToReadinessInput(
+  condition: ExtendedRawPropertyConditionRecord
+): ReadinessConditionInput {
+  return {
+    id: condition.id,
+    propertyId: condition.propertyId,
+    conditionType: normalizeConditionType(condition.conditionType),
+    status: normalizeConditionStatus(condition.status),
+    blockingStatus: normalizeConditionBlockingStatus(condition.blockingStatus),
+    severity: normalizeConditionSeverity(condition.severity),
+    managerDecision: normalizeConditionManagerDecision(
+      condition.managerDecision
+    ),
+    title: condition.title ?? null,
+    description: condition.description ?? condition.managerNotes ?? null,
+    firstDetectedAt: condition.firstDetectedAt ?? null,
+    lastDetectedAt: condition.lastDetectedAt ?? null,
+    createdAt: condition.createdAt ?? null,
+    updatedAt: condition.updatedAt ?? null,
+    resolvedAt: condition.resolvedAt ?? null,
+    dismissedAt: condition.dismissedAt ?? null,
+    sourceType: condition.sourceType ?? null,
+    sourceLabel: condition.sourceLabel ?? null,
+    sourceItemId: condition.sourceItemId ?? null,
+    sourceItemLabel: condition.sourceItemLabel ?? null,
+    sourceRunId: condition.sourceRunId ?? null,
+    sourceAnswerId: condition.sourceAnswerId ?? null,
+    taskId: condition.taskId ?? null,
+    bookingId: condition.bookingId ?? null,
+    propertySupplyId: condition.propertySupplyId ?? null,
+    mergeKey: condition.mergeKey ?? null,
+  };
+}
+
 function mapDbConditionToExtended(condition: {
   id: string;
   propertyId: string;
@@ -410,49 +526,6 @@ function mapDbConditionToExtended(condition: {
   };
 }
 
-function mapRawConditionToReadinessInput(
-  condition: ExtendedRawPropertyConditionRecord
-): ReadinessConditionInput {
-  return {
-    id: condition.id,
-    propertyId: condition.propertyId,
-    conditionType: condition.conditionType as "supply" | "issue" | "damage",
-    status: condition.status as "open" | "monitoring" | "resolved" | "dismissed",
-    blockingStatus: condition.blockingStatus as "blocking" | "non_blocking" | "warning",
-    severity: condition.severity as "low" | "medium" | "high" | "critical",
-    managerDecision: (condition.managerDecision ?? null) as
-      | "allow_with_issue"
-      | "block_until_resolved"
-      | "monitor"
-      | "resolved"
-      | "dismissed"
-      | null,
-    title: condition.title ?? null,
-    description: condition.description ?? condition.managerNotes ?? null,
-    firstDetectedAt: condition.firstDetectedAt ?? null,
-    lastDetectedAt: condition.lastDetectedAt ?? null,
-    createdAt: condition.createdAt ?? null,
-    updatedAt: condition.updatedAt ?? null,
-    resolvedAt: condition.resolvedAt ?? null,
-    dismissedAt: condition.dismissedAt ?? null,
-    sourceType: condition.sourceType ?? null,
-    sourceLabel: condition.sourceLabel ?? null,
-    sourceItemId: condition.sourceItemId ?? null,
-    sourceItemLabel: condition.sourceItemLabel ?? null,
-    sourceRunId: condition.sourceRunId ?? null,
-    sourceAnswerId: condition.sourceAnswerId ?? null,
-    taskId: condition.taskId ?? null,
-    bookingId: condition.bookingId ?? null,
-    propertySupplyId: condition.propertySupplyId ?? null,
-    mergeKey: condition.mergeKey ?? null,
-  };
-}
-
-type ReadinessOperationalContextInput = {
-  derivedReadinessStatus: "ready" | "borderline" | "not_ready" | "unknown";
-  operationalReason?: string | null;
-};
-
 function buildPropertyReadinessFromConditions(
   property: PropertyReadinessSource,
   operationalContext?: ReadinessOperationalContextInput
@@ -463,13 +536,14 @@ function buildPropertyReadinessFromConditions(
   const nextBooking =
     bookings
       .filter((booking) => {
-        if (!booking.checkInDate) return false
+        if (!booking.checkInDate) return false;
         const checkInDate = new Date(booking.checkInDate);
         return !Number.isNaN(checkInDate.getTime()) && checkInDate >= now;
       })
       .sort(
         (a, b) =>
-          new Date(a.checkInDate ?? 0).getTime() - new Date(b.checkInDate ?? 0).getTime()
+          new Date(a.checkInDate ?? 0).getTime() -
+          new Date(b.checkInDate ?? 0).getTime()
       )[0] || null;
 
   const rawConditions: ExtendedRawPropertyConditionRecord[] = safeArray(
@@ -515,10 +589,6 @@ function buildPropertyReadinessFromConditions(
     conditions: rawConditions.map((condition) =>
       mapRawConditionToReadinessInput(condition)
     ),
-    // Παρέχουμε operational context ώστε explain/score/reasons να είναι
-    // συνεπή με το τελικό status. Αν υπάρχει turnover εκκρεμότητα,
-    // το readiness επιστρέφει "not_ready" με OPERATIONAL_PENDING reason,
-    // ακόμα και αν δεν υπάρχουν active conditions.
     operationalContext: operationalContext ?? undefined,
   });
 
@@ -1229,12 +1299,6 @@ async function getFullProperty(id: string) {
     return ["medium", "low"].includes(String(supply.derivedState));
   });
 
-  // ─── Readiness: canonical σειρά εκτέλεσης ──────────────────────────────────
-  //
-  // ΒΗΜΑ 1: Υπολόγισε operational status ΠΡΩΤΑ (bookings + tasks).
-  // Δεν περνάμε readinessStatus εδώ — θα παραχθεί από τα conditions στη συνέχεια.
-  // Το derivedReadinessStatus του operational module είναι η αλήθεια για
-  // turnover states (no_task_coverage, task_unaccepted κ.λπ.).
   const operationalStatusResult = computePropertyOperationalStatus({
     readinessStatus: null,
     bookings: safeArray(property.bookings).map((b) => ({
@@ -1249,9 +1313,15 @@ async function getFullProperty(id: string) {
       const assignments = Array.isArray(task.assignments)
         ? (task.assignments as Array<{ status?: string | null }>)
         : [];
-      const checklistRun = (task.checklistRun ?? null) as { status?: string | null } | null;
-      const supplyRun = (task.supplyRun ?? null) as { status?: string | null } | null;
-      const issueRun = (task.issueRun ?? null) as { status?: string | null } | null;
+      const checklistRun = (task.checklistRun ?? null) as {
+        status?: string | null;
+      } | null;
+      const supplyRun = (task.supplyRun ?? null) as {
+        status?: string | null;
+      } | null;
+      const issueRun = (task.issueRun ?? null) as {
+        status?: string | null;
+      } | null;
 
       return {
         id: String(task.id ?? ""),
@@ -1274,11 +1344,6 @@ async function getFullProperty(id: string) {
     }),
   });
 
-  // ΒΗΜΑ 2: Υπολόγισε conditions readiness ΜΕ operational context.
-  // Αν το operational module επέστρεψε "not_ready" λόγω turnover εκκρεμότητας,
-  // η computePropertyReadiness θα παράγει status/explain/score/reasons
-  // που αντικατοπτρίζουν αυτή την πραγματικότητα — ακόμα και αν δεν υπάρχουν
-  // active conditions. Έτσι όλα τα πεδία του readinessSummary είναι συνεπή.
   const readinessComputed = buildPropertyReadinessFromConditions(
     {
       bookings: property.bookings,
@@ -1297,18 +1362,18 @@ async function getFullProperty(id: string) {
 
   const normalizedIssueTemplates = safeArray(property.issueTemplates);
   const normalizedBookings = safeArray(property.bookings).map((booking) => {
-      const linkedTasks = safeArray(booking.tasks);
+    const linkedTasks = safeArray(booking.tasks);
 
-      return {
-        ...booking,
-        tasks: linkedTasks,
-        taskCount: linkedTasks.length,
-        hasTask: linkedTasks.length > 0,
-      };
-    });
-  const bookingsWithoutTask = normalizedBookings.filter((booking) =>
-    isBookingPendingTaskCreation(booking)
-  ).filter((booking) => booking.hasTask !== true);
+    return {
+      ...booking,
+      tasks: linkedTasks,
+      taskCount: linkedTasks.length,
+      hasTask: linkedTasks.length > 0,
+    };
+  });
+  const bookingsWithoutTask = normalizedBookings
+    .filter((booking) => isBookingPendingTaskCreation(booking))
+    .filter((booking) => booking.hasTask !== true);
 
   const cleaningTemplate =
     normalizedChecklistTemplates.find((template) => {
@@ -1354,18 +1419,12 @@ async function getFullProperty(id: string) {
     operationalActiveBooking: operationalStatusResult.activeBooking,
     operationalRelevantTask: operationalStatusResult.relevantTask,
 
-    // readinessStatus: convenience alias του readinessSummary.status.
-    // Προέρχεται από το readinessComputed που έχει ήδη ενσωματώσει το operational context.
-    // Δεν χρειάζεται override — readinessComputed.status ΗΔΗ είναι η canonical αλήθεια.
     readinessStatus: readinessComputed.status,
     readinessUpdatedAt: readinessComputed.readinessUpdatedAt,
     readinessReasonsText: readinessComputed.readinessReasonsText,
     nextCheckInAt: readinessComputed.nextCheckInAt,
     nextBooking: readinessComputed.nextBooking,
     readinessSummary: {
-      // Όλα τα πεδία προέρχονται από το ίδιο readinessComputed αποτέλεσμα.
-      // Το readinessComputed έχει ήδη λάβει operational context — δεν υπάρχει
-      // πλέον πιθανότητα contradiction μεταξύ status / statusLabel / score / explain / reasons.
       status: readinessComputed.status,
       statusLabel: readinessComputed.statusLabel,
       score: readinessComputed.score,
