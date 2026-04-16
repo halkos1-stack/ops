@@ -3,7 +3,6 @@ import { prisma } from "@/lib/prisma"
 import {
   computePropertyReadiness,
   getReadinessStatusLabel,
-  summarizeReadinessReasons,
   type ReadinessConditionInput,
 } from "@/lib/readiness/compute-property-readiness"
 import {
@@ -11,6 +10,7 @@ import {
   mapDbConditionToRawRecord,
   type RawPropertyConditionRecord,
 } from "@/lib/readiness/property-condition-mappers"
+import { refreshPropertyReadiness } from "@/lib/readiness/refresh-property-readiness"
 
 type RouteContext = {
   params: Promise<{
@@ -231,22 +231,6 @@ function toPrismaManagerDecision(
       return "DISMISSED"
     default:
       return null
-  }
-}
-
-function toPropertyReadinessEnum(
-  status: "ready" | "borderline" | "not_ready" | "unknown"
-): "READY" | "BORDERLINE" | "NOT_READY" | "UNKNOWN" {
-  switch (status) {
-    case "ready":
-      return "READY"
-    case "borderline":
-      return "BORDERLINE"
-    case "not_ready":
-      return "NOT_READY"
-    case "unknown":
-    default:
-      return "UNKNOWN"
   }
 }
 
@@ -489,29 +473,11 @@ async function buildCanonicalConditionsPayload(propertyId: string) {
     conditions: readinessConditions,
   })
 
-  const readinessReasonsText = summarizeReadinessReasons(readiness.reasons)
-
-  await prisma.property.update({
-    where: {
-      id: property.id,
-    },
-    data: {
-      readinessStatus: toPropertyReadinessEnum(readiness.status),
-      readinessUpdatedAt: readiness.computedAt,
-      readinessReasonsText,
-      openConditionCount: snapshot.summary.active,
-      openBlockingConditionCount: snapshot.summary.blocking,
-      openWarningConditionCount: snapshot.summary.warning,
-      nextCheckInAt: computedNextCheckInAt,
-    },
-  })
-
   return {
     property,
     nextBooking,
     snapshot,
     readiness,
-    readinessReasonsText,
     generatedAt: now,
   }
 }
@@ -716,6 +682,15 @@ export async function POST(request: NextRequest, context: RouteContext) {
         lastDetectedAt,
       },
     })
+
+    try {
+      await refreshPropertyReadiness(property.id)
+    } catch (readinessError) {
+      console.warn(
+        "POST /api/properties/[id]/conditions: readiness refresh failed (non-critical):",
+        readinessError
+      )
+    }
 
     const payload = await buildCanonicalConditionsPayload(property.id)
 
