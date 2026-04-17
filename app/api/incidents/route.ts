@@ -11,6 +11,7 @@ type IncidentIssueLike = {
   description: string | null
   severity: string
   status: string
+  resolvedAt: Date | null
   createdAt: Date
   updatedAt: Date
   property: {
@@ -42,6 +43,7 @@ function mapIssueToIncidentLike(issue: IncidentIssueLike) {
     description: issue.description,
     severity: issue.severity,
     status: issue.status,
+    resolvedAt: issue.resolvedAt,
     createdAt: issue.createdAt,
     updatedAt: issue.updatedAt,
     property: issue.property,
