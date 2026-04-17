@@ -6,6 +6,14 @@ import {
   BOOKING_SYNC_STATUS,
   NormalizedBookingInput,
 } from "@/lib/bookings/booking-types"
+import { refreshPropertyReadiness } from "@/lib/readiness/refresh-property-readiness"
+
+async function refreshAffectedProperties(propertyIds: (string | null | undefined)[]) {
+  const unique = [...new Set(propertyIds.filter((id): id is string => Boolean(id)))]
+  for (const propertyId of unique) {
+    await refreshPropertyReadiness(propertyId)
+  }
+}
 
 function mapSyncStatus(params: {
   cancelled: boolean
@@ -55,6 +63,7 @@ export async function upsertBookingFromNormalizedInput(
     select: {
       id: true,
       importedAt: true,
+      propertyId: true,
     },
   })
 
@@ -141,6 +150,11 @@ export async function upsertBookingFromNormalizedInput(
     payload: input.rawPayload,
   })
 
+  // Refresh readiness για όλα τα affected properties:
+  // - το νέο propertyId (αν η κράτηση αντιστοιχίστηκε)
+  // - το παλιό propertyId (αν η κράτηση αποσυνδέθηκε ή μετακινήθηκε)
+  await refreshAffectedProperties([match.propertyId, existingBooking?.propertyId])
+
   return {
     booking,
   }
@@ -191,6 +205,9 @@ export async function cancelBookingByExternalKey(params: {
     message: "Η κράτηση σημειώθηκε ως ακυρωμένη.",
     payload: params.rawPayload,
   })
+
+  // Η ακύρωση κράτησης αλλάζει το readiness anchor — hard-fail intentionally.
+  await refreshAffectedProperties([booking.propertyId])
 
   return {
     booking: updated,
@@ -244,6 +261,9 @@ export async function reprocessBookingById(bookingId: string) {
       : "Η κράτηση ξαναεπεξεργάστηκε αλλά παραμένει χωρίς αντιστοίχιση.",
     payload: updated.rawPayload ?? undefined,
   })
+
+  // Refresh παλιού και νέου property (αν η αντιστοίχιση άλλαξε).
+  await refreshAffectedProperties([booking.propertyId, match.propertyId])
 
   return {
     booking: updated,
