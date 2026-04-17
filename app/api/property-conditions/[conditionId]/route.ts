@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import { requireApiAppAccess, canAccessOrganization } from "@/lib/route-access"
 import { refreshPropertyReadiness } from "@/lib/readiness/refresh-property-readiness"
 import {
   getReadinessStatusLabel,
@@ -208,6 +209,10 @@ function toPrismaManagerDecision(
 
 export async function GET(_request: NextRequest, context: RouteContext) {
   try {
+    const access = await requireApiAppAccess()
+    if (!access.ok) return access.response
+    const auth = access.auth
+
     const { conditionId } = await context.params
 
     if (!isValidId(conditionId)) {
@@ -258,6 +263,13 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       return NextResponse.json(
         { error: "Property condition not found." },
         { status: 404 }
+      )
+    }
+
+    if (!canAccessOrganization(auth, condition.organizationId)) {
+      return NextResponse.json(
+        { error: "Δεν έχετε πρόσβαση σε αυτή την condition." },
+        { status: 403 }
       )
     }
 
@@ -324,6 +336,10 @@ export async function GET(_request: NextRequest, context: RouteContext) {
 
 export async function PATCH(request: NextRequest, context: RouteContext) {
   try {
+    const access = await requireApiAppAccess()
+    if (!access.ok) return access.response
+    const auth = access.auth
+
     const { conditionId } = await context.params
 
     if (!isValidId(conditionId)) {
@@ -339,6 +355,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       },
       select: {
         id: true,
+        organizationId: true,
         propertyId: true,
         status: true,
         blockingStatus: true,
@@ -356,6 +373,13 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       return NextResponse.json(
         { error: "Property condition not found." },
         { status: 404 }
+      )
+    }
+
+    if (!canAccessOrganization(auth, existingCondition.organizationId)) {
+      return NextResponse.json(
+        { error: "Δεν έχετε πρόσβαση σε αυτή την condition." },
+        { status: 403 }
       )
     }
 

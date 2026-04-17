@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import { requireApiAppAccess, canAccessOrganization } from "@/lib/route-access"
 import {
   computePropertyReadiness,
   getReadinessStatusLabel,
@@ -484,6 +485,10 @@ async function buildCanonicalConditionsPayload(propertyId: string) {
 
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
+    const access = await requireApiAppAccess()
+    if (!access.ok) return access.response
+    const auth = access.auth
+
     const { id: propertyId } = await context.params
 
     if (!isValidId(propertyId)) {
@@ -499,6 +504,13 @@ export async function GET(request: NextRequest, context: RouteContext) {
       return NextResponse.json(
         { error: "Property not found." },
         { status: 404 }
+      )
+    }
+
+    if (!canAccessOrganization(auth, payload.property.organizationId)) {
+      return NextResponse.json(
+        { error: "Δεν έχετε πρόσβαση σε αυτό το ακίνητο." },
+        { status: 403 }
       )
     }
 
@@ -600,6 +612,10 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
+    const access = await requireApiAppAccess()
+    if (!access.ok) return access.response
+    const auth = access.auth
+
     const { id: propertyId } = await context.params
 
     if (!isValidId(propertyId)) {
@@ -621,6 +637,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
       return NextResponse.json(
         { error: "Property not found." },
         { status: 404 }
+      )
+    }
+
+    if (!canAccessOrganization(auth, property.organizationId)) {
+      return NextResponse.json(
+        { error: "Δεν έχετε πρόσβαση σε αυτό το ακίνητο." },
+        { status: 403 }
       )
     }
 
