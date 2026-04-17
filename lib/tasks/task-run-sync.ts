@@ -159,10 +159,72 @@ async function getActivePropertySupplies(propertyId: string) {
           nameEn: true,
           category: true,
           unit: true,
+          minimumStock: true,
         },
       },
     },
   })
+}
+
+type ActivePropertySupplyRow = Awaited<
+  ReturnType<typeof getActivePropertySupplies>
+>[number]
+
+function isMutableTaskSupplyRunStatus(status: unknown) {
+  const normalized = String(status ?? "").trim().toLowerCase()
+
+  if (!normalized) return true
+
+  return normalized === "pending" || normalized === "in_progress"
+}
+
+function buildTaskSupplyRunItemSnapshot(
+  propertySupply: ActivePropertySupplyRow,
+  sortOrder: number
+) {
+  const canonicalSupply = buildCanonicalSupplyWriteData({
+    stateMode: propertySupply.stateMode,
+    fillLevel: propertySupply.fillLevel,
+    currentStock: propertySupply.currentStock,
+    mediumThreshold: propertySupply.mediumThreshold,
+    fullThreshold: propertySupply.fullThreshold,
+    minimumThreshold: propertySupply.minimumThreshold,
+    reorderThreshold: propertySupply.reorderThreshold,
+    warningThreshold: propertySupply.warningThreshold,
+    targetStock: propertySupply.targetStock,
+    targetLevel: propertySupply.targetLevel,
+    trackingMode: propertySupply.trackingMode,
+    supplyMinimumStock: propertySupply.supplyItem?.minimumStock ?? null,
+    isActive: true,
+  })
+
+  return {
+    propertySupplyId: propertySupply.id,
+    supplyItemId: propertySupply.supplyItemId,
+    propertySupplyCode: propertySupply.supplyItem?.code ?? null,
+    label:
+      propertySupply.supplyItem?.nameEl ||
+      propertySupply.supplyItem?.name ||
+      "Ξ‘Ξ½Ξ±Ξ»ΟΟƒΞΉΞΌΞΏ",
+    labelEn: propertySupply.supplyItem?.nameEn ?? null,
+    category: propertySupply.supplyItem?.category ?? null,
+    unit: propertySupply.supplyItem?.unit ?? null,
+    fillLevel: canonicalSupply.canonicalTruth.fillLevel,
+    stateMode: toPrismaSupplyStateMode(canonicalSupply.canonicalTruth.stateMode),
+    currentStock: canonicalSupply.currentStock,
+    mediumThreshold: canonicalSupply.canonicalConfig.mediumThreshold,
+    fullThreshold: canonicalSupply.canonicalConfig.fullThreshold,
+    targetStock: canonicalSupply.compatibilityMirrors.targetStock,
+    reorderThreshold: canonicalSupply.compatibilityMirrors.reorderThreshold,
+    targetLevel: canonicalSupply.compatibilityMirrors.targetLevel,
+    minimumThreshold: canonicalSupply.compatibilityMirrors.minimumThreshold,
+    trackingMode: canonicalSupply.compatibilityMirrors.trackingMode,
+    isCritical: propertySupply.isCritical,
+    warningThreshold: canonicalSupply.compatibilityMirrors.warningThreshold,
+    sortOrder,
+    isRequired: true,
+    notes: propertySupply.notes,
+  }
 }
 
 export async function syncTaskChecklistRun(params: {
@@ -410,8 +472,11 @@ export async function syncTaskSupplyRun(params: {
     },
   })
 
+  const canResyncExistingRun =
+    !existingRun || isMutableTaskSupplyRunStatus(existingRun.status)
+
   if (!sendSuppliesChecklist) {
-    if (existingRun) {
+    if (existingRun && canResyncExistingRun) {
       await prisma.taskSupplyRun.delete({
         where: {
           taskId,
@@ -419,13 +484,77 @@ export async function syncTaskSupplyRun(params: {
       })
     }
 
-    return null
+    return canResyncExistingRun
+      ? null
+      : prisma.taskSupplyRun.findUnique({
+          where: {
+            taskId,
+          },
+          include: {
+            items: {
+              orderBy: {
+                sortOrder: "asc",
+              },
+              include: {
+                propertySupply: {
+                  include: {
+                    supplyItem: {
+                      select: {
+                        id: true,
+                        code: true,
+                        name: true,
+                        nameEl: true,
+                        nameEn: true,
+                        category: true,
+                        unit: true,
+                        minimumStock: true,
+                      },
+                    },
+                  },
+                },
+                supplyItem: {
+                  select: {
+                    id: true,
+                    code: true,
+                    name: true,
+                    nameEl: true,
+                    nameEn: true,
+                    category: true,
+                    unit: true,
+                    minimumStock: true,
+                  },
+                },
+              },
+            },
+            answers: {
+              include: {
+                runItem: true,
+                propertySupply: {
+                  include: {
+                    supplyItem: {
+                      select: {
+                        id: true,
+                        code: true,
+                        name: true,
+                        nameEl: true,
+                        nameEn: true,
+                        category: true,
+                        unit: true,
+                        minimumStock: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        })
   }
 
   const propertySupplies = await getActivePropertySupplies(propertyId)
 
   if (propertySupplies.length === 0) {
-    if (existingRun) {
+    if (existingRun && canResyncExistingRun) {
       await prisma.taskSupplyRun.delete({
         where: {
           taskId,
@@ -433,7 +562,137 @@ export async function syncTaskSupplyRun(params: {
       })
     }
 
-    return null
+    return canResyncExistingRun
+      ? null
+      : prisma.taskSupplyRun.findUnique({
+          where: {
+            taskId,
+          },
+          include: {
+            items: {
+              orderBy: {
+                sortOrder: "asc",
+              },
+              include: {
+                propertySupply: {
+                  include: {
+                    supplyItem: {
+                      select: {
+                        id: true,
+                        code: true,
+                        name: true,
+                        nameEl: true,
+                        nameEn: true,
+                        category: true,
+                        unit: true,
+                        minimumStock: true,
+                      },
+                    },
+                  },
+                },
+                supplyItem: {
+                  select: {
+                    id: true,
+                    code: true,
+                    name: true,
+                    nameEl: true,
+                    nameEn: true,
+                    category: true,
+                    unit: true,
+                    minimumStock: true,
+                  },
+                },
+              },
+            },
+            answers: {
+              include: {
+                runItem: true,
+                propertySupply: {
+                  include: {
+                    supplyItem: {
+                      select: {
+                        id: true,
+                        code: true,
+                        name: true,
+                        nameEl: true,
+                        nameEn: true,
+                        category: true,
+                        unit: true,
+                        minimumStock: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        })
+  }
+
+  if (existingRun && !canResyncExistingRun) {
+    return prisma.taskSupplyRun.findUnique({
+      where: {
+        taskId,
+      },
+      include: {
+        items: {
+          orderBy: {
+            sortOrder: "asc",
+          },
+          include: {
+            propertySupply: {
+              include: {
+                supplyItem: {
+                  select: {
+                    id: true,
+                    code: true,
+                    name: true,
+                    nameEl: true,
+                    nameEn: true,
+                    category: true,
+                    unit: true,
+                    minimumStock: true,
+                  },
+                },
+              },
+            },
+            supplyItem: {
+              select: {
+                id: true,
+                code: true,
+                name: true,
+                nameEl: true,
+                nameEn: true,
+                category: true,
+                unit: true,
+                minimumStock: true,
+              },
+            },
+          },
+        },
+        answers: {
+          include: {
+            runItem: true,
+            propertySupply: {
+              include: {
+                supplyItem: {
+                  select: {
+                    id: true,
+                    code: true,
+                    name: true,
+                    nameEl: true,
+                    nameEn: true,
+                    category: true,
+                    unit: true,
+                    minimumStock: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    })
   }
 
   const run =
@@ -483,44 +742,16 @@ export async function syncTaskSupplyRun(params: {
   for (let index = 0; index < propertySupplies.length; index += 1) {
     const propertySupply = propertySupplies[index]
     const existingItem = existingItemMap.get(propertySupply.id)
-    const canonicalSupply = buildCanonicalSupplyWriteData({
-      stateMode: propertySupply.stateMode,
-      fillLevel: propertySupply.fillLevel,
-      currentStock: propertySupply.currentStock,
-      mediumThreshold: propertySupply.mediumThreshold,
-      fullThreshold: propertySupply.fullThreshold,
-      isActive: true,
-    })
+    const runItemSnapshot = buildTaskSupplyRunItemSnapshot(
+      propertySupply,
+      index
+    )
 
     if (!existingItem) {
       await prisma.taskSupplyRunItem.create({
         data: {
           taskSupplyRunId: run.id,
-          propertySupplyId: propertySupply.id,
-          supplyItemId: propertySupply.supplyItemId,
-          propertySupplyCode: propertySupply.supplyItem?.code ?? null,
-          label:
-            propertySupply.supplyItem?.nameEl ||
-            propertySupply.supplyItem?.name ||
-            "Αναλώσιμο",
-          labelEn: propertySupply.supplyItem?.nameEn ?? null,
-          category: propertySupply.supplyItem?.category ?? null,
-          unit: propertySupply.supplyItem?.unit ?? null,
-          fillLevel: canonicalSupply.fillLevel,
-          stateMode: toPrismaSupplyStateMode(canonicalSupply.stateMode),
-          currentStock: canonicalSupply.currentStock,
-          mediumThreshold: canonicalSupply.mediumThreshold,
-          fullThreshold: canonicalSupply.fullThreshold,
-          targetStock: canonicalSupply.targetStock,
-          reorderThreshold: canonicalSupply.reorderThreshold,
-          targetLevel: canonicalSupply.targetLevel,
-          minimumThreshold: canonicalSupply.minimumThreshold,
-          trackingMode: canonicalSupply.trackingMode,
-          isCritical: propertySupply.isCritical,
-          warningThreshold: canonicalSupply.warningThreshold,
-          sortOrder: index,
-          isRequired: true,
-          notes: propertySupply.notes,
+          ...runItemSnapshot,
         },
       })
     } else {
@@ -529,30 +760,7 @@ export async function syncTaskSupplyRun(params: {
           id: existingItem.id,
         },
         data: {
-          supplyItemId: propertySupply.supplyItemId,
-          propertySupplyCode: propertySupply.supplyItem?.code ?? null,
-          label:
-            propertySupply.supplyItem?.nameEl ||
-            propertySupply.supplyItem?.name ||
-            "Αναλώσιμο",
-          labelEn: propertySupply.supplyItem?.nameEn ?? null,
-          category: propertySupply.supplyItem?.category ?? null,
-          unit: propertySupply.supplyItem?.unit ?? null,
-          fillLevel: canonicalSupply.fillLevel,
-          stateMode: toPrismaSupplyStateMode(canonicalSupply.stateMode),
-          currentStock: canonicalSupply.currentStock,
-          mediumThreshold: canonicalSupply.mediumThreshold,
-          fullThreshold: canonicalSupply.fullThreshold,
-          targetStock: canonicalSupply.targetStock,
-          reorderThreshold: canonicalSupply.reorderThreshold,
-          targetLevel: canonicalSupply.targetLevel,
-          minimumThreshold: canonicalSupply.minimumThreshold,
-          trackingMode: canonicalSupply.trackingMode,
-          isCritical: propertySupply.isCritical,
-          warningThreshold: canonicalSupply.warningThreshold,
-          sortOrder: index,
-          isRequired: true,
-          notes: propertySupply.notes,
+          ...runItemSnapshot,
         },
       })
     }
@@ -847,3 +1055,4 @@ export async function syncTaskIssueRun(params: {
     },
   })
 }
+

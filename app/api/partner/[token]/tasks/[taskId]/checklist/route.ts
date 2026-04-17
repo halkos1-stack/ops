@@ -42,14 +42,6 @@ type ChecklistItemWithRules = {
   linkedSupplyItemId: string | null
   supplyUpdateMode: string
   supplyQuantity: number | null
-  supplyItem?: {
-    id: string
-    code: string
-    name: string
-    category: string
-    unit: string
-    minimumStock: number | null
-  } | null
 }
 
 function isExpired(date?: Date | string | null) {
@@ -151,30 +143,6 @@ function normalizeAnswerText(answer?: IncomingAnswer | null) {
     toNullableTrimmedString(answer.valueText) ||
     toNullableTrimmedString(answer.notes)
   )
-}
-
-function normalizeSupplyStatusValue(answer?: IncomingAnswer | null) {
-  const text = String(normalizeAnswerText(answer) || "")
-    .trim()
-    .toLowerCase()
-
-  if (!text) return null
-
-  if (
-    ["έλλειψη", "ελλειψη", "empty", "low", "missing", "none"].includes(text)
-  ) {
-    return "empty"
-  }
-
-  if (["μέτρια", "μετρια", "medium", "partial", "mid"].includes(text)) {
-    return "medium"
-  }
-
-  if (["πλήρης", "πληρης", "full", "ok", "good"].includes(text)) {
-    return "full"
-  }
-
-  return null
 }
 
 function isFailureAnswer(
@@ -313,93 +281,6 @@ function buildIssueDescription(
   return parts.join("\n")
 }
 
-function getSupplyQuantity(
-  item: ChecklistItemWithRules,
-  answer?: IncomingAnswer | null
-) {
-  if (
-    typeof answer?.valueNumber === "number" &&
-    Number.isFinite(answer.valueNumber) &&
-    answer.valueNumber >= 0
-  ) {
-    return answer.valueNumber
-  }
-
-  if (
-    typeof item.supplyQuantity === "number" &&
-    Number.isFinite(item.supplyQuantity) &&
-    item.supplyQuantity >= 0
-  ) {
-    return item.supplyQuantity
-  }
-
-  return null
-}
-
-function computeStatusMapStock(params: {
-  status: "empty" | "medium" | "full"
-  existingCurrentStock?: number | null
-  targetStock?: number | null
-  reorderThreshold?: number | null
-  minimumStock?: number | null
-}) {
-  const existingCurrentStock =
-    typeof params.existingCurrentStock === "number" &&
-    Number.isFinite(params.existingCurrentStock)
-      ? params.existingCurrentStock
-      : 0
-
-  const targetStock =
-    typeof params.targetStock === "number" && Number.isFinite(params.targetStock)
-      ? params.targetStock
-      : null
-
-  const reorderThreshold =
-    typeof params.reorderThreshold === "number" &&
-    Number.isFinite(params.reorderThreshold)
-      ? params.reorderThreshold
-      : null
-
-  const minimumStock =
-    typeof params.minimumStock === "number" && Number.isFinite(params.minimumStock)
-      ? params.minimumStock
-      : 0
-
-  if (params.status === "empty") {
-    return 0
-  }
-
-  if (params.status === "full") {
-    if (targetStock !== null && targetStock > 0) {
-      return targetStock
-    }
-
-    if (reorderThreshold !== null && reorderThreshold > 0) {
-      return Math.max(reorderThreshold + 2, minimumStock + 2)
-    }
-
-    if (minimumStock > 0) {
-      return minimumStock + 2
-    }
-
-    return Math.max(existingCurrentStock, 3)
-  }
-
-  if (reorderThreshold !== null && reorderThreshold > 0) {
-    return reorderThreshold
-  }
-
-  if (targetStock !== null && targetStock > 1) {
-    return Math.max(1, Math.ceil(targetStock / 2))
-  }
-
-  if (minimumStock > 0) {
-    return minimumStock
-  }
-
-  return Math.max(1, existingCurrentStock)
-}
-
 function isIssueReportItem(item: ChecklistItemWithRules) {
   return String(item.category || "").trim().toLowerCase() === "issue_report"
 }
@@ -434,18 +315,6 @@ const taskAssignmentWithChecklistArgs =
                   items: {
                     orderBy: {
                       sortOrder: "asc",
-                    },
-                    include: {
-                      supplyItem: {
-                        select: {
-                          id: true,
-                          code: true,
-                          name: true,
-                          category: true,
-                          unit: true,
-                          minimumStock: true,
-                        },
-                      },
                     },
                   },
                 },
@@ -634,7 +503,6 @@ export async function POST(req: NextRequest, context: RouteContext) {
         linkedSupplyItemId: item.linkedSupplyItemId,
         supplyUpdateMode: item.supplyUpdateMode,
         supplyQuantity: item.supplyQuantity,
-        supplyItem: item.supplyItem,
       })
     )
 
@@ -986,229 +854,8 @@ export async function POST(req: NextRequest, context: RouteContext) {
               })
             }
           }
-        }
+        }
 
-        if (item.linkedSupplyItemId) {
-          const supplyMode = String(item.supplyUpdateMode || "none").toLowerCase()
-
-          if (supplyMode === "set_stock") {
-            const stockValue =
-              typeof safeIncoming.valueNumber === "number" &&
-              Number.isFinite(safeIncoming.valueNumber)
-                ? Math.max(0, safeIncoming.valueNumber)
-                : null
-
-            if (stockValue !== null) {
-              const existingSupply = await tx.propertySupply.findUnique({
-                where: {
-                  propertyId_supplyItemId: {
-                    propertyId: latestAssignment.task.property.id,
-                    supplyItemId: item.linkedSupplyItemId,
-                  },
-                },
-              })
-
-              if (existingSupply) {
-                await tx.propertySupply.update({
-                  where: { id: existingSupply.id },
-                  data: {
-                    currentStock: stockValue,
-                    lastUpdatedAt: now,
-                  },
-                })
-              } else {
-                await tx.propertySupply.create({
-                  data: {
-                    propertyId: latestAssignment.task.property.id,
-                    supplyItemId: item.linkedSupplyItemId,
-                    currentStock: stockValue,
-                    lastUpdatedAt: now,
-                  },
-                })
-              }
-            }
-          }
-
-          if (supplyMode === "consume") {
-            const quantity = getSupplyQuantity(item, safeIncoming)
-
-            if (quantity !== null && quantity > 0) {
-              const existingSupply = await tx.propertySupply.findUnique({
-                where: {
-                  propertyId_supplyItemId: {
-                    propertyId: latestAssignment.task.property.id,
-                    supplyItemId: item.linkedSupplyItemId,
-                  },
-                },
-              })
-
-              const currentStock = existingSupply?.currentStock ?? 0
-              const nextStock = Math.max(0, currentStock - quantity)
-
-              if (existingSupply) {
-                await tx.propertySupply.update({
-                  where: { id: existingSupply.id },
-                  data: {
-                    currentStock: nextStock,
-                    lastUpdatedAt: now,
-                  },
-                })
-              } else {
-                await tx.propertySupply.create({
-                  data: {
-                    propertyId: latestAssignment.task.property.id,
-                    supplyItemId: item.linkedSupplyItemId,
-                    currentStock: nextStock,
-                    lastUpdatedAt: now,
-                  },
-                })
-              }
-
-              await tx.supplyConsumption.create({
-                data: {
-                  taskId: latestAssignment.task.id,
-                  supplyItemId: item.linkedSupplyItemId,
-                  quantity,
-                  unit: item.supplyItem?.unit || "τεμ.",
-                  notes: `Κατανάλωση από checklist item "${item.label}"`,
-                },
-              })
-            }
-          }
-
-          if (supplyMode === "flag_low" && failed) {
-            const existingSupply = await tx.propertySupply.findUnique({
-              where: {
-                propertyId_supplyItemId: {
-                  propertyId: latestAssignment.task.property.id,
-                  supplyItemId: item.linkedSupplyItemId,
-                },
-              },
-            })
-
-            const threshold =
-              existingSupply?.reorderThreshold ??
-              item.supplyItem?.minimumStock ??
-              0
-
-            if (existingSupply) {
-              await tx.propertySupply.update({
-                where: { id: existingSupply.id },
-                data: {
-                  currentStock: threshold,
-                  lastUpdatedAt: now,
-                },
-              })
-            } else {
-              await tx.propertySupply.create({
-                data: {
-                  propertyId: latestAssignment.task.property.id,
-                  supplyItemId: item.linkedSupplyItemId,
-                  currentStock: threshold,
-                  reorderThreshold: threshold,
-                  lastUpdatedAt: now,
-                },
-              })
-            }
-          }
-
-          if (supplyMode === "status_map") {
-            const normalizedStatus = normalizeSupplyStatusValue(safeIncoming)
-
-            if (normalizedStatus) {
-              const existingSupply = await tx.propertySupply.findUnique({
-                where: {
-                  propertyId_supplyItemId: {
-                    propertyId: latestAssignment.task.property.id,
-                    supplyItemId: item.linkedSupplyItemId,
-                  },
-                },
-                include: {
-                  supplyItem: {
-                    select: {
-                      id: true,
-                      minimumStock: true,
-                    },
-                  },
-                },
-              })
-
-              const nextStock = computeStatusMapStock({
-                status: normalizedStatus,
-                existingCurrentStock: existingSupply?.currentStock ?? null,
-                targetStock: existingSupply?.targetStock ?? null,
-                reorderThreshold:
-                  existingSupply?.reorderThreshold ??
-                  item.supplyItem?.minimumStock ??
-                  null,
-                minimumStock:
-                  existingSupply?.supplyItem?.minimumStock ??
-                  item.supplyItem?.minimumStock ??
-                  null,
-              })
-
-              const notesPrefix =
-                normalizedStatus === "empty"
-                  ? "Checklist status map: Έλλειψη"
-                  : normalizedStatus === "medium"
-                  ? "Checklist status map: Μέτρια"
-                  : "Checklist status map: Πλήρης"
-
-              if (existingSupply) {
-                await tx.propertySupply.update({
-                  where: { id: existingSupply.id },
-                  data: {
-                    currentStock: nextStock,
-                    lastUpdatedAt: now,
-                    notes: [existingSupply.notes, notesPrefix]
-                      .filter(Boolean)
-                      .join(" | "),
-                  },
-                })
-              } else {
-                const derivedThreshold = item.supplyItem?.minimumStock ?? 0
-                const derivedTarget =
-                  normalizedStatus === "full"
-                    ? Math.max(derivedThreshold + 2, 3)
-                    : null
-
-                await tx.propertySupply.create({
-                  data: {
-                    propertyId: latestAssignment.task.property.id,
-                    supplyItemId: item.linkedSupplyItemId,
-                    currentStock: nextStock,
-                    targetStock: derivedTarget,
-                    reorderThreshold: derivedThreshold,
-                    notes: notesPrefix,
-                    lastUpdatedAt: now,
-                  },
-                })
-              }
-
-              await tx.activityLog.create({
-                data: {
-                  organizationId: latestAssignment.task.property.organizationId,
-                  propertyId: latestAssignment.task.property.id,
-                  taskId: latestAssignment.task.id,
-                  partnerId: latestAssignment.partnerId,
-                  entityType: "PROPERTY_SUPPLY",
-                  entityId: item.linkedSupplyItemId,
-                  action: "CHECKLIST_SUPPLY_STATUS_MAPPED",
-                  message: `Το αναλώσιμο "${item.supplyItem?.name || item.label}" ενημερώθηκε από checklist answer (${normalizedStatus}).`,
-                  actorType: "PARTNER_PORTAL",
-                  actorName: latestAssignment.partner.name,
-                  metadata: {
-                    checklistRunId: checklistRun.id,
-                    templateItemId: item.id,
-                    linkedSupplyItemId: item.linkedSupplyItemId,
-                    normalizedStatus,
-                    supplyMode,
-                  },
-                },
-              })
-            }
-          }
-        }
       }
 
       if (mode === "submit" && runConditionAnswers.length > 0) {
@@ -1294,3 +941,4 @@ export async function POST(req: NextRequest, context: RouteContext) {
     )
   }
 }
+

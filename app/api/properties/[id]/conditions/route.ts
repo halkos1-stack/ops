@@ -683,14 +683,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       },
     })
 
-    try {
-      await refreshPropertyReadiness(property.id)
-    } catch (readinessError) {
-      console.warn(
-        "POST /api/properties/[id]/conditions: readiness refresh failed (non-critical):",
-        readinessError
-      )
-    }
+    await refreshPropertyReadiness(property.id)
 
     const payload = await buildCanonicalConditionsPayload(property.id)
 

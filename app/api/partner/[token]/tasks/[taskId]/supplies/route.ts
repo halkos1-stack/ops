@@ -3,15 +3,14 @@ import { Prisma } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
 import {
   mergePropertyCondition,
-  resolveMergedPropertyConditionsNotSeenInRun,
 } from "@/lib/checklists/merge-property-conditions"
 import { refreshPropertyReadiness } from "@/lib/readiness/refresh-property-readiness"
 import {
   buildCanonicalSupplyWriteData,
-  computeSupplyState,
 } from "@/lib/supplies/compute-supply-state"
 import {
   normalizeSupplyState,
+  normalizeSupplyStateMode,
   toPrismaSupplyStateMode,
 } from "@/lib/supplies/supply-mode-rules"
 
@@ -40,6 +39,10 @@ function buildSupplyConditionMergeKey(input: {
 
 function buildSupplyConditionTitle(name: string) {
   return `Supply shortage: ${name}`
+}
+
+function isNumericSupplyMode(value: unknown) {
+  return normalizeSupplyStateMode(value) === "numeric_thresholds"
 }
 
 function buildSupplyConditionDescription(input: {
@@ -83,6 +86,61 @@ function toNullableTrimmedString(value: unknown) {
 
   const text = String(value).trim()
   return text === "" ? null : text
+}
+
+async function resolveSupplyShortageTruthFromProof(params: {
+  tx: Prisma.TransactionClient
+  organizationId: string
+  propertyId: string
+  mergeKeysToKeepOpen: string[]
+  sourceRunId: string
+  resolvedAt: Date
+}) {
+  const mergeKeysToKeepOpen = new Set(params.mergeKeysToKeepOpen)
+
+  const activeSupplyConditions = await params.tx.propertyCondition.findMany({
+    where: {
+      organizationId: params.organizationId,
+      propertyId: params.propertyId,
+      sourceType: "task_supply_proof",
+      sourceRunId: params.sourceRunId,
+      conditionType: "SUPPLY",
+      status: {
+        in: ["OPEN", "MONITORING"],
+      },
+    },
+    select: {
+      id: true,
+      mergeKey: true,
+    },
+  })
+
+  const conditionIdsToResolve = activeSupplyConditions
+    .filter((condition) => {
+      const mergeKey = String(condition.mergeKey ?? "").trim()
+      return !!mergeKey && !mergeKeysToKeepOpen.has(mergeKey)
+    })
+    .map((condition) => condition.id)
+
+  if (conditionIdsToResolve.length === 0) {
+    return
+  }
+
+  await params.tx.propertyCondition.updateMany({
+    where: {
+      id: {
+        in: conditionIdsToResolve,
+      },
+    },
+    data: {
+      status: "RESOLVED",
+      blockingStatus: "NON_BLOCKING",
+      managerDecision: "RESOLVED",
+      resolvedAt: params.resolvedAt,
+      dismissedAt: null,
+      lastDetectedAt: params.resolvedAt,
+    },
+  })
 }
 
 const taskAssignmentWithSupplyArgs =
@@ -384,9 +442,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
           continue
         }
 
-        const usesNumericMode =
-          String(runItem.stateMode || "").trim().toUpperCase() ===
-          "NUMERIC_THRESHOLDS"
+        const usesNumericMode = isNumericSupplyMode(runItem.stateMode)
 
         const canonical = buildCanonicalSupplyWriteData(
           usesNumericMode
@@ -402,68 +458,70 @@ export async function POST(req: NextRequest, context: RouteContext) {
               }
         )
 
+        const answerWriteData = {
+          fillLevel: canonical.fillLevel,
+          quantityValue:
+            canonical.stateMode === "numeric_thresholds"
+              ? canonical.canonicalTruth.currentStock
+              : null,
+          notes: incoming.notes || null,
+        }
+
         const existingAnswer = supplyRun.answers.find(
           (answer) => answer.propertySupplyId === propertySupply.id
         )
+        let savedAnswerId: string
 
         if (existingAnswer) {
-          await tx.taskSupplyAnswer.update({
+          const updatedAnswer = await tx.taskSupplyAnswer.update({
             where: {
               id: existingAnswer.id,
             },
-            data: {
-              fillLevel: canonical.fillLevel,
-              quantityValue:
-                canonical.stateMode === "numeric_thresholds"
-                  ? canonical.currentStock
-                  : null,
-              notes: incoming.notes || null,
+            data: answerWriteData,
+            select: {
+              id: true,
             },
           })
+          savedAnswerId = updatedAnswer.id
         } else {
-          await tx.taskSupplyAnswer.create({
+          const createdAnswer = await tx.taskSupplyAnswer.create({
             data: {
               taskSupplyRunId: supplyRun.id,
               runItemId: runItem.id,
               propertySupplyId: propertySupply.id,
+              ...answerWriteData,
+            },
+            select: {
+              id: true,
+            },
+          })
+          savedAnswerId = createdAnswer.id
+        }
+
+        if (mode === "submit") {
+          await tx.propertySupply.update({
+            where: {
+              id: propertySupply.id,
+            },
+            data: {
               fillLevel: canonical.fillLevel,
-              quantityValue:
-                canonical.stateMode === "numeric_thresholds"
-                  ? canonical.currentStock
-                  : null,
-              notes: incoming.notes || null,
+              stateMode: toPrismaSupplyStateMode(canonical.stateMode),
+              currentStock: canonical.currentStock,
+              mediumThreshold: canonical.mediumThreshold,
+              fullThreshold: canonical.fullThreshold,
+              targetStock: canonical.targetStock,
+              reorderThreshold: canonical.reorderThreshold,
+              targetLevel: canonical.targetLevel,
+              minimumThreshold: canonical.minimumThreshold,
+              trackingMode: canonical.trackingMode,
+              warningThreshold: canonical.warningThreshold,
+              lastUpdatedAt: now,
+              notes: incoming.notes || propertySupply.notes || null,
             },
           })
         }
 
-        await tx.propertySupply.update({
-          where: {
-            id: propertySupply.id,
-          },
-          data: {
-            fillLevel: canonical.fillLevel,
-            stateMode: toPrismaSupplyStateMode(canonical.stateMode),
-            currentStock: canonical.currentStock,
-            mediumThreshold: canonical.mediumThreshold,
-            fullThreshold: canonical.fullThreshold,
-            targetStock: canonical.targetStock,
-            reorderThreshold: canonical.reorderThreshold,
-            targetLevel: canonical.targetLevel,
-            minimumThreshold: canonical.minimumThreshold,
-            trackingMode: canonical.trackingMode,
-            warningThreshold: canonical.warningThreshold,
-            lastUpdatedAt: now,
-            notes: incoming.notes || propertySupply.notes || null,
-          },
-        })
-
-        const computedState = computeSupplyState({
-          stateMode: canonical.stateMode,
-          fillLevel: canonical.fillLevel,
-          currentStock: canonical.currentStock,
-          mediumThreshold: canonical.mediumThreshold,
-          fullThreshold: canonical.fullThreshold,
-        })
+        const computedState = canonical.fillLevel
 
         const mergeKey = buildSupplyConditionMergeKey({
           propertyId: latestAssignment.task.property.id,
@@ -471,7 +529,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
           supplyItemId: propertySupply.supplyItem?.id ?? null,
         })
 
-        if (mode === "submit" && computedState.state !== "full") {
+        if (mode === "submit" && computedState !== "full") {
           mergeKeysToKeepOpen.push(mergeKey)
 
           await mergePropertyCondition(
@@ -488,7 +546,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
               sourceItemLabel:
                 propertySupply.supplyItem?.name ?? propertySupply.id,
               sourceRunId: supplyRun.id,
-              sourceAnswerId: existingAnswer?.id ?? null,
+              sourceAnswerId: savedAnswerId,
               conditionType: "SUPPLY",
               title: buildSupplyConditionTitle(
                 propertySupply.supplyItem?.name ?? propertySupply.id
@@ -496,28 +554,28 @@ export async function POST(req: NextRequest, context: RouteContext) {
               description: buildSupplyConditionDescription({
                 supplyName:
                   propertySupply.supplyItem?.name ?? propertySupply.id,
-                fillLevel: computedState.state,
+                fillLevel: computedState,
                 quantityValue:
                   canonical.stateMode === "numeric_thresholds"
-                    ? canonical.currentStock
+                    ? canonical.canonicalTruth.currentStock
                     : null,
                 notes: incoming.notes,
               }),
               blockingStatus:
-                computedState.state === "missing" ? "BLOCKING" : "WARNING",
+                computedState === "missing" ? "BLOCKING" : "WARNING",
               severity:
-                computedState.state === "missing"
+                computedState === "missing"
                   ? propertySupply.isCritical
                     ? "HIGH"
                     : "MEDIUM"
                   : propertySupply.isCritical
                     ? "MEDIUM"
                     : "LOW",
-              evidence: {
-                fillLevel: computedState.state,
+                  evidence: {
+                fillLevel: computedState,
                 quantityValue:
                   canonical.stateMode === "numeric_thresholds"
-                    ? canonical.currentStock
+                    ? canonical.canonicalTruth.currentStock
                     : null,
                 notes: incoming.notes ?? null,
                 propertySupplyId: propertySupply.id,
@@ -531,16 +589,14 @@ export async function POST(req: NextRequest, context: RouteContext) {
       }
 
       if (mode === "submit") {
-        await resolveMergedPropertyConditionsNotSeenInRun(
-          {
-            organizationId: latestAssignment.task.property.organizationId,
-            propertyId: latestAssignment.task.property.id,
-            mergeKeysToKeepOpen,
-            sourceRunId: supplyRun.id,
-            resolvedAt: now,
-          },
-          tx as never
-        )
+        await resolveSupplyShortageTruthFromProof({
+          tx,
+          organizationId: latestAssignment.task.property.organizationId,
+          propertyId: latestAssignment.task.property.id,
+          mergeKeysToKeepOpen,
+          sourceRunId: supplyRun.id,
+          resolvedAt: now,
+        })
       }
 
       const refreshedTask = await tx.task.findUnique({

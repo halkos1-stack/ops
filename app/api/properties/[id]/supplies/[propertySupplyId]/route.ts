@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma"
 import { requireApiAppAccess, canAccessOrganization } from "@/lib/route-access"
 import { refreshPropertyReadiness } from "@/lib/readiness/refresh-property-readiness"
 import { syncPropertySupplyTemplate } from "@/lib/supplies/property-supply-template-sync"
+import { syncTaskSupplyRun } from "@/lib/tasks/task-run-sync"
 import {
   buildCanonicalSupplySnapshot,
   buildCanonicalSupplyWriteData,
@@ -40,6 +41,26 @@ async function getPropertyBase(propertyId: string) {
       status: true,
     },
   })
+}
+
+async function resyncMutablePropertySupplyRuns(propertyId: string) {
+  const supplyTasks = await prisma.task.findMany({
+    where: {
+      propertyId,
+      sendSuppliesChecklist: true,
+    },
+    select: {
+      id: true,
+    },
+  })
+
+  for (const task of supplyTasks) {
+    await syncTaskSupplyRun({
+      taskId: task.id,
+      propertyId,
+      sendSuppliesChecklist: true,
+    })
+  }
 }
 
 function shapePropertySupply(row: {
@@ -272,6 +293,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       propertyId: property.id,
       organizationId: property.organizationId,
     })
+    await resyncMutablePropertySupplyRuns(property.id)
     await refreshPropertyReadiness(property.id)
 
     const payload = await buildResponse(property.id)
@@ -331,6 +353,7 @@ export async function DELETE(_request: NextRequest, context: RouteContext) {
       propertyId: property.id,
       organizationId: property.organizationId,
     })
+    await resyncMutablePropertySupplyRuns(property.id)
     await refreshPropertyReadiness(property.id)
 
     const payload = await buildResponse(property.id)

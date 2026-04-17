@@ -4,7 +4,11 @@ import { getSupplyPresetByCode, SUPPLY_STATUS_OPTIONS } from "@/lib/supply-prese
 type PrismaLike = typeof prisma
 
 function buildSupplyChecklistLabel(name: string) {
-  return `Επαρκεια ${name}`
+  return `Ξ•Ο€Ξ±ΟΞΊΞµΞΉΞ± ${name}`
+}
+
+function buildSupplyChecklistDescription(name: string) {
+  return `Observed supply proof / state for: ${name}`
 }
 
 async function getOrCreateSupplyTemplate(
@@ -37,9 +41,9 @@ async function getOrCreateSupplyTemplate(
     data: {
       propertyId,
       organizationId,
-      title: "Λιστα αναλωσιμων",
+      title: "Ξ›ΞΉΟƒΟ„Ξ± Ξ±Ξ½Ξ±Ξ»Ο‰ΟƒΞΉΞΌΟ‰Ξ½",
       description:
-        "Καταγραφη αναλωσιμων και proof για την επιχειρησιακη κατασταση του ακινητου.",
+        "ΞΞ±Ο„Ξ±Ξ³ΟΞ±Ο†Ξ· Ξ±Ξ½Ξ±Ξ»Ο‰ΟƒΞΉΞΌΟ‰Ξ½ ΞΊΞ±ΞΉ proof Ξ³ΞΉΞ± Ο„Ξ·Ξ½ ΞµΟ€ΞΉΟ‡ΞµΞΉΟΞ·ΟƒΞΉΞ±ΞΊΞ· ΞΊΞ±Ο„Ξ±ΟƒΟ„Ξ±ΟƒΞ· Ο„ΞΏΟ… Ξ±ΞΊΞΉΞ½Ξ·Ο„ΞΏΟ….",
       templateType: "supplies",
       isPrimary: false,
       isActive: true,
@@ -165,10 +169,7 @@ export async function syncPropertySupplyTemplate(input: {
     const supplyDisplayName = row.supplyItem.nameEl ?? row.supplyItem.name
     const label =
       preset?.checklistLabelEl || buildSupplyChecklistLabel(supplyDisplayName)
-    const description =
-      row.stateMode === "NUMERIC_THRESHOLDS"
-        ? `Καταγραψε ποσοτητα για: ${supplyDisplayName}`
-        : `Καταγραψε κατασταση για: ${supplyDisplayName}`
+    const description = buildSupplyChecklistDescription(supplyDisplayName)
 
     const data = {
       label,
@@ -184,12 +185,8 @@ export async function syncPropertySupplyTemplate(input: {
       issueSeverityOnFail: "medium",
       failureValuesText: null,
       linkedSupplyItemId: row.supplyItemId,
-      supplyUpdateMode:
-        row.stateMode === "NUMERIC_THRESHOLDS"
-          ? "numeric_thresholds"
-          : "direct_state",
-      supplyQuantity:
-        row.stateMode === "NUMERIC_THRESHOLDS" ? row.fullThreshold ?? null : null,
+      supplyUpdateMode: "none",
+      supplyQuantity: null,
     }
 
     if (existing) {
@@ -213,8 +210,8 @@ export async function syncPropertySupplyTemplate(input: {
     db,
     templateId: template.id,
     issueType: "damage",
-    label: "Αναφορα ζημιας",
-    description: "Καταχωρισε οποιαδηποτε ζημια εντοπιστηκε στο ακινητο.",
+    label: "Ξ‘Ξ½Ξ±Ο†ΞΏΟΞ± Ξ¶Ξ·ΞΌΞΉΞ±Ο‚",
+    description: "ΞΞ±Ο„Ξ±Ο‡Ο‰ΟΞΉΟƒΞµ ΞΏΟ€ΞΏΞΉΞ±Ξ΄Ξ·Ο€ΞΏΟ„Ξµ Ξ¶Ξ·ΞΌΞΉΞ± ΞµΞ½Ο„ΞΏΟ€ΞΉΟƒΟ„Ξ·ΞΊΞµ ΟƒΟ„ΞΏ Ξ±ΞΊΞΉΞ½Ξ·Ο„ΞΏ.",
     sortOrder,
   })
 
@@ -224,8 +221,8 @@ export async function syncPropertySupplyTemplate(input: {
     db,
     templateId: template.id,
     issueType: "repair",
-    label: "Αναφορα βλαβης",
-    description: "Καταχωρισε οποιαδηποτε βλαβη ή τεχνικο θεμα εντοπιστηκε στο ακινητο.",
+    label: "Ξ‘Ξ½Ξ±Ο†ΞΏΟΞ± Ξ²Ξ»Ξ±Ξ²Ξ·Ο‚",
+    description: "ΞΞ±Ο„Ξ±Ο‡Ο‰ΟΞΉΟƒΞµ ΞΏΟ€ΞΏΞΉΞ±Ξ΄Ξ·Ο€ΞΏΟ„Ξµ Ξ²Ξ»Ξ±Ξ²Ξ· Ξ® Ο„ΞµΟ‡Ξ½ΞΉΞΊΞΏ ΞΈΞµΞΌΞ± ΞµΞ½Ο„ΞΏΟ€ΞΉΟƒΟ„Ξ·ΞΊΞµ ΟƒΟ„ΞΏ Ξ±ΞΊΞΉΞ½Ξ·Ο„ΞΏ.",
     sortOrder,
   })
 

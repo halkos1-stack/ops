@@ -7,6 +7,7 @@ import {
 import { createExpiryDate, createSecureToken } from "@/lib/tokens"
 import { sendMailSafe } from "@/lib/mailer"
 import { refreshPropertyReadiness } from "@/lib/readiness/refresh-property-readiness"
+import { syncTaskSupplyRun } from "@/lib/tasks/task-run-sync"
 
 function toNullableString(value: unknown) {
   if (value === undefined || value === null) return null
@@ -214,54 +215,6 @@ async function ensureTaskChecklistRun(params: {
   }
 
   return prisma.taskChecklistRun.update({
-    where: { taskId },
-    data: {
-      status: "pending",
-      startedAt: null,
-      completedAt: null,
-    },
-  })
-}
-
-async function ensureTaskSupplyRun(params: {
-  taskId: string
-  sendSuppliesChecklist: boolean
-}) {
-  const { taskId, sendSuppliesChecklist } = params
-
-  const existingRun = await prisma.taskSupplyRun.findUnique({
-    where: { taskId },
-    select: { id: true },
-  })
-
-  if (!sendSuppliesChecklist) {
-    if (existingRun) {
-      await prisma.taskSupplyAnswer.deleteMany({
-        where: {
-          taskSupplyRunId: existingRun.id,
-        },
-      })
-
-      await prisma.taskSupplyRun.delete({
-        where: {
-          taskId,
-        },
-      })
-    }
-
-    return null
-  }
-
-  if (!existingRun) {
-    return prisma.taskSupplyRun.create({
-      data: {
-        taskId,
-        status: "pending",
-      },
-    })
-  }
-
-  return prisma.taskSupplyRun.update({
     where: { taskId },
     data: {
       status: "pending",
@@ -687,8 +640,9 @@ export async function POST(request: NextRequest) {
       }
 
       if (task.sendSuppliesChecklist) {
-        await ensureTaskSupplyRun({
+        await syncTaskSupplyRun({
           taskId: task.id,
+          propertyId: task.propertyId,
           sendSuppliesChecklist: true,
         })
       }

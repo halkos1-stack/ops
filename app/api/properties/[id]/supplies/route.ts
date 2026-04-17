@@ -12,6 +12,7 @@ import {
 import { toPrismaSupplyStateMode } from "@/lib/supplies/supply-mode-rules"
 import { refreshPropertyReadiness } from "@/lib/readiness/refresh-property-readiness"
 import { syncPropertySupplyTemplate } from "@/lib/supplies/property-supply-template-sync"
+import { syncTaskSupplyRun } from "@/lib/tasks/task-run-sync"
 
 type RouteContext = {
   params: Promise<{
@@ -64,6 +65,26 @@ async function getPropertyBase(propertyId: string) {
       status: true,
     },
   })
+}
+
+async function resyncMutablePropertySupplyRuns(propertyId: string) {
+  const supplyTasks = await prisma.task.findMany({
+    where: {
+      propertyId,
+      sendSuppliesChecklist: true,
+    },
+    select: {
+      id: true,
+    },
+  })
+
+  for (const task of supplyTasks) {
+    await syncTaskSupplyRun({
+      taskId: task.id,
+      propertyId,
+      sendSuppliesChecklist: true,
+    })
+  }
 }
 
 function shapeActiveSupplyRow(row: {
@@ -392,6 +413,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
         propertyId: property.id,
         organizationId: property.organizationId,
       })
+      await resyncMutablePropertySupplyRuns(property.id)
       await refreshPropertyReadiness(property.id)
 
       const payload = await buildResponse(property.id)
@@ -474,6 +496,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
         propertyId: property.id,
         organizationId: property.organizationId,
       })
+      await resyncMutablePropertySupplyRuns(property.id)
       await refreshPropertyReadiness(property.id)
 
       const payload = await buildResponse(property.id)
