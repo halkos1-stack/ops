@@ -102,21 +102,22 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  memberships        Membership[]
-  properties         Property[]
-  bookings           Booking[]
-  bookingMappings    BookingPropertyMapping[]
-  bookingSyncEvents  BookingSyncEvent[]
-  partners           Partner[]
-  tasks              Task[]
-  issues             Issue[]
-  propertyConditions PropertyCondition[]
-  events             Event[]
-  checklistTemplates PropertyChecklistTemplate[]
-  issueTemplates     PropertyIssueTemplate[]
-  activityLogs       ActivityLog[]
-  settings           Settings[]
-  qrCodes            PropertySupplyQRCode[]
+  memberships          Membership[]
+  properties           Property[]
+  bookings             Booking[]
+  bookingMappings      BookingPropertyMapping[]
+  bookingSyncEvents    BookingSyncEvent[]
+  partners             Partner[]
+  tasks                Task[]
+  issues               Issue[]
+  propertyConditions   PropertyCondition[]
+  events               Event[]
+  checklistTemplates   PropertyChecklistTemplate[]
+  issueTemplates       PropertyIssueTemplate[]
+  activityLogs         ActivityLog[]
+  settings             Settings[]
+  qrCodes              PropertySupplyQRCode[]
+  supplyReplenishments SupplyReplenishmentLog[]
 }
 
 model Membership {
@@ -165,20 +166,21 @@ model Property {
   createdAt                  DateTime                 @default(now())
   updatedAt                  DateTime                 @updatedAt
 
-  organization       Organization                @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  defaultPartner     Partner?                    @relation("PropertyDefaultPartner", fields: [defaultPartnerId], references: [id], onDelete: SetNull)
-  bookings           Booking[]
-  bookingMappings    BookingPropertyMapping[]
-  tasks              Task[]
-  checklistTemplates PropertyChecklistTemplate[]
-  issueTemplates     PropertyIssueTemplate[]
-  issues             Issue[]
-  conditions         PropertyCondition[]
-  propertySupplies   PropertySupply[]
-  taskPhotos         TaskPhoto[]
-  activityLogs       ActivityLog[]
-  events             Event[]
-  qrCodes            PropertySupplyQRCode[]
+  organization         Organization                @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  defaultPartner       Partner?                    @relation("PropertyDefaultPartner", fields: [defaultPartnerId], references: [id], onDelete: SetNull)
+  bookings             Booking[]
+  bookingMappings      BookingPropertyMapping[]
+  tasks                Task[]
+  checklistTemplates   PropertyChecklistTemplate[]
+  issueTemplates       PropertyIssueTemplate[]
+  issues               Issue[]
+  conditions           PropertyCondition[]
+  propertySupplies     PropertySupply[]
+  taskPhotos           TaskPhoto[]
+  activityLogs         ActivityLog[]
+  events               Event[]
+  qrCodes              PropertySupplyQRCode[]
+  supplyReplenishments SupplyReplenishmentLog[]
 
   @@unique([organizationId, code])
   @@index([organizationId])
@@ -191,14 +193,14 @@ model Property {
 }
 
 model PropertyCondition {
-  id               String                          @id @default(cuid())
+  id               String                            @id @default(cuid())
   organizationId   String
   propertyId       String
   taskId           String?
   bookingId        String?
   propertySupplyId String?
   mergeKey         String?
-  sourceType       String                          @default("system")
+  sourceType       String                            @default("system")
   sourceLabel      String?
   sourceItemId     String?
   sourceItemLabel  String?
@@ -208,18 +210,18 @@ model PropertyCondition {
   title            String
   description      String?
   locationText     String?
-  status           PropertyConditionStatus         @default(OPEN)
-  blockingStatus   PropertyConditionBlockingStatus @default(WARNING)
-  severity         PropertyConditionSeverity       @default(MEDIUM)
+  status           PropertyConditionStatus           @default(OPEN)
+  blockingStatus   PropertyConditionBlockingStatus   @default(WARNING)
+  severity         PropertyConditionSeverity         @default(MEDIUM)
   managerDecision  PropertyConditionManagerDecision?
   managerNotes     String?
   evidence         Json?
-  firstDetectedAt  DateTime                        @default(now())
-  lastDetectedAt   DateTime                        @default(now())
+  firstDetectedAt  DateTime                          @default(now())
+  lastDetectedAt   DateTime                          @default(now())
   resolvedAt       DateTime?
   dismissedAt      DateTime?
-  createdAt        DateTime                        @default(now())
-  updatedAt        DateTime                        @updatedAt
+  createdAt        DateTime                          @default(now())
+  updatedAt        DateTime                          @updatedAt
 
   organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   property       Property        @relation(fields: [propertyId], references: [id], onDelete: Cascade)
@@ -426,20 +428,21 @@ model Task {
   createdAt                       DateTime  @default(now())
   updatedAt                       DateTime  @updatedAt
 
-  organization       Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  property           Property               @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  booking            Booking?               @relation(fields: [bookingId], references: [id], onDelete: SetNull)
-  assignments        TaskAssignment[]
-  issues             Issue[]
-  propertyConditions PropertyCondition[]
-  taskPhotos         TaskPhoto[]
-  supplyConsumptions SupplyConsumption[]
-  activityLogs       ActivityLog[]
-  checklistRun       TaskChecklistRun?
-  supplyRun          TaskSupplyRun?
-  issueRun           TaskIssueRun?
-  events             Event[]
-  qrScans            PropertySupplyQRScan[]
+  organization         Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  property             Property                 @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  booking              Booking?                 @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  assignments          TaskAssignment[]
+  issues               Issue[]
+  propertyConditions   PropertyCondition[]
+  taskPhotos           TaskPhoto[]
+  supplyConsumptions   SupplyConsumption[]
+  activityLogs         ActivityLog[]
+  checklistRun         TaskChecklistRun?
+  supplyRun            TaskSupplyRun?
+  issueRun             TaskIssueRun?
+  events               Event[]
+  qrScans              PropertySupplyQRScan[]
+  supplyReplenishments SupplyReplenishmentLog[]
 
   @@index([organizationId])
   @@index([propertyId])
@@ -540,6 +543,7 @@ model SupplyItem {
   checklistTemplateItems PropertyChecklistTemplateItem[]
   taskChecklistRunItems  TaskChecklistRunItem[]
   taskSupplyRunItems     TaskSupplyRunItem[]
+  replenishmentLogs      SupplyReplenishmentLog[]
 
   @@index([category])
   @@index([isActive])
@@ -549,33 +553,35 @@ model SupplyItem {
 }
 
 model PropertySupply {
-  id               String   @id @default(cuid())
+  id               String                  @id @default(cuid())
   propertyId       String
   supplyItemId     String
-  isActive         Boolean  @default(true)
-  fillLevel        String   @default("full")
+  isActive         Boolean                 @default(true)
+  fillLevel        String                  @default("full")
   stateMode        PropertySupplyStateMode @default(DIRECT_STATE)
-  currentStock     Float    @default(0)
+  currentStock     Float                   @default(0)
   mediumThreshold  Float?
   fullThreshold    Float?
   targetStock      Float?
   reorderThreshold Float?
   targetLevel      Float?
   minimumThreshold Float?
-  trackingMode     String   @default("fill_level")
-  isCritical       Boolean  @default(false)
+  trackingMode     String                  @default("fill_level")
+  isCritical       Boolean                 @default(false)
   warningThreshold Float?
-  lastUpdatedAt    DateTime @default(now())
+  lastUpdatedAt    DateTime                @default(now())
   notes            String?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
 
-  property           Property               @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  supplyItem         SupplyItem             @relation(fields: [supplyItemId], references: [id], onDelete: Cascade)
+  property           Property                 @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  supplyItem         SupplyItem               @relation(fields: [supplyItemId], references: [id], onDelete: Cascade)
   taskSupplyRunItems TaskSupplyRunItem[]
   taskSupplyAnswers  TaskSupplyAnswer[]
   propertyConditions PropertyCondition[]
   qrCodes            PropertySupplyQRCode[]
+  consumptions       SupplyConsumption[]
+  replenishmentLogs  SupplyReplenishmentLog[]
 
   @@unique([propertyId, supplyItemId])
   @@index([propertyId])
@@ -588,23 +594,69 @@ model PropertySupply {
 }
 
 model SupplyConsumption {
-  id           String   @id @default(cuid())
-  taskId       String
-  supplyItemId String
-  quantity     Float
-  unit         String
-  notes        String?
-  createdAt    DateTime @default(now())
+  id               String   @id @default(cuid())
+  taskId           String
+  supplyItemId     String
+  /// Σύνδεση με PropertySupply για ακριβές ιστορικό ανά ακίνητο
+  propertySupplyId String?
+  quantity         Float
+  unit             String
+  notes            String?
+  createdAt        DateTime @default(now())
 
-  task       Task       @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  supplyItem SupplyItem @relation(fields: [supplyItemId], references: [id], onDelete: Cascade)
+  task           Task            @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  supplyItem     SupplyItem      @relation(fields: [supplyItemId], references: [id], onDelete: Cascade)
+  propertySupply PropertySupply? @relation(fields: [propertySupplyId], references: [id], onDelete: SetNull)
 
   @@index([taskId])
   @@index([supplyItemId])
+  @@index([propertySupplyId])
+}
+
+/// Ιστορικό συμπλήρωσης αναλωσίμων: καταγράφει κάθε φορά που ένα PropertySupply
+/// αναπληρώθηκε, με πλήρη απόδειξη: ποιος, πότε, πόσο βρέθηκε, πόσο προστέθηκε,
+/// τελική κατάσταση. Αυτό το model είναι immutable append-only ιστορικό.
+model SupplyReplenishmentLog {
+  id                 String   @id @default(cuid())
+  organizationId     String
+  propertyId         String
+  propertySupplyId   String
+  supplyItemId       String
+  /// Task που οδήγησε στη συμπλήρωση (αν υπάρχει)
+  taskId             String?
+  /// TaskSupplyAnswer που τεκμηριώνει την εκτέλεση
+  taskSupplyAnswerId String?
+  /// Ποσότητα που βρέθηκε πριν τη συμπλήρωση
+  quantityBefore     Float?
+  /// Ποσότητα που προστέθηκε
+  quantityAdded      Float?
+  /// Ποσότητα μετά τη συμπλήρωση
+  quantityAfter      Float?
+  /// Κατάσταση πριν τη συμπλήρωση (missing/medium/full)
+  stateBefore        String?
+  /// Κατάσταση μετά τη συμπλήρωση (missing/medium/full)
+  stateAfter         String
+  /// Ποιος εκτέλεσε τη συμπλήρωση (partner name ή user)
+  performedBy        String?
+  notes              String?
+  loggedAt           DateTime @default(now())
+
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  property       Property       @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  propertySupply PropertySupply @relation(fields: [propertySupplyId], references: [id], onDelete: Cascade)
+  supplyItem     SupplyItem     @relation(fields: [supplyItemId], references: [id], onDelete: Cascade)
+  task           Task?          @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([propertyId])
+  @@index([propertySupplyId])
+  @@index([supplyItemId])
+  @@index([taskId])
+  @@index([loggedAt])
 }
 
 model TaskPhoto {
-  id         String   @id @default(cuid())
+  id         String    @id @default(cuid())
   propertyId String
   taskId     String?
   issueId    String?
@@ -613,7 +665,7 @@ model TaskPhoto {
   fileName   String?
   caption    String?
   takenAt    DateTime?
-  uploadedAt DateTime @default(now())
+  uploadedAt DateTime  @default(now())
 
   property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   task     Task?    @relation(fields: [taskId], references: [id], onDelete: SetNull)
@@ -637,8 +689,8 @@ model PropertyChecklistTemplate {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  organization  Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  property      Property                  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  organization  Organization                    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  property      Property                        @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   items         PropertyChecklistTemplateItem[]
   checklistRuns TaskChecklistRun[]
 
@@ -667,7 +719,7 @@ model PropertyChecklistTemplateItem {
   failureValuesText   String?
 
   linkedSupplyItemId String?
-  supplyUpdateMode   String @default("none")
+  supplyUpdateMode   String  @default("none")
   supplyQuantity     Float?
 
   createdAt DateTime @default(now())
@@ -685,18 +737,18 @@ model PropertyChecklistTemplateItem {
 }
 
 model TaskChecklistRun {
-  id                        String   @id @default(cuid())
-  taskId                    String   @unique
+  id                        String    @id @default(cuid())
+  taskId                    String    @unique
   templateId                String?
   sourceTemplateTitle       String?
   sourceTemplateDescription String?
-  templateType              String?  @default("main")
-  isCustomized              Boolean  @default(false)
-  status                    String   @default("pending")
+  templateType              String?   @default("main")
+  isCustomized              Boolean   @default(false)
+  status                    String    @default("pending")
   startedAt                 DateTime?
   completedAt               DateTime?
-  createdAt                 DateTime @default(now())
-  updatedAt                 DateTime @updatedAt
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
 
   task     Task                       @relation(fields: [taskId], references: [id], onDelete: Cascade)
   template PropertyChecklistTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
@@ -734,9 +786,9 @@ model TaskChecklistRunItem {
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
 
-  checklistRun         TaskChecklistRun              @relation(fields: [checklistRunId], references: [id], onDelete: Cascade)
+  checklistRun         TaskChecklistRun               @relation(fields: [checklistRunId], references: [id], onDelete: Cascade)
   propertyTemplateItem PropertyChecklistTemplateItem? @relation(fields: [propertyTemplateItemId], references: [id], onDelete: SetNull)
-  supplyItem           SupplyItem?                   @relation(fields: [linkedSupplyItemId], references: [id], onDelete: SetNull)
+  supplyItem           SupplyItem?                    @relation(fields: [linkedSupplyItemId], references: [id], onDelete: SetNull)
   answers              TaskChecklistAnswer[]
 
   @@index([checklistRunId])
@@ -760,8 +812,8 @@ model TaskChecklistAnswer {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  checklistRun TaskChecklistRun              @relation(fields: [checklistRunId], references: [id], onDelete: Cascade)
-  runItem      TaskChecklistRunItem          @relation(fields: [runItemId], references: [id], onDelete: Cascade)
+  checklistRun TaskChecklistRun               @relation(fields: [checklistRunId], references: [id], onDelete: Cascade)
+  runItem      TaskChecklistRunItem           @relation(fields: [runItemId], references: [id], onDelete: Cascade)
   templateItem PropertyChecklistTemplateItem? @relation(fields: [templateItemId], references: [id], onDelete: SetNull)
 
   @@index([checklistRunId])
@@ -780,8 +832,8 @@ model PropertyIssueTemplate {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  property     Property             @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  organization Organization                @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  property     Property                    @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   items        PropertyIssueTemplateItem[]
   issueRuns    TaskIssueRun[]
 
@@ -820,17 +872,17 @@ model PropertyIssueTemplateItem {
 }
 
 model TaskIssueRun {
-  id                        String   @id @default(cuid())
-  taskId                    String   @unique
+  id                        String    @id @default(cuid())
+  taskId                    String    @unique
   templateId                String?
   sourceTemplateTitle       String?
   sourceTemplateDescription String?
-  isCustomized              Boolean  @default(false)
-  status                    String   @default("pending")
+  isCustomized              Boolean   @default(false)
+  status                    String    @default("pending")
   startedAt                 DateTime?
   completedAt               DateTime?
-  createdAt                 DateTime @default(now())
-  updatedAt                 DateTime @updatedAt
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
 
   task     Task                   @relation(fields: [taskId], references: [id], onDelete: Cascade)
   template PropertyIssueTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
@@ -843,25 +895,25 @@ model TaskIssueRun {
 }
 
 model TaskIssueRunItem {
-  id                     String   @id @default(cuid())
-  issueRunId             String
-  propertyTemplateItemId String?
-  label                  String
-  labelEn                String?
-  description            String?
-  sortOrder              Int
-  itemType               String   @default("issue_check")
-  isRequired             Boolean  @default(true)
-  allowsIssue            Boolean  @default(true)
-  allowsDamage           Boolean  @default(true)
-  defaultIssueType       String?  @default("repair")
-  defaultSeverity        String?  @default("medium")
-  requiresPhoto          Boolean  @default(false)
-  affectsHostingByDefault Boolean @default(false)
-  urgentByDefault        Boolean  @default(false)
-  locationHint           String?
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
+  id                      String   @id @default(cuid())
+  issueRunId              String
+  propertyTemplateItemId  String?
+  label                   String
+  labelEn                 String?
+  description             String?
+  sortOrder               Int
+  itemType                String   @default("issue_check")
+  isRequired              Boolean  @default(true)
+  allowsIssue             Boolean  @default(true)
+  allowsDamage            Boolean  @default(true)
+  defaultIssueType        String?  @default("repair")
+  defaultSeverity         String?  @default("medium")
+  requiresPhoto           Boolean  @default(false)
+  affectsHostingByDefault Boolean  @default(false)
+  urgentByDefault         Boolean  @default(false)
+  locationHint            String?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
 
   issueRun             TaskIssueRun               @relation(fields: [issueRunId], references: [id], onDelete: Cascade)
   propertyTemplateItem PropertyIssueTemplateItem? @relation(fields: [propertyTemplateItemId], references: [id], onDelete: SetNull)
@@ -900,16 +952,16 @@ model TaskIssueAnswer {
 }
 
 model TaskSupplyRun {
-  id           String   @id @default(cuid())
-  taskId       String   @unique
-  isCustomized Boolean  @default(false)
-  status       String   @default("pending")
+  id           String    @id @default(cuid())
+  taskId       String    @unique
+  isCustomized Boolean   @default(false)
+  status       String    @default("pending")
   startedAt    DateTime?
   completedAt  DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
-  task    Task              @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  task    Task                @relation(fields: [taskId], references: [id], onDelete: Cascade)
   items   TaskSupplyRunItem[]
   answers TaskSupplyAnswer[]
 
@@ -918,36 +970,36 @@ model TaskSupplyRun {
 }
 
 model TaskSupplyRunItem {
-  id               String   @id @default(cuid())
-  taskSupplyRunId  String
-  propertySupplyId String?
-  supplyItemId     String?
+  id                 String                  @id @default(cuid())
+  taskSupplyRunId    String
+  propertySupplyId   String?
+  supplyItemId       String?
   propertySupplyCode String?
-  label            String
-  labelEn          String?
-  category         String?
-  unit             String?
-  fillLevel        String?
-  stateMode        PropertySupplyStateMode @default(DIRECT_STATE)
-  currentStock     Float?
-  mediumThreshold  Float?
-  fullThreshold    Float?
-  targetStock      Float?
-  reorderThreshold Float?
-  targetLevel      Float?
-  minimumThreshold Float?
-  trackingMode     String   @default("fill_level")
-  isCritical       Boolean  @default(false)
-  warningThreshold Float?
-  sortOrder        Int
-  isRequired       Boolean  @default(true)
-  notes            String?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  label              String
+  labelEn            String?
+  category           String?
+  unit               String?
+  fillLevel          String?
+  stateMode          PropertySupplyStateMode @default(DIRECT_STATE)
+  currentStock       Float?
+  mediumThreshold    Float?
+  fullThreshold      Float?
+  targetStock        Float?
+  reorderThreshold   Float?
+  targetLevel        Float?
+  minimumThreshold   Float?
+  trackingMode       String                  @default("fill_level")
+  isCritical         Boolean                 @default(false)
+  warningThreshold   Float?
+  sortOrder          Int
+  isRequired         Boolean                 @default(true)
+  notes              String?
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
 
-  taskSupplyRun  TaskSupplyRun   @relation(fields: [taskSupplyRunId], references: [id], onDelete: Cascade)
-  propertySupply PropertySupply? @relation(fields: [propertySupplyId], references: [id], onDelete: SetNull)
-  supplyItem     SupplyItem?     @relation(fields: [supplyItemId], references: [id], onDelete: SetNull)
+  taskSupplyRun  TaskSupplyRun      @relation(fields: [taskSupplyRunId], references: [id], onDelete: Cascade)
+  propertySupply PropertySupply?    @relation(fields: [propertySupplyId], references: [id], onDelete: SetNull)
+  supplyItem     SupplyItem?        @relation(fields: [supplyItemId], references: [id], onDelete: SetNull)
   answers        TaskSupplyAnswer[]
 
   @@index([taskSupplyRunId])
@@ -957,19 +1009,25 @@ model TaskSupplyRunItem {
 }
 
 model TaskSupplyAnswer {
-  id               String   @id @default(cuid())
-  taskSupplyRunId  String
-  runItemId        String
-  propertySupplyId String?
-  fillLevel        String
-  quantityValue    Float?
-  notes            String?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id                           String   @id @default(cuid())
+  taskSupplyRunId              String
+  runItemId                    String
+  propertySupplyId             String?
+  fillLevel                    String
+  quantityValue                Float?
+  /// Ποσότητα που βρέθηκε κατά την εκτέλεση (πριν τη συμπλήρωση)
+  quantityFound                Float?
+  /// Ποσότητα που προστέθηκε/συμπληρώθηκε από τον συνεργάτη
+  quantityReplenished          Float?
+  /// Τελική κατάσταση μετά τη συμπλήρωση (missing/medium/full)
+  finalStateAfterReplenishment String?
+  notes                        String?
+  createdAt                    DateTime @default(now())
+  updatedAt                    DateTime @updatedAt
 
-  taskSupplyRun  TaskSupplyRun   @relation(fields: [taskSupplyRunId], references: [id], onDelete: Cascade)
+  taskSupplyRun  TaskSupplyRun     @relation(fields: [taskSupplyRunId], references: [id], onDelete: Cascade)
   runItem        TaskSupplyRunItem @relation(fields: [runItemId], references: [id], onDelete: Cascade)
-  propertySupply PropertySupply? @relation(fields: [propertySupplyId], references: [id], onDelete: SetNull)
+  propertySupply PropertySupply?   @relation(fields: [propertySupplyId], references: [id], onDelete: SetNull)
 
   @@unique([taskSupplyRunId, runItemId])
   @@index([taskSupplyRunId])
@@ -979,7 +1037,7 @@ model TaskSupplyAnswer {
 }
 
 model Event {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   organizationId String
   propertyId     String?
   bookingId      String?
@@ -989,11 +1047,11 @@ model Event {
   title          String
   description    String?
   eventType      String
-  status         String   @default("open")
+  status         String    @default("open")
   startAt        DateTime?
   endAt          DateTime?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   property     Property?    @relation(fields: [propertyId], references: [id], onDelete: SetNull)
@@ -1111,12 +1169,12 @@ model VerificationToken {
 }
 
 model UserActivationToken {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   userId    String
-  token     String   @unique
+  token     String    @unique
   expiresAt DateTime
   usedAt    DateTime?
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -1137,9 +1195,9 @@ model PropertySupplyQRCode {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  property       Property       @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  propertySupply PropertySupply @relation(fields: [propertySupplyId], references: [id], onDelete: Cascade)
+  organization   Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  property       Property               @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  propertySupply PropertySupply         @relation(fields: [propertySupplyId], references: [id], onDelete: Cascade)
   scans          PropertySupplyQRScan[]
 
   @@index([organizationId])

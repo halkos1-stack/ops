@@ -26,6 +26,10 @@ type IncomingSupplyAnswer = {
   propertySupplyId: string
   fillLevel?: "missing" | "medium" | "full" | null
   quantityValue?: number | null
+  /// Ποσότητα που βρέθηκε πριν τη συμπλήρωση (προαιρετική — από partner)
+  quantityFound?: number | null
+  /// Ποσότητα που προστέθηκε κατά την εκτέλεση (προαιρετική — από partner)
+  quantityReplenished?: number | null
   notes?: string | null
 }
 
@@ -181,17 +185,19 @@ export async function POST(req: NextRequest, context: RouteContext) {
     const incomingAnswers: IncomingSupplyAnswer[] = rawAnswers.map(
       (entry: unknown) => {
         const raw = (entry ?? {}) as Record<string, unknown>
-        const numericValue =
-          raw.quantityValue === undefined ||
-          raw.quantityValue === null ||
-          raw.quantityValue === ""
-            ? null
-            : Number(raw.quantityValue)
+
+        function toFiniteOrNull(value: unknown): number | null {
+          if (value === undefined || value === null || value === "") return null
+          const n = Number(value)
+          return Number.isFinite(n) ? n : null
+        }
 
         return {
           propertySupplyId: String(raw.propertySupplyId || "").trim(),
           fillLevel: normalizeSupplyState(raw.fillLevel),
-          quantityValue: Number.isFinite(numericValue) ? numericValue : null,
+          quantityValue: toFiniteOrNull(raw.quantityValue),
+          quantityFound: toFiniteOrNull(raw.quantityFound),
+          quantityReplenished: toFiniteOrNull(raw.quantityReplenished),
           notes: toNullableTrimmedString(raw.notes),
         }
       }
@@ -412,12 +418,21 @@ export async function POST(req: NextRequest, context: RouteContext) {
               }
         )
 
+        // Προσδιορισμός finalStateAfterReplenishment:
+        // Αν ο partner δήλωσε quantityFound (πριν) και quantityReplenished (προστέθηκε),
+        // τότε η τελική κατάσταση είναι η canonical computed state.
+        // Αν δεν υπάρχει quantityReplenished, η τελική = η δηλωθείσα κατάσταση.
+        const finalState = canonical.fillLevel
+
         const answerWriteData = {
           fillLevel: canonical.fillLevel,
           quantityValue:
             canonical.stateMode === "numeric_thresholds"
               ? canonical.canonicalTruth.currentStock
               : null,
+          quantityFound: incoming.quantityFound ?? null,
+          quantityReplenished: incoming.quantityReplenished ?? null,
+          finalStateAfterReplenishment: finalState,
           notes: incoming.notes || null,
         }
 
@@ -453,6 +468,9 @@ export async function POST(req: NextRequest, context: RouteContext) {
         }
 
         if (mode === "submit") {
+          // Αποθήκευση κατάστασης πριν την ενημέρωση για το log
+          const stateBefore = propertySupply.fillLevel
+
           await tx.propertySupply.update({
             where: {
               id: propertySupply.id,
@@ -471,6 +489,29 @@ export async function POST(req: NextRequest, context: RouteContext) {
               warningThreshold: canonical.warningThreshold,
               lastUpdatedAt: now,
               notes: incoming.notes || propertySupply.notes || null,
+            },
+          })
+
+          // Γράψιμο immutable ιστορικού συμπλήρωσης
+          await tx.supplyReplenishmentLog.create({
+            data: {
+              organizationId: latestAssignment.task.property.organizationId,
+              propertyId: latestAssignment.task.property.id,
+              propertySupplyId: propertySupply.id,
+              supplyItemId: propertySupply.supplyItemId,
+              taskId: latestAssignment.task.id,
+              taskSupplyAnswerId: savedAnswerId,
+              quantityBefore: incoming.quantityFound ?? null,
+              quantityAdded: incoming.quantityReplenished ?? null,
+              quantityAfter:
+                canonical.stateMode === "numeric_thresholds"
+                  ? (canonical.canonicalTruth.currentStock ?? null)
+                  : null,
+              stateBefore,
+              stateAfter: canonical.fillLevel,
+              performedBy: latestAssignment.partner.name,
+              notes: incoming.notes || null,
+              loggedAt: now,
             },
           })
         }
