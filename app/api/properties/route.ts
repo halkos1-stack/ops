@@ -333,16 +333,16 @@ function mapConditionToReadinessInput(
  * Μετατρέπει raw Prisma property σε operational view.
  *
  * Κανονική σειρά εκτέλεσης:
- * 1. Supply canonical state (υπήρχε ήδη)
- * 2. Operational status ΠΡΩΤΑ — bookings + canonical tasks, χωρίς readinessStatus input
- * 3. Live readiness ΜΕ operational context — conditions + operational override
+ * 1. Supply canonical state
+ * 2. Καθαρό conditions-based readiness
+ * 3. Operational status με conditions fallback
+ * 4. Live readiness με operational override
  *
- * Τα live πεδία (readinessStatus, readinessReasonsText, readinessUpdatedAt)
- * αντικαθιστούν τις stale DB τιμές στο response.
+ * Τα live πεδία αντικαθιστούν τις stale DB τιμές στο response.
  */
 function shapePropertyForOperationalViews(property: FullPropertyRow) {
-  // Cast σε LooseRecord[] για ασφαλή πρόσβαση — το Prisma type inference
-  // χάνεται όταν το tasks include περιέχει nested relations με optional fields.
+  const now = new Date()
+
   const allTasks = (Array.isArray(property?.tasks) ? property.tasks : []) as LooseRecord[]
 
   // ─── Supply canonical state ───────────────────────────────────────────────
@@ -394,11 +394,6 @@ function shapePropertyForOperationalViews(property: FullPropertyRow) {
     (task) => getOperationalTaskValidity(task as { source?: unknown; bookingId?: unknown }).isCanonicalOperational !== true
   ).length
 
-  // ─── ΒΗΜΑ 1: Operational status ───────────────────────────────────────────
-  // Canonical tasks μόνο, χωρίς readinessStatus input.
-  // filterCanonicalOperationalTasks ελέγχει μόνο source + bookingId.
-  // Δεν κάνουμε intermediate .map() γιατί το spread πάνω σε LooseRecord
-  // χάνει τα ονόματα πεδίων και το TypeScript βλέπει μόνο τα ρητά νέα πεδία.
   type RawTaskRow = LooseRecord & {
     source?: unknown
     bookingId?: unknown
@@ -406,8 +401,18 @@ function shapePropertyForOperationalViews(property: FullPropertyRow) {
   }
   const canonicalTasks = filterCanonicalOperationalTasks(allTasks as RawTaskRow[])
 
+  const readinessConditions: ReadinessConditionInput[] = safeArray(
+    property.conditions
+  ).map(mapConditionToReadinessInput)
+
+  const conditionsReadiness = computePropertyReadiness({
+    now,
+    nextCheckInAt: property.nextCheckInAt ?? null,
+    conditions: readinessConditions,
+  })
+
   const operationalStatusResult = computePropertyOperationalStatus({
-    readinessStatus: null,
+    readinessStatus: conditionsReadiness.status,
     bookings: safeArray(property.bookings).map((b) => ({
       id: b.id,
       status: b.status ?? null,
@@ -450,13 +455,8 @@ function shapePropertyForOperationalViews(property: FullPropertyRow) {
     }),
   })
 
-  // ─── ΒΗΜΑ 2: Live readiness με operational context ────────────────────────
-  const readinessConditions: ReadinessConditionInput[] = safeArray(
-    property.conditions
-  ).map(mapConditionToReadinessInput)
-
   const readinessResult = computePropertyReadiness({
-    now: new Date(),
+    now,
     nextCheckInAt: property.nextCheckInAt ?? null,
     conditions: readinessConditions,
     operationalContext:
@@ -468,7 +468,6 @@ function shapePropertyForOperationalViews(property: FullPropertyRow) {
         : undefined,
   })
 
-  // Canonical condition counters — από live readinessConditions, όχι stale DB
   const activeConditions = readinessConditions.filter(
     (c) => c.status !== "resolved" && c.status !== "dismissed"
   )
@@ -482,18 +481,14 @@ function shapePropertyForOperationalViews(property: FullPropertyRow) {
 
   return {
     ...property,
-    // Canonical tasks μόνο (φιλτραρισμένα)
     tasks: canonicalTasks,
     propertySupplies,
-    // Live readiness — αντικαθιστά stale DB fields
     readinessStatus: readinessResult.status,
     readinessReasonsText: readinessResult.reasons.map((r) => r.message).join("\n"),
     readinessUpdatedAt: readinessResult.computedAt,
-    // Canonical condition counters — αντικαθιστά stale DB counters
     openConditionCount: canonicalOpenConditionCount,
     openBlockingConditionCount: canonicalOpenBlockingConditionCount,
     openWarningConditionCount: canonicalOpenWarningConditionCount,
-    // Operational status για σελίδες που το χρειάζονται
     operationalStatus: operationalStatusResult.operationalStatus,
     operationalStatusLabel: operationalStatusResult.label,
     auditSummary: {
@@ -536,8 +531,6 @@ export async function GET(req: NextRequest) {
     const city = searchParams.get("city")
     const type = searchParams.get("type")
     const search = searchParams.get("search")
-    // readinessStatus query param: δεν γίνεται DB filter —
-    // το live readiness υπολογίζεται στο shapePropertyForOperationalViews.
 
     let organizationId: string | null = null
 
