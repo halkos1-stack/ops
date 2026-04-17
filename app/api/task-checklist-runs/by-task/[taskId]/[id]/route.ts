@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import {
+  requireApiAppAccess,
+  canAccessOrganization,
+} from "@/lib/route-access"
 
 type RouteContext = {
   params: Promise<{
@@ -38,6 +42,10 @@ function toPhotoUrls(value: unknown) {
 
 export async function PATCH(req: NextRequest, context: RouteContext) {
   try {
+    const access = await requireApiAppAccess()
+    if (!access.ok) return access.response
+    const { auth } = access
+
     const { taskId, id } = await context.params
     const body = await req.json().catch(() => ({}))
 
@@ -48,6 +56,25 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       return NextResponse.json(
         { error: "Μη έγκυρη ενέργεια." },
         { status: 400 }
+      )
+    }
+
+    const taskScope = await prisma.task.findUnique({
+      where: { id: taskId },
+      select: { id: true, organizationId: true },
+    })
+
+    if (!taskScope) {
+      return NextResponse.json(
+        { error: "Η εργασία δεν βρέθηκε." },
+        { status: 404 }
+      )
+    }
+
+    if (!canAccessOrganization(auth, taskScope.organizationId)) {
+      return NextResponse.json(
+        { error: "Δεν έχετε πρόσβαση σε αυτή την εργασία." },
+        { status: 403 }
       )
     }
 
@@ -79,6 +106,16 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       return NextResponse.json(
         { error: "Η checklist δεν βρέθηκε." },
         { status: 404 }
+      )
+    }
+
+    if (String(run.status ?? "").toLowerCase() === "completed") {
+      return NextResponse.json(
+        {
+          error:
+            "Η checklist έχει ήδη οριστικοποιηθεί και δεν επιτρέπεται τροποποίηση.",
+        },
+        { status: 409 }
       )
     }
 
@@ -180,8 +217,8 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
           entityId: refreshedRun.id,
           action: "CHECKLIST_SAVED",
           message: `Έγινε προσωρινή αποθήκευση checklist για την εργασία "${refreshedRun.task.title}"`,
-          actorType: "PARTNER",
-          actorName: "Partner User",
+          actorType: "manager",
+          actorName: auth.name || auth.email || "Διαχειριστής",
           metadata: {
             runId: refreshedRun.id,
             taskId: refreshedRun.task.id,
@@ -272,8 +309,8 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
         entityId: refreshedRun.id,
         action: "CHECKLIST_SUBMITTED",
         message: `Υποβλήθηκε checklist για την εργασία "${refreshedRun.task.title}"`,
-        actorType: "PARTNER",
-        actorName: "Partner User",
+        actorType: "manager",
+        actorName: auth.name || auth.email || "Διαχειριστής",
         metadata: {
           runId: refreshedRun.id,
           taskId: refreshedRun.task.id,
