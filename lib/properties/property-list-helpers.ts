@@ -13,11 +13,8 @@
  * Κανόνας: χωρίς React imports, χωρίς business logic που ξεπερνά το display layer.
  */
 
-import { isTaskAlertActive } from "@/components/tasks/task-ui"
 import {
   normalizeBookingStatus,
-  normalizeIssueStatus,
-  normalizeTaskStatus,
 } from "@/lib/i18n/normalizers"
 import { normalizeReadinessForUI } from "@/lib/readiness/readiness-ui"
 import {
@@ -237,69 +234,6 @@ export function normalizeLooseText(value: unknown) {
     .toLowerCase()
     .replace(/\s+/g, "_")
     .replace(/-+/g, "_")
-}
-
-// ─── Operational counter selectors ───────────────────────────────────────────
-
-export function isTodayOpenTask(task: PropertyTaskListItem, now: Date) {
-  const scheduledDate = normalizeDate(task.scheduledDate)
-  if (!scheduledDate) return false
-
-  const taskStatus = normalizeTaskStatus(task.status)
-  const isOpenStatus = [
-    "PENDING",
-    "ASSIGNED",
-    "WAITING_ACCEPTANCE",
-    "ACCEPTED",
-    "IN_PROGRESS",
-    "NEW",
-  ].includes(taskStatus)
-
-  return isOpenStatus && isSameCalendarDay(scheduledDate, now)
-}
-
-export function isOpenIssue(issue: PropertyIssueListItem) {
-  const issueStatus = normalizeIssueStatus(issue.status)
-  return issueStatus === "OPEN" || issueStatus === "IN_PROGRESS"
-}
-
-export function isDamageIssue(issue: PropertyIssueListItem) {
-  const normalizedType = normalizeLooseText(issue.issueType)
-  return normalizedType.includes("damage") || normalizedType.includes("ζημια")
-}
-
-/**
- * Επιστρέφει αν το supply έχει shortage.
- * Προτεραιότητα: `isShortage` precomputed field → fallback derivedState/fillLevel.
- */
-export function isSupplyShortage(supply: PropertySupplyListItem) {
-  if (!supply.isActive) return false
-  if (typeof supply.isShortage === "boolean") return supply.isShortage
-  const state = String(supply.derivedState ?? supply.fillLevel ?? "").toLowerCase()
-  return state === "missing" || state === "empty" || state === "low"
-}
-
-export function getOperationalCountsForToday(
-  property: PropertyListItem,
-  now: Date
-): PropertyOperationalCounts {
-  return {
-    todayOpenTasks: safeArray(property.tasks).filter((task) =>
-      isTodayOpenTask(task, now)
-    ).length,
-    activeAlerts: safeArray(property.tasks).filter((task) =>
-      isTaskAlertActive(task)
-    ).length,
-    openIssues: safeArray(property.issues).filter(
-      (issue) => isOpenIssue(issue) && !isDamageIssue(issue)
-    ).length,
-    openDamages: safeArray(property.issues).filter(
-      (issue) => isOpenIssue(issue) && isDamageIssue(issue)
-    ).length,
-    supplyShortages: safeArray(property.propertySupplies).filter((supply) =>
-      isSupplyShortage(supply)
-    ).length,
-  }
 }
 
 // ─── Readiness selectors ──────────────────────────────────────────────────────
