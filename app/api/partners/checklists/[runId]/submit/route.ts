@@ -568,6 +568,27 @@ export async function POST(req: NextRequest, context: RouteContext) {
           }
         }
 
+        await tx.activityLog.create({
+          data: {
+            organizationId: existingRun.task.organizationId,
+            propertyId: existingRun.task.propertyId,
+            taskId: existingRun.task.id,
+            partnerId: auth.partnerId,
+            entityType: "TASK_CHECKLIST_RUN",
+            entityId: runId,
+            action: "PARTNER_CHECKLIST_SUBMITTED",
+            message: `Ο συνεργάτης ${auth.partnerName} υπέβαλε τη checklist από το portal.`,
+            actorType: "PARTNER",
+            actorName: auth.partnerName,
+            metadata: {
+              taskId: existingRun.task.id,
+              checklistRunId: runId,
+              answersCount: submittedAnswers.length,
+              createdOrUpdatedConditionCount: createdOrUpdatedConditionIds.length,
+            },
+          },
+        });
+
         const refreshedRun = await tx.taskChecklistRun.findUnique({
           where: { id: runId },
           include: {

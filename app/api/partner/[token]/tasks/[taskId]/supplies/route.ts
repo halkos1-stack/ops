@@ -608,8 +608,8 @@ export async function POST(req: NextRequest, context: RouteContext) {
               : "PARTNER_SUPPLIES_SAVED",
           message:
             mode === "submit"
-              ? `Ο συνεργατης ${latestAssignment.partner.name} υπεβαλε τα αναλωσιμα απο το portal.`
-              : `Ο συνεργατης ${latestAssignment.partner.name} αποθηκευσε προοδο αναλωσιμων απο το portal.`,
+              ? `Ο συνεργάτης ${latestAssignment.partner.name} υπέβαλε τα αναλώσιμα από το portal.`
+              : `Ο συνεργάτης ${latestAssignment.partner.name} αποθήκευσε πρόοδο αναλωσίμων από το portal.`,
           actorType: "PARTNER_PORTAL",
           actorName: latestAssignment.partner.name,
           metadata: {
