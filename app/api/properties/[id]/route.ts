@@ -170,6 +170,11 @@ function safeArray<T>(value: T[] | null | undefined): T[] {
   return Array.isArray(value) ? value : [];
 }
 
+function normalizePhotoUrls(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => String(item ?? "").trim()).filter(Boolean);
+}
+
 function toNullableString(value: unknown): string | null {
   if (value === undefined || value === null) return null;
 
@@ -258,15 +263,24 @@ function normalizeChecklistRun(run: ChecklistRunRecord | null | undefined) {
 
   return {
     ...run,
-    answers: safeArray(run.answers).sort((a, b) => {
-      const aOrder = Number(
-        a?.runItem?.sortOrder ?? a?.templateItem?.sortOrder ?? 0
-      );
-      const bOrder = Number(
-        b?.runItem?.sortOrder ?? b?.templateItem?.sortOrder ?? 0
-      );
-      return aOrder - bOrder;
-    }),
+    answers: safeArray(run.answers)
+      .map((a) => ({
+        ...(a as Record<string, unknown>),
+        photoUrls: normalizePhotoUrls((a as Record<string, unknown>).photoUrls),
+      }))
+      .sort((a, b) => {
+        const aOrder = Number(
+          (a as ChecklistRunAnswerRecord)?.runItem?.sortOrder ??
+            (a as ChecklistRunAnswerRecord)?.templateItem?.sortOrder ??
+            0
+        );
+        const bOrder = Number(
+          (b as ChecklistRunAnswerRecord)?.runItem?.sortOrder ??
+            (b as ChecklistRunAnswerRecord)?.templateItem?.sortOrder ??
+            0
+        );
+        return aOrder - bOrder;
+      }),
     items: safeArray(run.items).sort((a, b) => {
       const aOrder = Number(a?.sortOrder ?? 0);
       const bOrder = Number(b?.sortOrder ?? 0);
@@ -329,21 +343,34 @@ function normalizeIssueRun(run: IssueRunRecord | null | undefined) {
       const bOrder = Number(b?.sortOrder ?? 0);
       return aOrder - bOrder;
     }),
-    answers: safeArray(run.answers).sort((a, b) => {
-      const aOrder = Number(
-        a?.runItem?.sortOrder ?? a?.templateItem?.sortOrder ?? 0
-      );
-      const bOrder = Number(
-        b?.runItem?.sortOrder ?? b?.templateItem?.sortOrder ?? 0
-      );
+    answers: safeArray(run.answers)
+      .map((a) => ({
+        ...(a as Record<string, unknown>),
+        photoUrls: normalizePhotoUrls((a as Record<string, unknown>).photoUrls),
+      }))
+      .sort((a, b) => {
+        const aOrder = Number(
+          (a as IssueRunAnswerRecord)?.runItem?.sortOrder ??
+            (a as IssueRunAnswerRecord)?.templateItem?.sortOrder ??
+            0
+        );
+        const bOrder = Number(
+          (b as IssueRunAnswerRecord)?.runItem?.sortOrder ??
+            (b as IssueRunAnswerRecord)?.templateItem?.sortOrder ??
+            0
+        );
 
-      if (aOrder !== bOrder) return aOrder - bOrder;
+        if (aOrder !== bOrder) return aOrder - bOrder;
 
-      const aCreated = new Date(a?.createdAt || 0).getTime();
-      const bCreated = new Date(b?.createdAt || 0).getTime();
+        const aCreated = new Date(
+          (a as IssueRunAnswerRecord)?.createdAt || 0
+        ).getTime();
+        const bCreated = new Date(
+          (b as IssueRunAnswerRecord)?.createdAt || 0
+        ).getTime();
 
-      return aCreated - bCreated;
-    }),
+        return aCreated - bCreated;
+      }),
   };
 }
 
@@ -992,6 +1019,7 @@ async function getFullProperty(id: string) {
                   affectsHosting: true,
                   requiresImmediateAction: true,
                   locationText: true,
+                  photoUrls: true,
                   createdIssueId: true,
                   createdAt: true,
                   updatedAt: true,
@@ -1390,8 +1418,17 @@ async function getFullProperty(id: string) {
       return template?.isPrimary === true;
     }) || null;
 
+  const canonicalConditions = readinessComputed.conditionSnapshot.conditions;
+  const canonicalConditionSummary = readinessComputed.conditionSnapshot.summary;
+
   return {
     ...property,
+    // Canonical condition surface — αντικαθιστά το raw DB conditions spread
+    conditions: canonicalConditions,
+    openConditionCount: canonicalConditionSummary.active,
+    openBlockingConditionCount: canonicalConditionSummary.blocking,
+    openWarningConditionCount: canonicalConditionSummary.warning,
+
     bookings: normalizedBookings,
     bookingsWithoutTask,
     bookingsWithoutTaskCount: bookingsWithoutTask.length,
@@ -1450,7 +1487,7 @@ async function getFullProperty(id: string) {
         mediumSupplies: mediumSupplies.length,
       },
       conditions: {
-        summary: readinessComputed.conditionSnapshot.summary,
+        summary: canonicalConditionSummary,
         reasons: readinessComputed.conditionSnapshot.reasons,
         active: readinessComputed.conditionSnapshot.buckets.active,
         blocking: readinessComputed.conditionSnapshot.buckets.blocking,
