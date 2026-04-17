@@ -53,12 +53,16 @@ export async function refreshPropertyReadiness(propertyId: string) {
   }
 
   const [nextBooking, recentBookings, dbConditions, dbTasks] = await Promise.all([
-    // Επόμενη κράτηση (για conditions readiness + activeTarget στο operational status)
+    // Επόμενη ενεργή κράτηση (για conditions readiness + activeTarget στο operational status)
+    // Αποκλείονται cancelled/canceled κρατήσεις — ευθυγράμμιση με isActiveBookingStatus()
+    // στο property-operational-status.ts, ώστε το αποθηκευμένο nextCheckInAt να αντικατοπτρίζει
+    // μόνο πραγματικές μελλοντικές αφίξεις.
     prisma.booking.findFirst({
       where: {
         organizationId: property.organizationId,
         propertyId: property.id,
         checkInDate: { gte: now },
+        status: { notIn: ["cancelled", "canceled"] },
       },
       orderBy: { checkInDate: "asc" },
       select: { id: true, checkInDate: true, checkOutDate: true, guestName: true, status: true },
