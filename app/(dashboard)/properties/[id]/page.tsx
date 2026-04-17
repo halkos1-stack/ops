@@ -73,6 +73,21 @@ import {
 
 type ViewMode = "calendar" | "management"
 
+function formatIssueSeverity(language: Language, severity: string | null | undefined): string {
+  const normalized = String(severity || "").trim().toLowerCase()
+  const severityLabels: Record<string, { el: string; en: string }> = {
+    critical: { el: "Κρίσιμη", en: "Critical" },
+    high:     { el: "Υψηλή", en: "High" },
+    urgent:   { el: "Επείγουσα", en: "Urgent" },
+    medium:   { el: "Μέτρια", en: "Medium" },
+    warning:  { el: "Προειδοποίηση", en: "Warning" },
+    low:      { el: "Χαμηλή", en: "Low" },
+  }
+  const prefix = language === "en" ? "Severity" : "Σοβαρότητα"
+  const value = severityLabels[normalized]?.[language] ?? (normalized ? normalized.toUpperCase() : "—")
+  return `${prefix}: ${value}`
+}
+
 type PartnerOption = {
   id: string
   code: string
@@ -1678,7 +1693,7 @@ export default function PropertyDetailPage() {
 
               {selectedWindow ? (
                 <div className="mt-2">
-                  <strong>Παράθυρο:</strong> {formatDateTime(selectedWindow.startAt, locale)} → {selectedWindow.endAt
+                  <strong>{t.workWindowLabel}:</strong> {formatDateTime(selectedWindow.startAt, locale)} → {selectedWindow.endAt
                     ? formatDateTime(selectedWindow.endAt, locale)
                     : "—"}
                 </div>
@@ -1865,7 +1880,7 @@ export default function PropertyDetailPage() {
                 </div>
 
                 <div className="mt-2 text-xs text-slate-500">
-                  Severity: {String(issue.severity || "—").toUpperCase()}
+                  {formatIssueSeverity(language, issue.severity)}
                 </div>
 
                 {issue.description ? (
