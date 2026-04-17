@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { createSecureToken, createExpiryDate } from "@/lib/tokens"
+import { refreshPropertyReadiness } from "@/lib/readiness/refresh-property-readiness"
 
 type RouteContext = {
   params: Promise<{
@@ -254,6 +255,10 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
       return updatedAssignment
     })
+
+    if (existingAssignment.task.propertyId) {
+      await refreshPropertyReadiness(existingAssignment.task.propertyId)
+    }
 
     return NextResponse.json({
       success: true,
