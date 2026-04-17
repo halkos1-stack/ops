@@ -71,6 +71,11 @@ export async function POST(req: NextRequest, context: RouteContext) {
       )
     }
 
+    await prisma.partnerPortalAccessToken.update({
+      where: { id: portalAccess.id },
+      data: { lastUsedAt: new Date() },
+    })
+
     const assignments = await prisma.taskAssignment.findMany({
       where: {
         partnerId: portalAccess.partnerId,
@@ -142,6 +147,13 @@ export async function POST(req: NextRequest, context: RouteContext) {
       return NextResponse.json(
         { error: "Δεν υπάρχει συνδεδεμένη checklist για αυτή την εργασία." },
         { status: 400 }
+      )
+    }
+
+    if (String(checklistRun.status || "").toLowerCase() === "completed") {
+      return NextResponse.json(
+        { error: "Η checklist έχει ήδη οριστικοποιηθεί και δεν επιτρέπεται νέα αποστολή φωτογραφίας." },
+        { status: 409 }
       )
     }
 

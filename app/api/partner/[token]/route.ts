@@ -120,8 +120,12 @@ export async function GET(_req: NextRequest, context: RouteContext) {
 
     const latestAssignments = Array.from(latestAssignmentsMap.values())
 
+    const ACTIVE_ASSIGNMENT_STATUSES = ["assigned", "accepted", "in_progress", "completed"]
+
     const activeAssignments = latestAssignments.filter(
-      (assignment) => !isCancelledTaskStatus(assignment.task?.status)
+      (assignment) =>
+        !isCancelledTaskStatus(assignment.task?.status) &&
+        ACTIVE_ASSIGNMENT_STATUSES.includes(normalizeStatus(assignment.status))
     )
 
     const pendingAcceptance = activeAssignments.filter((assignment) =>
