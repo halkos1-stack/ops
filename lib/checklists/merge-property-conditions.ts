@@ -312,6 +312,7 @@ export async function resolveMergedPropertyConditionsNotSeenInRun(
     where: {
       organizationId: input.organizationId,
       propertyId: input.propertyId,
+      conditionType: { not: "SUPPLY" },
       status: {
         in: ["OPEN", "MONITORING"],
       },
@@ -385,4 +386,67 @@ export async function resolveMergedPropertyConditionsNotSeenInRun(
     keptOpenIds,
     notSeenIds,
   }
+}
+
+export type ResolveActiveSupplyShortageConditionsInput = {
+  organizationId: string
+  propertyId: string
+  mergeKeysToKeepOpen: string[]
+  resolvedAt: Date
+}
+
+export type ResolveActiveSupplyShortageConditionsResult = {
+  resolvedIds: string[]
+}
+
+export async function resolveActiveSupplyShortageConditions(
+  input: ResolveActiveSupplyShortageConditionsInput,
+  client?: MergePropertyConditionPrismaClient
+): Promise<ResolveActiveSupplyShortageConditionsResult> {
+  const db = getDb(client)
+  const mergeKeysToKeepOpen = uniqueStrings(input.mergeKeysToKeepOpen)
+
+  const activeSupplyConditions = await db.propertyCondition.findMany({
+    where: {
+      organizationId: input.organizationId,
+      propertyId: input.propertyId,
+      conditionType: "SUPPLY",
+      status: {
+        in: ["OPEN", "MONITORING"],
+      },
+    },
+    select: {
+      id: true,
+      mergeKey: true,
+    },
+  })
+
+  const conditionIdsToResolve = activeSupplyConditions
+    .filter((condition) => {
+      const mergeKey = toNullableString(condition.mergeKey)
+      return !!mergeKey && !mergeKeysToKeepOpen.includes(mergeKey)
+    })
+    .map((condition) => condition.id)
+
+  if (conditionIdsToResolve.length === 0) {
+    return { resolvedIds: [] }
+  }
+
+  await db.propertyCondition.updateMany({
+    where: {
+      id: {
+        in: conditionIdsToResolve,
+      },
+    },
+    data: {
+      status: "RESOLVED",
+      blockingStatus: "NON_BLOCKING",
+      managerDecision: "RESOLVED",
+      resolvedAt: input.resolvedAt,
+      dismissedAt: null,
+      lastDetectedAt: input.resolvedAt,
+    },
+  })
+
+  return { resolvedIds: conditionIdsToResolve }
 }

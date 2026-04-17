@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
 import {
   mergePropertyCondition,
+  resolveActiveSupplyShortageConditions,
 } from "@/lib/checklists/merge-property-conditions"
 import { refreshPropertyReadiness } from "@/lib/readiness/refresh-property-readiness"
 import {
@@ -88,60 +89,6 @@ function toNullableTrimmedString(value: unknown) {
   return text === "" ? null : text
 }
 
-async function resolveSupplyShortageTruthFromProof(params: {
-  tx: Prisma.TransactionClient
-  organizationId: string
-  propertyId: string
-  mergeKeysToKeepOpen: string[]
-  sourceRunId: string
-  resolvedAt: Date
-}) {
-  const mergeKeysToKeepOpen = new Set(params.mergeKeysToKeepOpen)
-
-  const activeSupplyConditions = await params.tx.propertyCondition.findMany({
-    where: {
-      organizationId: params.organizationId,
-      propertyId: params.propertyId,
-      sourceType: "task_supply_proof",
-      sourceRunId: params.sourceRunId,
-      conditionType: "SUPPLY",
-      status: {
-        in: ["OPEN", "MONITORING"],
-      },
-    },
-    select: {
-      id: true,
-      mergeKey: true,
-    },
-  })
-
-  const conditionIdsToResolve = activeSupplyConditions
-    .filter((condition) => {
-      const mergeKey = String(condition.mergeKey ?? "").trim()
-      return !!mergeKey && !mergeKeysToKeepOpen.has(mergeKey)
-    })
-    .map((condition) => condition.id)
-
-  if (conditionIdsToResolve.length === 0) {
-    return
-  }
-
-  await params.tx.propertyCondition.updateMany({
-    where: {
-      id: {
-        in: conditionIdsToResolve,
-      },
-    },
-    data: {
-      status: "RESOLVED",
-      blockingStatus: "NON_BLOCKING",
-      managerDecision: "RESOLVED",
-      resolvedAt: params.resolvedAt,
-      dismissedAt: null,
-      lastDetectedAt: params.resolvedAt,
-    },
-  })
-}
 
 const taskAssignmentWithSupplyArgs =
   Prisma.validator<Prisma.TaskAssignmentDefaultArgs>()({
@@ -329,6 +276,13 @@ export async function POST(req: NextRequest, context: RouteContext) {
       return NextResponse.json(
         { error: "This task does not have an active supplies run." },
         { status: 400 }
+      )
+    }
+
+    if (String(supplyRun.status || "").toLowerCase() === "completed") {
+      return NextResponse.json(
+        { error: "This supply run has already been submitted and cannot be modified." },
+        { status: 409 }
       )
     }
 
@@ -589,14 +543,15 @@ export async function POST(req: NextRequest, context: RouteContext) {
       }
 
       if (mode === "submit") {
-        await resolveSupplyShortageTruthFromProof({
-          tx,
-          organizationId: latestAssignment.task.property.organizationId,
-          propertyId: latestAssignment.task.property.id,
-          mergeKeysToKeepOpen,
-          sourceRunId: supplyRun.id,
-          resolvedAt: now,
-        })
+        await resolveActiveSupplyShortageConditions(
+          {
+            organizationId: latestAssignment.task.property.organizationId,
+            propertyId: latestAssignment.task.property.id,
+            mergeKeysToKeepOpen,
+            resolvedAt: now,
+          },
+          tx as never
+        )
       }
 
       const refreshedTask = await tx.task.findUnique({
