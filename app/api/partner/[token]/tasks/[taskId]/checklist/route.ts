@@ -15,14 +15,35 @@ type RouteContext = {
   }>
 }
 
-type IncomingAnswer = {
-  templateItemId: string
+type AnswerValueShape = {
   valueBoolean?: boolean | null
   valueText?: string | null
   valueNumber?: number | null
   valueSelect?: string | null
   notes?: string | null
   photoUrls?: string[] | null
+}
+
+type IncomingAnswer = AnswerValueShape & {
+  templateItemId: string
+  hasValueBoolean: boolean
+  hasValueText: boolean
+  hasValueNumber: boolean
+  hasValueSelect: boolean
+  hasNotes: boolean
+  hasPhotoUrls: boolean
+}
+
+type PersistedChecklistAnswerSnapshot = AnswerValueShape & {
+  id: string
+  runItemId: string | null
+  templateItemId: string
+  photoUrls: string[]
+}
+
+type EffectiveAnswer = AnswerValueShape & {
+  templateItemId: string
+  photoUrls: string[]
 }
 
 type ChecklistItemWithRules = {
@@ -68,7 +89,120 @@ function normalizePhotoUrls(value: unknown) {
     .filter(Boolean)
 }
 
-function isMeaningfulAnswer(answer?: IncomingAnswer | null) {
+function mergePhotoUrls(...groups: unknown[]) {
+  const merged = groups.flatMap((group) => normalizePhotoUrls(group))
+  return Array.from(new Set(merged))
+}
+
+function hasOwn(raw: Record<string, unknown>, key: string) {
+  return Object.prototype.hasOwnProperty.call(raw, key)
+}
+
+function requireNonEmptyTemplateItemId(
+  value: string | null | undefined,
+  contextMessage: string
+) {
+  const normalized = String(value || "").trim()
+
+  if (!normalized) {
+    throw new Error(contextMessage)
+  }
+
+  return normalized
+}
+
+function toPersistedChecklistAnswerSnapshot(answer: {
+  id: string
+  runItemId: string | null
+  templateItemId: string | null
+  valueBoolean: boolean | null
+  valueText: string | null
+  valueNumber: number | null
+  valueSelect: string | null
+  notes: string | null
+  photoUrls: Prisma.JsonValue | null
+}): PersistedChecklistAnswerSnapshot {
+  return {
+    id: answer.id,
+    runItemId: answer.runItemId,
+    templateItemId: requireNonEmptyTemplateItemId(
+      answer.templateItemId,
+      `Το answer ${answer.id} δεν έχει templateItemId.`
+    ),
+    valueBoolean: answer.valueBoolean,
+    valueText: answer.valueText,
+    valueNumber: answer.valueNumber,
+    valueSelect: answer.valueSelect,
+    notes: answer.notes,
+    photoUrls: normalizePhotoUrls(answer.photoUrls),
+  }
+}
+
+function buildExistingAnswersByTemplateItemId(
+  answers: Array<{
+    id: string
+    runItemId: string | null
+    templateItemId: string | null
+    valueBoolean: boolean | null
+    valueText: string | null
+    valueNumber: number | null
+    valueSelect: string | null
+    notes: string | null
+    photoUrls: Prisma.JsonValue | null
+  }>
+) {
+  const entries: Array<[string, PersistedChecklistAnswerSnapshot]> = []
+
+  for (const answer of answers) {
+    const templateItemId = String(answer.templateItemId || "").trim()
+
+    if (!templateItemId) continue
+
+    const snapshot = toPersistedChecklistAnswerSnapshot(answer)
+    entries.push([templateItemId, snapshot])
+  }
+
+  return new Map<string, PersistedChecklistAnswerSnapshot>(entries)
+}
+
+function buildEffectiveAnswer(
+  templateItemId: string,
+  existing?: PersistedChecklistAnswerSnapshot | null,
+  incoming?: IncomingAnswer | null
+): EffectiveAnswer {
+  return {
+    templateItemId,
+    valueBoolean:
+      incoming?.hasValueBoolean
+        ? incoming.valueBoolean ?? null
+        : existing?.valueBoolean ?? null,
+    valueText:
+      incoming?.hasValueText
+        ? toNullableTrimmedString(incoming.valueText)
+        : existing?.valueText ?? null,
+    valueNumber:
+      incoming?.hasValueNumber
+        ? typeof incoming.valueNumber === "number" &&
+          Number.isFinite(incoming.valueNumber)
+          ? incoming.valueNumber
+          : null
+        : existing?.valueNumber ?? null,
+    valueSelect:
+      incoming?.hasValueSelect
+        ? toNullableTrimmedString(incoming.valueSelect)
+        : existing?.valueSelect ?? null,
+    notes:
+      incoming?.hasNotes
+        ? toNullableTrimmedString(incoming.notes)
+        : existing?.notes ?? null,
+    photoUrls: mergePhotoUrls(
+      existing?.photoUrls,
+      incoming?.hasPhotoUrls ? incoming.photoUrls : []
+    ),
+  }
+}
+
+function isMeaningfulAnswer(answer?: AnswerValueShape | null) {
   if (!answer) return false
 
   if (typeof answer.valueBoolean === "boolean") return true
@@ -88,7 +222,7 @@ function isMeaningfulAnswer(answer?: IncomingAnswer | null) {
   return false
 }
 
-function hasRequiredValue(itemType: string, answer?: IncomingAnswer | null) {
+function hasRequiredValue(itemType: string, answer?: AnswerValueShape | null) {
   if (!answer) return false
 
   const normalized = String(itemType || "").trim().toLowerCase()
@@ -135,7 +269,7 @@ function parseFailureValues(value?: string | null) {
     .filter(Boolean)
 }
 
-function normalizeAnswerText(answer?: IncomingAnswer | null) {
+function normalizeAnswerText(answer?: AnswerValueShape | null) {
   if (!answer) return null
 
   return (
@@ -147,13 +281,15 @@ function normalizeAnswerText(answer?: IncomingAnswer | null) {
 
 function isFailureAnswer(
   item: ChecklistItemWithRules,
-  answer?: IncomingAnswer | null
+  answer?: AnswerValueShape | null
 ) {
   if (!answer) return false
 
   const itemType = String(item.itemType || "").trim().toLowerCase()
   const configuredFailureValues = parseFailureValues(item.failureValuesText)
-  const answerText = String(normalizeAnswerText(answer) || "").trim().toLowerCase()
+  const answerText = String(normalizeAnswerText(answer) || "")
+    .trim()
+    .toLowerCase()
 
   if (
     itemType === "boolean" ||
@@ -240,7 +376,7 @@ function getIssueTitle(item: ChecklistItemWithRules, issueType: string) {
 
 function buildIssueDescription(
   item: ChecklistItemWithRules,
-  answer?: IncomingAnswer | null
+  answer?: AnswerValueShape | null
 ) {
   const parts: string[] = []
 
@@ -378,20 +514,39 @@ export async function POST(req: NextRequest, context: RouteContext) {
       (entry: unknown) => {
         const raw = (entry ?? {}) as Record<string, unknown>
 
+        const hasValueBoolean = hasOwn(raw, "valueBoolean")
+        const hasValueText = hasOwn(raw, "valueText")
+        const hasValueNumber = hasOwn(raw, "valueNumber")
+        const hasValueSelect = hasOwn(raw, "valueSelect")
+        const hasNotes = hasOwn(raw, "notes")
+        const hasPhotoUrls = hasOwn(raw, "photoUrls")
+
         return {
           templateItemId: String(raw.templateItemId || "").trim(),
+          hasValueBoolean,
+          hasValueText,
+          hasValueNumber,
+          hasValueSelect,
+          hasNotes,
+          hasPhotoUrls,
           valueBoolean:
-            typeof raw.valueBoolean === "boolean" ? raw.valueBoolean : null,
-          valueText: toNullableTrimmedString(raw.valueText),
+            hasValueBoolean && typeof raw.valueBoolean === "boolean"
+              ? raw.valueBoolean
+              : null,
+          valueText: hasValueText ? toNullableTrimmedString(raw.valueText) : null,
           valueNumber:
-            raw.valueNumber === null ||
-            raw.valueNumber === undefined ||
-            raw.valueNumber === ""
-              ? null
-              : Number(raw.valueNumber),
-          valueSelect: toNullableTrimmedString(raw.valueSelect),
-          notes: toNullableTrimmedString(raw.notes),
-          photoUrls: normalizePhotoUrls(raw.photoUrls),
+            hasValueNumber &&
+            raw.valueNumber !== null &&
+            raw.valueNumber !== undefined &&
+            raw.valueNumber !== "" &&
+            Number.isFinite(Number(raw.valueNumber))
+              ? Number(raw.valueNumber)
+              : null,
+          valueSelect: hasValueSelect
+            ? toNullableTrimmedString(raw.valueSelect)
+            : null,
+          notes: hasNotes ? toNullableTrimmedString(raw.notes) : null,
+          photoUrls: hasPhotoUrls ? normalizePhotoUrls(raw.photoUrls) : null,
         }
       }
     )
@@ -480,14 +635,16 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
     if (!checklistRun.template) {
       return NextResponse.json(
-        { error: "Checklist template not found for this task." },
+        { error: "Δεν βρέθηκε πρότυπο checklist για αυτή την εργασία." },
         { status: 400 }
       )
     }
 
     if (String(checklistRun.status || "").toLowerCase() === "completed") {
       return NextResponse.json(
-        { error: "Η checklist έχει ήδη υποβληθεί και δεν μπορεί να τροποποιηθεί." },
+        {
+          error: "Η checklist έχει ήδη υποβληθεί και δεν μπορεί να τροποποιηθεί.",
+        },
         { status: 409 }
       )
     }
@@ -531,11 +688,15 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
       return NextResponse.json(
         {
-          error: `Missing checklist run item for template item "${item.label}".`,
+          error: `Λείπει checklist run item για το στοιχείο "${item.label}".`,
         },
         { status: 400 }
       )
     }
+
+    const existingAnswersByTemplateItemId = buildExistingAnswersByTemplateItemId(
+      checklistRun.answers
+    )
 
     const answersMap = new Map<string, IncomingAnswer>()
 
@@ -546,9 +707,11 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
     if (mode === "submit") {
       for (const item of templateItems) {
-        const answer = answersMap.get(item.id)
+        const existing = existingAnswersByTemplateItemId.get(item.id) ?? null
+        const incoming = answersMap.get(item.id)
+        const effectiveAnswer = buildEffectiveAnswer(item.id, existing, incoming)
 
-        if (item.isRequired && !hasRequiredValue(item.itemType, answer)) {
+        if (item.isRequired && !hasRequiredValue(item.itemType, effectiveAnswer)) {
           return NextResponse.json(
             {
               error: `Το υποχρεωτικό πεδίο "${item.label}" δεν έχει συμπληρωθεί.`,
@@ -559,7 +722,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
         if (
           item.requiresPhoto &&
-          normalizePhotoUrls(answer?.photoUrls).length === 0
+          normalizePhotoUrls(effectiveAnswer.photoUrls).length === 0
         ) {
           return NextResponse.json(
             {
@@ -630,14 +793,14 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
       for (const item of templateItems) {
         const incoming = answersMap.get(item.id)
+        const hasIncoming = answersMap.has(item.id)
         const runItem = runItemsByTemplateItemId.get(item.id)
+        const existing = existingAnswersByTemplateItemId.get(item.id) ?? null
 
-        const existing = checklistRun.answers.find(
-          (answer) => answer.templateItemId === item.id
-        )
+        const effectiveAnswer = buildEffectiveAnswer(item.id, existing, incoming)
 
-        if (!isMeaningfulAnswer(incoming)) {
-          if (existing) {
+        if (!isMeaningfulAnswer(effectiveAnswer)) {
+          if (existing && hasIncoming) {
             await tx.taskChecklistAnswer.delete({
               where: {
                 id: existing.id,
@@ -647,35 +810,35 @@ export async function POST(req: NextRequest, context: RouteContext) {
           continue
         }
 
-        const safeIncoming = incoming as IncomingAnswer
-
         const answerData = {
           valueBoolean:
-            typeof safeIncoming.valueBoolean === "boolean"
-              ? safeIncoming.valueBoolean
+            typeof effectiveAnswer.valueBoolean === "boolean"
+              ? effectiveAnswer.valueBoolean
               : null,
-          valueText: toNullableTrimmedString(safeIncoming.valueText),
+          valueText: toNullableTrimmedString(effectiveAnswer.valueText),
           valueNumber:
-            typeof safeIncoming.valueNumber === "number" &&
-            Number.isFinite(safeIncoming.valueNumber)
-              ? safeIncoming.valueNumber
+            typeof effectiveAnswer.valueNumber === "number" &&
+            Number.isFinite(effectiveAnswer.valueNumber)
+              ? effectiveAnswer.valueNumber
               : null,
-          valueSelect: toNullableTrimmedString(safeIncoming.valueSelect),
-          notes: toNullableTrimmedString(safeIncoming.notes),
-          photoUrls: normalizePhotoUrls(safeIncoming.photoUrls),
+          valueSelect: toNullableTrimmedString(effectiveAnswer.valueSelect),
+          notes: toNullableTrimmedString(effectiveAnswer.notes),
+          photoUrls: mergePhotoUrls(effectiveAnswer.photoUrls),
         }
 
-        let savedAnswer
+        let savedAnswer: PersistedChecklistAnswerSnapshot
 
-        if (existing) {
-          savedAnswer = await tx.taskChecklistAnswer.update({
+        if (existing && hasIncoming) {
+          const updatedAnswer = await tx.taskChecklistAnswer.update({
             where: {
               id: existing.id,
             },
             data: answerData,
           })
-        } else {
-          savedAnswer = await tx.taskChecklistAnswer.create({
+
+          savedAnswer = toPersistedChecklistAnswerSnapshot(updatedAnswer)
+        } else if (!existing && hasIncoming) {
+          const createdAnswer = await tx.taskChecklistAnswer.create({
             data: {
               checklistRunId: checklistRun.id,
               runItemId: runItem!.id,
@@ -683,14 +846,21 @@ export async function POST(req: NextRequest, context: RouteContext) {
               ...answerData,
             },
           })
+
+          savedAnswer = toPersistedChecklistAnswerSnapshot(createdAnswer)
+        } else if (existing) {
+          savedAnswer = existing
+        } else {
+          continue
         }
 
         if (mode === "submit") {
           runConditionAnswers.push({
             answerId: savedAnswer.id,
-            runItemId: runItem?.id ?? null,
-            templateItemId: item.id,
-            propertyTemplateItemId: runItem?.propertyTemplateItemId ?? item.id,
+            runItemId: runItem?.id ?? savedAnswer.runItemId ?? null,
+            templateItemId: savedAnswer.templateItemId,
+            propertyTemplateItemId:
+              runItem?.propertyTemplateItemId ?? savedAnswer.templateItemId,
             templateItemLabel: item.label,
             templateItemCategory: item.category,
             itemType: item.itemType,
@@ -710,7 +880,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
         if (mode !== "submit") continue
 
-        const failed = isFailureAnswer(item, safeIncoming)
+        const failed = isFailureAnswer(item, effectiveAnswer)
         const shouldCreateIssue = item.opensIssueOnFail && failed
 
         await tx.taskChecklistAnswer.update({
@@ -746,7 +916,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
                 bookingId: latestAssignment.task.booking?.id ?? null,
                 issueType,
                 title: issueTitle,
-                description: buildIssueDescription(item, safeIncoming),
+                description: buildIssueDescription(item, effectiveAnswer),
                 severity,
                 status: "open",
                 reportedBy: latestAssignment.partner.name,
@@ -779,8 +949,8 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
         if (isIssueReportItem(item)) {
           const freeText =
-            toNullableTrimmedString(safeIncoming.valueText) ||
-            toNullableTrimmedString(safeIncoming.notes)
+            toNullableTrimmedString(effectiveAnswer.valueText) ||
+            toNullableTrimmedString(effectiveAnswer.notes)
 
           if (freeText) {
             const issueType = String(item.issueTypeOnFail || "repair").toLowerCase()
@@ -804,11 +974,11 @@ export async function POST(req: NextRequest, context: RouteContext) {
             const descriptionParts = [
               `Αναφορά από checklist item: ${item.label}`,
               `Κείμενο συνεργάτη: ${freeText}`,
-              toNullableTrimmedString(safeIncoming.notes)
-                ? `Σημειώσεις: ${toNullableTrimmedString(safeIncoming.notes)}`
+              toNullableTrimmedString(effectiveAnswer.notes)
+                ? `Σημειώσεις: ${toNullableTrimmedString(effectiveAnswer.notes)}`
                 : null,
-              normalizePhotoUrls(safeIncoming.photoUrls).length > 0
-                ? `Φωτογραφίες: ${normalizePhotoUrls(safeIncoming.photoUrls).length}`
+              normalizePhotoUrls(effectiveAnswer.photoUrls).length > 0
+                ? `Φωτογραφίες: ${normalizePhotoUrls(effectiveAnswer.photoUrls).length}`
                 : null,
             ].filter(Boolean)
 
@@ -862,7 +1032,6 @@ export async function POST(req: NextRequest, context: RouteContext) {
             }
           }
         }
-
       }
 
       if (mode === "submit" && runConditionAnswers.length > 0) {
@@ -948,4 +1117,3 @@ export async function POST(req: NextRequest, context: RouteContext) {
     )
   }
 }
-

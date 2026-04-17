@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
-import { mkdir, writeFile } from "node:fs/promises"
+import { mkdir, writeFile, unlink } from "node:fs/promises"
 import path from "node:path"
 import crypto from "node:crypto"
 
@@ -10,6 +10,17 @@ type RouteContext = {
     taskId: string
   }>
 }
+
+const ALLOWED_MIME_TYPES = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/jpg",
+  "image/heic",
+  "image/heif",
+]
+
+const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 
 function isExpired(date?: Date | string | null) {
   if (!date) return false
@@ -24,7 +35,22 @@ function sanitizeFilename(filename: string) {
   return filename.replace(/[^a-zA-Z0-9._-]/g, "_")
 }
 
+function normalizePhotoUrls(value: unknown) {
+  if (!Array.isArray(value)) return []
+
+  return value
+    .map((item) => String(item || "").trim())
+    .filter(Boolean)
+}
+
+function mergePhotoUrls(...groups: unknown[]) {
+  const merged = groups.flatMap((group) => normalizePhotoUrls(group))
+  return Array.from(new Set(merged))
+}
+
 export async function POST(req: NextRequest, context: RouteContext) {
+  let uploadedFilePath: string | null = null
+
   try {
     const { token, taskId } = await context.params
 
@@ -71,11 +97,6 @@ export async function POST(req: NextRequest, context: RouteContext) {
       )
     }
 
-    await prisma.partnerPortalAccessToken.update({
-      where: { id: portalAccess.id },
-      data: { lastUsedAt: new Date() },
-    })
-
     const assignments = await prisma.taskAssignment.findMany({
       where: {
         partnerId: portalAccess.partnerId,
@@ -96,9 +117,19 @@ export async function POST(req: NextRequest, context: RouteContext) {
               include: {
                 template: {
                   include: {
-                    items: true,
+                    items: {
+                      orderBy: {
+                        sortOrder: "asc",
+                      },
+                    },
                   },
                 },
+                items: {
+                  orderBy: {
+                    sortOrder: "asc",
+                  },
+                },
+                answers: true,
               },
             },
             property: {
@@ -152,14 +183,17 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
     if (String(checklistRun.status || "").toLowerCase() === "completed") {
       return NextResponse.json(
-        { error: "Η checklist έχει ήδη οριστικοποιηθεί και δεν επιτρέπεται νέα αποστολή φωτογραφίας." },
+        {
+          error:
+            "Η checklist έχει ήδη οριστικοποιηθεί και δεν επιτρέπεται νέα αποστολή φωτογραφίας.",
+        },
         { status: 409 }
       )
     }
 
     if (!checklistRun.template) {
       return NextResponse.json(
-        { error: "Checklist template not found for this task." },
+        { error: "Δεν βρέθηκε πρότυπο checklist για αυτή την εργασία." },
         { status: 400 }
       )
     }
@@ -182,6 +216,27 @@ export async function POST(req: NextRequest, context: RouteContext) {
       )
     }
 
+    if (!ALLOWED_MIME_TYPES.includes(file.type)) {
+      return NextResponse.json(
+        { error: "Μη αποδεκτός τύπος αρχείου εικόνας." },
+        { status: 400 }
+      )
+    }
+
+    if (file.size <= 0) {
+      return NextResponse.json(
+        { error: "Το αρχείο εικόνας είναι κενό." },
+        { status: 400 }
+      )
+    }
+
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      return NextResponse.json(
+        { error: "Το αρχείο εικόνας είναι πολύ μεγάλο." },
+        { status: 400 }
+      )
+    }
+
     const checklistItem = checklistRun.template.items.find(
       (item) => item.id === templateItemId
     )
@@ -193,21 +248,23 @@ export async function POST(req: NextRequest, context: RouteContext) {
       )
     }
 
-    const allowedMimeTypes = [
-      "image/jpeg",
-      "image/png",
-      "image/webp",
-      "image/jpg",
-      "image/heic",
-      "image/heif",
-    ]
+    const runItem = checklistRun.items.find(
+      (item) => String(item.propertyTemplateItemId || "") === templateItemId
+    )
 
-    if (!allowedMimeTypes.includes(file.type)) {
+    if (!runItem) {
       return NextResponse.json(
-        { error: "Μη αποδεκτός τύπος αρχείου εικόνας." },
+        {
+          error:
+            "Δεν βρέθηκε το αντίστοιχο checklist run item για το στοιχείο φωτογραφίας.",
+        },
         { status: 400 }
       )
     }
+
+    const existingAnswer = checklistRun.answers.find(
+      (answer) => answer.templateItemId === templateItemId
+    )
 
     const bytes = await file.arrayBuffer()
     const buffer = Buffer.from(bytes)
@@ -235,36 +292,79 @@ export async function POST(req: NextRequest, context: RouteContext) {
       `${Date.now()}-${crypto.randomUUID()}${ext}`
     )
 
-    const filePath = path.join(uploadsDir, filename)
-    await writeFile(filePath, buffer)
+    uploadedFilePath = path.join(uploadsDir, filename)
+    await writeFile(uploadedFilePath, buffer)
 
     const fileUrl = `/uploads/partner-checklists/${cleanTaskId}/${templateItemId}/${filename}`
 
-    await prisma.activityLog.create({
-      data: {
-        organizationId: latestAssignment.task.property.organizationId,
-        propertyId: latestAssignment.task.property.id,
-        taskId: latestAssignment.task.id,
-        partnerId: latestAssignment.partnerId,
-        entityType: "TASK_CHECKLIST_ANSWER",
-        entityId: templateItemId,
-        action: "PARTNER_CHECKLIST_PHOTO_UPLOADED",
-        message: `Ο συνεργάτης ${latestAssignment.partner.name} ανέβασε φωτογραφία για το στοιχείο "${checklistItem.label}".`,
-        actorType: "PARTNER_PORTAL",
-        actorName: latestAssignment.partner.name,
-        metadata: {
-          checklistRunId: checklistRun.id,
-          templateItemId,
-          fileUrl,
+    const result = await prisma.$transaction(async (tx) => {
+      await tx.partnerPortalAccessToken.update({
+        where: { id: portalAccess.id },
+        data: { lastUsedAt: new Date() },
+      })
+
+      const savedAnswer = existingAnswer
+        ? await tx.taskChecklistAnswer.update({
+            where: {
+              id: existingAnswer.id,
+            },
+            data: {
+              runItemId: existingAnswer.runItemId || runItem.id,
+              photoUrls: mergePhotoUrls(existingAnswer.photoUrls, [fileUrl]),
+            },
+          })
+        : await tx.taskChecklistAnswer.create({
+            data: {
+              checklistRunId: checklistRun.id,
+              runItemId: runItem.id,
+              templateItemId,
+              photoUrls: [fileUrl],
+            },
+          })
+
+      await tx.activityLog.create({
+        data: {
+          organizationId: latestAssignment.task.property.organizationId,
+          propertyId: latestAssignment.task.property.id,
+          taskId: latestAssignment.task.id,
+          partnerId: latestAssignment.partnerId,
+          entityType: "TASK_CHECKLIST_ANSWER",
+          entityId: savedAnswer.id,
+          action: "PARTNER_CHECKLIST_PHOTO_UPLOADED",
+          message: `Ο συνεργάτης ${latestAssignment.partner.name} ανέβασε φωτογραφία για το στοιχείο "${checklistItem.label}".`,
+          actorType: "PARTNER_PORTAL",
+          actorName: latestAssignment.partner.name,
+          metadata: {
+            checklistRunId: checklistRun.id,
+            runItemId: runItem.id,
+            templateItemId,
+            fileUrl,
+            photoCount: mergePhotoUrls(savedAnswer.photoUrls).length,
+          },
         },
-      },
+      })
+
+      return {
+        answerId: savedAnswer.id,
+        photoUrls: mergePhotoUrls(savedAnswer.photoUrls),
+      }
     })
 
     return NextResponse.json({
       success: true,
       fileUrl,
+      answerId: result.answerId,
+      photoUrls: result.photoUrls,
     })
   } catch (error) {
+    if (uploadedFilePath) {
+      try {
+        await unlink(uploadedFilePath)
+      } catch {
+        // αγνόηση cleanup error
+      }
+    }
+
     console.error(
       "POST /api/partner/[token]/tasks/[taskId]/checklist-upload error:",
       error
