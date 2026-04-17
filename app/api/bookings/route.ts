@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { buildTenantWhere, requireApiAppAccess } from "@/lib/route-access"
 
-// ─── Date helpers ─────────────────────────────────────────────────────────────
-
 function parseDateParam(value: string | null) {
   if (!value) return null
   const date = new Date(`${value}T12:00:00`)
@@ -21,8 +19,6 @@ function endOfDay(date: Date) {
   next.setHours(23, 59, 59, 999)
   return next
 }
-
-// ─── Query builder ────────────────────────────────────────────────────────────
 
 function buildBookingWhere(
   auth: Parameters<typeof buildTenantWhere>[0],
@@ -53,9 +49,6 @@ function buildBookingWhere(
       : {}),
   })
 }
-
-// ─── Shared select ────────────────────────────────────────────────────────────
-// Το ίδιο shape χρησιμοποιείται στη λίστα και στο detail.
 
 const bookingListSelect = {
   id: true,
@@ -117,8 +110,6 @@ const bookingListSelect = {
     take: 10,
   },
 } as const
-
-// ─── GET ──────────────────────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
   const access = await requireApiAppAccess()
