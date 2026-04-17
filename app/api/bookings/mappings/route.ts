@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { buildTenantWhere, requireApiAppAccess } from "@/lib/route-access"
+import { createBookingSyncEvents } from "@/lib/bookings/booking-logging"
 import { reprocessBookingsForMapping } from "@/lib/bookings/booking-service"
 
 function toNullableString(value: unknown) {
@@ -145,6 +146,25 @@ export async function POST(req: NextRequest) {
       sourcePlatform,
       externalListingId,
     })
+
+    if (reprocessResult.bookingIds.length > 0) {
+      await createBookingSyncEvents({
+        events: reprocessResult.bookingIds.map((bookingId) => ({
+          bookingId,
+          organizationId,
+          propertyId: mapping.propertyId,
+          eventType: "BOOKING_MAPPING_APPLIED",
+          sourcePlatform,
+          message: `Εφαρμόστηκε αντιστοίχιση listing ${externalListingId} στο ακίνητο ${mapping.property.name}.`,
+          activityAction: "BOOKING_MAPPING_APPLIED",
+          activityMetadata: {
+            propertyId: mapping.propertyId,
+            propertyCode: mapping.property.code,
+            externalListingId,
+          },
+        })),
+      })
+    }
 
     return NextResponse.json(
       {

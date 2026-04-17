@@ -148,6 +148,7 @@ export async function upsertBookingFromNormalizedInput(
   await createBookingSyncEvent({
     bookingId: booking.id,
     organizationId: booking.organizationId,
+    propertyId: booking.propertyId,
     eventType: existingBooking ? "BOOKING_UPDATED" : "BOOKING_IMPORTED",
     sourcePlatform: booking.sourcePlatform,
     resultStatus: booking.syncStatus,
@@ -206,6 +207,7 @@ export async function cancelBookingByExternalKey(params: {
   await createBookingSyncEvent({
     bookingId: updated.id,
     organizationId: updated.organizationId,
+    propertyId: updated.propertyId,
     eventType: "BOOKING_CANCELLED",
     sourcePlatform: updated.sourcePlatform,
     resultStatus: updated.syncStatus,
@@ -263,6 +265,7 @@ export async function reprocessBookingById(bookingId: string) {
   await createBookingSyncEvent({
     bookingId: updated.id,
     organizationId: updated.organizationId,
+    propertyId: updated.propertyId,
     eventType: "BOOKING_REPROCESSED",
     sourcePlatform: updated.sourcePlatform,
     resultStatus: updated.syncStatus,

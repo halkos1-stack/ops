@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { buildTenantWhere, requireApiAppAccess } from "@/lib/route-access"
+import { createBookingSyncEvents } from "@/lib/bookings/booking-logging"
 import { reprocessBookingsForMapping } from "@/lib/bookings/booking-service"
 
 type RouteContext = {
@@ -146,6 +147,33 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       for (const bookingId of previousKeyResult.bookingIds) {
         reprocessedBookingIds.add(bookingId)
       }
+
+      if (previousKeyResult.bookingIds.length > 0) {
+        await createBookingSyncEvents({
+          events: previousKeyResult.bookingIds.map((bookingId) => ({
+            bookingId,
+            organizationId: current.organizationId,
+            propertyId: current.propertyId,
+            eventType:
+              updated.status !== "ACTIVE"
+                ? "BOOKING_MAPPING_DEACTIVATED"
+                : "BOOKING_MAPPING_REMOVED",
+            sourcePlatform: current.sourcePlatform,
+            message:
+              updated.status !== "ACTIVE"
+                ? `Απενεργοποιήθηκε η αντιστοίχιση listing ${current.externalListingId}.`
+                : `Αφαιρέθηκε η προηγούμενη αντιστοίχιση listing ${current.externalListingId}.`,
+            activityAction:
+              updated.status !== "ACTIVE"
+                ? "BOOKING_MAPPING_DEACTIVATED"
+                : "BOOKING_MAPPING_REMOVED",
+            activityMetadata: {
+              previousPropertyId: current.propertyId,
+              externalListingId: current.externalListingId,
+            },
+          })),
+        })
+      }
     }
 
     if (updated.status === "ACTIVE") {
@@ -157,6 +185,25 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
 
       for (const bookingId of nextKeyResult.bookingIds) {
         reprocessedBookingIds.add(bookingId)
+      }
+
+      if (nextKeyResult.bookingIds.length > 0) {
+        await createBookingSyncEvents({
+          events: nextKeyResult.bookingIds.map((bookingId) => ({
+            bookingId,
+            organizationId: updated.organizationId,
+            propertyId: updated.propertyId,
+            eventType: "BOOKING_MAPPING_APPLIED",
+            sourcePlatform: updated.sourcePlatform,
+            message: `Εφαρμόστηκε αντιστοίχιση listing ${updated.externalListingId} στο ακίνητο ${updated.property.name}.`,
+            activityAction: "BOOKING_MAPPING_APPLIED",
+            activityMetadata: {
+              propertyId: updated.propertyId,
+              propertyCode: updated.property.code,
+              externalListingId: updated.externalListingId,
+            },
+          })),
+        })
       }
     }
 
@@ -212,11 +259,29 @@ export async function DELETE(_req: NextRequest, context: RouteContext) {
       },
     })
 
-    await reprocessBookingsForMapping({
+    const reprocessResult = await reprocessBookingsForMapping({
       organizationId: current.organizationId,
       sourcePlatform: current.sourcePlatform,
       externalListingId: current.externalListingId,
     })
+
+    if (reprocessResult.bookingIds.length > 0) {
+      await createBookingSyncEvents({
+        events: reprocessResult.bookingIds.map((bookingId) => ({
+          bookingId,
+          organizationId: current.organizationId,
+          propertyId: current.propertyId,
+          eventType: "BOOKING_MAPPING_DEACTIVATED",
+          sourcePlatform: current.sourcePlatform,
+          message: `Απενεργοποιήθηκε η αντιστοίχιση listing ${current.externalListingId}.`,
+          activityAction: "BOOKING_MAPPING_DEACTIVATED",
+          activityMetadata: {
+            previousPropertyId: current.propertyId,
+            externalListingId: current.externalListingId,
+          },
+        })),
+      })
+    }
 
     return NextResponse.json({
       success: true,

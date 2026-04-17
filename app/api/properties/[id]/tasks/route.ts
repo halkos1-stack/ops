@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { requireApiAppAccess, canAccessOrganization } from "@/lib/route-access"
+import { createBookingSyncEvent } from "@/lib/bookings/booking-logging"
 import {
   filterCanonicalOperationalTasks,
   getOperationalTaskValidity,
@@ -559,8 +560,15 @@ export async function POST(req: NextRequest, context: RouteContext) {
       )
     }
 
+    let linkedBooking:
+      | {
+          id: string
+          sourcePlatform: string
+        }
+      | null = null
+
     if (bookingId) {
-      const booking = await prisma.booking.findFirst({
+      linkedBooking = await prisma.booking.findFirst({
         where: {
           id: bookingId,
           organizationId: property.organizationId,
@@ -568,10 +576,11 @@ export async function POST(req: NextRequest, context: RouteContext) {
         },
         select: {
           id: true,
+          sourcePlatform: true,
         },
       })
 
-      if (!booking) {
+      if (!linkedBooking) {
         return NextResponse.json(
           { error: "Η κράτηση δεν βρέθηκε για αυτό το ακίνητο." },
           { status: 400 }
@@ -630,6 +639,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
         data: {
           organizationId: property.organizationId,
           propertyId: property.id,
+          bookingId,
           taskId: task.id,
           entityType: "TASK",
           entityId: task.id,
@@ -650,6 +660,24 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
       return task
     })
+
+    if (bookingId && taskSource === "booking" && linkedBooking) {
+      await createBookingSyncEvent({
+        bookingId,
+        organizationId: property.organizationId,
+        propertyId: property.id,
+        taskId: createdTask.id,
+        eventType: "BOOKING_TASK_CREATED",
+        sourcePlatform: linkedBooking.sourcePlatform,
+        message: `Δημιουργήθηκε εργασία "${title}" από την κράτηση.`,
+        activityAction: "BOOKING_TASK_CREATED",
+        activityMetadata: {
+          taskId: createdTask.id,
+          taskTitle: title,
+          taskType,
+        },
+      })
+    }
 
     const payload = await getPropertyTasksPayload(property.id)
 

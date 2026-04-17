@@ -1,6 +1,7 @@
 ﻿import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { buildTenantWhere, requireApiAppAccess } from "@/lib/route-access"
+import { createBookingSyncEvents } from "@/lib/bookings/booking-logging"
 import { reprocessBookingsForMapping } from "@/lib/bookings/booking-service"
 import { refreshPropertyReadiness } from "@/lib/readiness/refresh-property-readiness"
 
@@ -276,10 +277,11 @@ async function createPropertyAndMapping(params: {
   })
 
   if (affectedBookings.length > 0) {
-    await prisma.bookingSyncEvent.createMany({
-      data: affectedBookings.map((booking) => ({
+    await createBookingSyncEvents({
+      events: affectedBookings.map((booking) => ({
         bookingId: booking.id,
         organizationId: params.organizationId,
+        propertyId: property.id,
         eventType: "MATCH",
         sourcePlatform: params.sourcePlatform,
         resultStatus: "READY_FOR_ACTION",
@@ -289,6 +291,12 @@ async function createPropertyAndMapping(params: {
           propertyCode: property.code,
           externalListingId: params.externalListingId,
           externalListingName: params.externalListingName || null,
+        },
+        activityAction: "BOOKING_PLATFORM_AUTO_MATCHED",
+        activityMetadata: {
+          propertyId: property.id,
+          propertyCode: property.code,
+          externalListingId: params.externalListingId,
         },
       })),
     })

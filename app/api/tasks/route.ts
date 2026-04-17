@@ -22,6 +22,7 @@ import {
   taskDetailsInclude,
   shapeTaskForResponse,
 } from "@/lib/tasks/task-response-builder"
+import { createBookingSyncEvent } from "@/lib/bookings/booking-logging"
 import { refreshPropertyReadiness } from "@/lib/readiness/refresh-property-readiness"
 
 // ─── Local parsing helpers ────────────────────────────────────────────────────
@@ -277,13 +278,20 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    let linkedBooking:
+      | {
+          id: string
+          sourcePlatform: string
+        }
+      | null = null
+
     if (bookingId) {
-      const booking = await prisma.booking.findFirst({
+      linkedBooking = await prisma.booking.findFirst({
         where: { id: bookingId, organizationId, propertyId },
-        select: { id: true },
+        select: { id: true, sourcePlatform: true },
       })
 
-      if (!booking) {
+      if (!linkedBooking) {
         return NextResponse.json(
           {
             error:
@@ -387,6 +395,7 @@ export async function POST(req: NextRequest) {
       data: {
         organizationId,
         propertyId,
+        bookingId,
         taskId: task.id,
         entityType: "TASK",
         entityId: task.id,
@@ -402,6 +411,24 @@ export async function POST(req: NextRequest) {
         },
       },
     })
+
+    if (bookingId && taskSource === "booking" && linkedBooking) {
+      await createBookingSyncEvent({
+        bookingId,
+        organizationId,
+        propertyId,
+        taskId: task.id,
+        eventType: "BOOKING_TASK_CREATED",
+        sourcePlatform: linkedBooking.sourcePlatform,
+        message: `Δημιουργήθηκε εργασία "${task.title}" από την κράτηση.`,
+        activityAction: "BOOKING_TASK_CREATED",
+        activityMetadata: {
+          taskId: task.id,
+          taskTitle: task.title,
+          taskType,
+        },
+      })
+    }
 
     // ─── Readiness refresh ────────────────────────────────────────────────────
     // Νέα εργασία → αλλάζει το operational status του ακινήτου.
