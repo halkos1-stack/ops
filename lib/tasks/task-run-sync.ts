@@ -249,8 +249,11 @@ export async function syncTaskChecklistRun(params: {
     },
   })
 
+  const canResyncExistingRun =
+    !existingRun || isMutableTaskSupplyRunStatus(existingRun.status)
+
   if (!sendCleaningChecklist) {
-    if (existingRun) {
+    if (existingRun && canResyncExistingRun) {
       await prisma.taskChecklistRun.delete({
         where: {
           taskId,
@@ -267,7 +270,7 @@ export async function syncTaskChecklistRun(params: {
   )
 
   if (!primaryTemplate) {
-    if (existingRun) {
+    if (existingRun && canResyncExistingRun) {
       await prisma.taskChecklistRun.delete({
         where: {
           taskId,
@@ -299,6 +302,48 @@ export async function syncTaskChecklistRun(params: {
         },
       },
     }))
+
+  if (existingRun && !canResyncExistingRun) {
+    await prisma.taskChecklistRun.update({
+      where: {
+        taskId,
+      },
+      data: {
+        sourceTemplateTitle: primaryTemplate.title,
+        sourceTemplateDescription: primaryTemplate.description,
+        templateType: primaryTemplate.templateType ?? "main",
+      },
+    })
+
+    return prisma.taskChecklistRun.findUnique({
+      where: {
+        taskId,
+      },
+      include: {
+        template: {
+          select: {
+            id: true,
+            title: true,
+            templateType: true,
+            isPrimary: true,
+          },
+        },
+        items: {
+          orderBy: {
+            sortOrder: "asc",
+          },
+        },
+        answers: {
+          select: {
+            id: true,
+            runItemId: true,
+            issueCreated: true,
+            createdAt: true,
+          },
+        },
+      },
+    })
+  }
 
   const templateChanged = run.templateId !== primaryTemplate.id
 
@@ -869,8 +914,11 @@ export async function syncTaskIssueRun(params: {
     },
   })
 
+  const canResyncExistingRun =
+    !existingRun || isMutableTaskSupplyRunStatus(existingRun.status)
+
   if (!sendIssuesChecklist) {
-    if (existingRun) {
+    if (existingRun && canResyncExistingRun) {
       await prisma.taskIssueRun.delete({
         where: {
           taskId,
@@ -887,7 +935,7 @@ export async function syncTaskIssueRun(params: {
   )
 
   if (!primaryTemplate) {
-    if (existingRun) {
+    if (existingRun && canResyncExistingRun) {
       await prisma.taskIssueRun.delete({
         where: {
           taskId,
@@ -918,6 +966,47 @@ export async function syncTaskIssueRun(params: {
         },
       },
     }))
+
+  if (existingRun && !canResyncExistingRun) {
+    await prisma.taskIssueRun.update({
+      where: {
+        taskId,
+      },
+      data: {
+        sourceTemplateTitle: primaryTemplate.title,
+        sourceTemplateDescription: primaryTemplate.description,
+      },
+    })
+
+    return prisma.taskIssueRun.findUnique({
+      where: {
+        taskId,
+      },
+      include: {
+        template: {
+          select: {
+            id: true,
+            title: true,
+            isPrimary: true,
+            isActive: true,
+          },
+        },
+        items: {
+          orderBy: {
+            sortOrder: "asc",
+          },
+        },
+        answers: {
+          select: {
+            id: true,
+            runItemId: true,
+            createdIssueId: true,
+            createdAt: true,
+          },
+        },
+      },
+    })
+  }
 
   const templateChanged = run.templateId !== primaryTemplate.id
 
