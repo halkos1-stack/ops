@@ -1,6 +1,7 @@
 ﻿import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { buildTenantWhere, requireApiAppAccess } from "@/lib/route-access"
+import { refreshPropertyReadiness } from "@/lib/readiness/refresh-property-readiness"
 
 type ListingGroup = {
   sourcePlatform: string
@@ -381,6 +382,8 @@ export async function POST(req: NextRequest) {
         externalPropertyCountry: normalizeText(body.externalPropertyCountry),
       })
 
+      await refreshPropertyReadiness(property.id)
+
       return NextResponse.json({
         success: true,
         property,
@@ -407,6 +410,7 @@ export async function POST(req: NextRequest) {
           externalPropertyCountry: listing.externalPropertyCountry,
         })
 
+        await refreshPropertyReadiness(property.id)
         created.push(property)
       }
 
