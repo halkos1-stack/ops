@@ -517,6 +517,21 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    const taskStatus = String(task.status || "").toLowerCase()
+    if (taskStatus === "cancelled") {
+      return NextResponse.json(
+        { error: "Δεν μπορεί να γίνει ανάθεση σε ακυρωμένη εργασία." },
+        { status: 400 }
+      )
+    }
+
+    if (taskStatus === "completed") {
+      return NextResponse.json(
+        { error: "Δεν μπορεί να γίνει ανάθεση σε ολοκληρωμένη εργασία." },
+        { status: 400 }
+      )
+    }
+
     if (task.sendCleaningChecklist) {
       const primaryTemplate = await findPrimaryChecklistTemplate(
         task.organizationId,
@@ -724,6 +739,11 @@ export async function POST(request: NextRequest) {
       }
 
       for (const previousAssignment of previousAssignedAssignments) {
+        await tx.taskAssignment.update({
+          where: { id: previousAssignment.id },
+          data: { status: "superseded" },
+        })
+
         await tx.activityLog.create({
           data: {
             organizationId: task.organizationId,

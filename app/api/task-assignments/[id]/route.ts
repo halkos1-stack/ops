@@ -274,6 +274,14 @@ export async function PUT(request: NextRequest, context: RouteContext) {
       )
     }
 
+    const taskStatus = String(existingAssignment.task.status || "").toLowerCase()
+    if (status !== undefined && taskStatus === "cancelled") {
+      return NextResponse.json(
+        { error: "Δεν μπορεί να αλλάξει κατάσταση ανάθεσης σε ακυρωμένη εργασία." },
+        { status: 400 }
+      )
+    }
+
     if (status === "rejected" && !rejectionReason?.trim()) {
       return NextResponse.json(
         { error: "Η αιτία απόρριψης είναι υποχρεωτική." },
@@ -356,7 +364,7 @@ export async function PUT(request: NextRequest, context: RouteContext) {
           where: { id: existingAssignment.taskId },
           data: {
             status: "completed",
-            completedAt: new Date(),
+            ...(taskStatus !== "completed" ? { completedAt: new Date() } : {}),
           },
         })
       }
@@ -422,6 +430,14 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
       return NextResponse.json(
         { error: "Δεν έχετε πρόσβαση σε αυτή την ανάθεση." },
         { status: 403 }
+      )
+    }
+
+    const deleteTaskStatus = String(existingAssignment.task.status || "").toLowerCase()
+    if (deleteTaskStatus === "cancelled" || deleteTaskStatus === "completed") {
+      return NextResponse.json(
+        { error: "Δεν μπορεί να διαγραφεί ανάθεση εργασίας που είναι ήδη σε τελική κατάσταση." },
+        { status: 400 }
       )
     }
 

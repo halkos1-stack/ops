@@ -123,6 +123,21 @@ export async function POST(req: NextRequest, context: RouteContext) {
       )
     }
 
+    const taskStatus = String(existingAssignment.task.status || "").toLowerCase()
+    if (taskStatus === "cancelled") {
+      return NextResponse.json(
+        { error: "Η εργασία έχει ακυρωθεί και δεν δέχεται πλέον απαντήσεις." },
+        { status: 409 }
+      )
+    }
+
+    if (taskStatus === "completed") {
+      return NextResponse.json(
+        { error: "Η εργασία έχει ήδη ολοκληρωθεί." },
+        { status: 409 }
+      )
+    }
+
     const result = await prisma.$transaction(async (tx) => {
       if (action === "reject") {
         const updatedAssignment = await tx.taskAssignment.update({

@@ -269,6 +269,18 @@ export async function POST(req: NextRequest, context: RouteContext) {
       },
     })
 
+    await prisma.taskAssignment.updateMany({
+      where: {
+        taskId: existingTask.id,
+        status: {
+          in: ["assigned", "accepted", "in_progress"],
+        },
+      },
+      data: {
+        status: "cancelled",
+      },
+    })
+
     if (latestAssignment?.id) {
       try {
         await prisma.taskAssignment.update({
