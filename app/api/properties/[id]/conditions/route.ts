@@ -671,6 +671,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const firstDetectedAt = toDateOrNull(body?.firstDetectedAt) ?? new Date()
     const lastDetectedAt =
       toDateOrNull(body?.lastDetectedAt) ?? firstDetectedAt
+    const now = new Date()
 
     if (!title) {
       return NextResponse.json(
@@ -678,6 +679,10 @@ export async function POST(request: NextRequest, context: RouteContext) {
         { status: 400 }
       )
     }
+
+    // Canonical closure metadata: συνέπεια με PATCH handler
+    const resolvedAt = status === "resolved" ? now : null
+    const dismissedAt = status === "dismissed" ? now : null
 
     await prisma.propertyCondition.create({
       data: {
@@ -703,6 +708,8 @@ export async function POST(request: NextRequest, context: RouteContext) {
         managerNotes,
         firstDetectedAt,
         lastDetectedAt,
+        resolvedAt,
+        dismissedAt,
       },
     })
 

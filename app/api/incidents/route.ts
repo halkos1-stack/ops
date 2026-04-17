@@ -129,6 +129,12 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    const normalizedStatus = status.toLowerCase()
+    const resolvedAt =
+      normalizedStatus === "resolved" || normalizedStatus === "closed"
+        ? new Date()
+        : null
+
     const issue = await prisma.issue.create({
       data: {
         organizationId,
@@ -140,6 +146,7 @@ export async function POST(request: NextRequest) {
         severity,
         status,
         reportedBy: auth.email,
+        ...(resolvedAt !== null ? { resolvedAt } : {}),
       },
       include: {
         property: {

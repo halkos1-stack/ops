@@ -182,7 +182,7 @@ export async function PUT(req: NextRequest, context: RouteContext) {
         ...(resolutionNotes !== null ? { resolutionNotes } : {}),
         ...(normalizedStatus === "resolved" || normalizedStatus === "closed"
           ? { resolvedAt: new Date() }
-          : {}),
+          : { resolvedAt: null }),
       },
       include: {
         property: {
@@ -300,7 +300,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       issueType?: string
       reportedBy?: string
       resolutionNotes?: string | null
-      resolvedAt?: Date
+      resolvedAt?: Date | null
     } = {}
 
     if (body.title !== undefined) {
@@ -326,6 +326,8 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
         const normalizedStatus = status.toLowerCase()
         if (normalizedStatus === "resolved" || normalizedStatus === "closed") {
           data.resolvedAt = new Date()
+        } else {
+          data.resolvedAt = null
         }
       }
     }

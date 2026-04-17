@@ -103,6 +103,19 @@ export async function PUT(request: NextRequest, context: RouteContext) {
       )
     }
 
+    const nextStatus = body.status !== undefined
+      ? (toNullableString(body.status) || "open")
+      : undefined
+
+    const normalizedNextStatus = nextStatus?.toLowerCase() ?? null
+
+    const resolvedAtPatch =
+      normalizedNextStatus === null
+        ? {}
+        : normalizedNextStatus === "resolved" || normalizedNextStatus === "closed"
+          ? { resolvedAt: new Date() }
+          : { resolvedAt: null }
+
     const updated = await prisma.issue.update({
       where: { id },
       data: {
@@ -110,8 +123,9 @@ export async function PUT(request: NextRequest, context: RouteContext) {
         ...(body.title !== undefined ? { title: toNullableString(body.title) || "Νέο συμβάν" } : {}),
         ...(body.description !== undefined ? { description: toNullableString(body.description) } : {}),
         ...(body.severity !== undefined ? { severity: toNullableString(body.severity) || "medium" } : {}),
-        ...(body.status !== undefined ? { status: toNullableString(body.status) || "open" } : {}),
+        ...(nextStatus !== undefined ? { status: nextStatus } : {}),
         ...(body.linkedTaskId !== undefined ? { taskId: toNullableString(body.linkedTaskId) } : {}),
+        ...resolvedAtPatch,
       },
       include: {
         property: {
