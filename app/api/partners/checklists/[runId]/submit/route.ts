@@ -311,6 +311,13 @@ export async function POST(req: NextRequest, context: RouteContext) {
       );
     }
 
+    if (String(existingRun.status || "").toLowerCase() === "completed") {
+      return NextResponse.json(
+        { error: "Το checklist run έχει ήδη υποβληθεί και δεν μπορεί να τροποποιηθεί." },
+        { status: 409 }
+      );
+    }
+
     const runItems = safeArray(existingRun.items).map(normalizeEffectiveChecklistItem);
     const fallbackTemplateItems = safeArray(existingRun.template?.items).map(
       normalizeEffectiveChecklistItem

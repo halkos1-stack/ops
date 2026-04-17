@@ -485,6 +485,13 @@ export async function POST(req: NextRequest, context: RouteContext) {
       )
     }
 
+    if (String(checklistRun.status || "").toLowerCase() === "completed") {
+      return NextResponse.json(
+        { error: "Η checklist έχει ήδη υποβληθεί και δεν μπορεί να τροποποιηθεί." },
+        { status: 409 }
+      )
+    }
+
     const templateItems: ChecklistItemWithRules[] = checklistRun.template.items.map(
       (item) => ({
         id: item.id,
@@ -854,7 +861,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
               })
             }
           }
-        }
+        }
 
       }
 
