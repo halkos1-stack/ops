@@ -7,7 +7,12 @@ import {
 import { createExpiryDate, createSecureToken } from "@/lib/tokens"
 import { sendMailSafe } from "@/lib/mailer"
 import { refreshPropertyReadiness } from "@/lib/readiness/refresh-property-readiness"
-import { syncTaskSupplyRun } from "@/lib/tasks/task-run-sync"
+import {
+  findPrimaryCleaningTemplate,
+  syncTaskChecklistRun,
+  syncTaskSupplyRun,
+  syncTaskIssueRun,
+} from "@/lib/tasks/task-run-sync"
 
 function toNullableString(value: unknown) {
   if (value === undefined || value === null) return null
@@ -116,112 +121,6 @@ function buildTaskAssignedMessage(partnerName: string, taskTitle: string) {
 
 function buildSupersededAssignmentMessage() {
   return "Previous pending assignment was replaced by a newer assignment before acceptance."
-}
-
-async function findPrimaryChecklistTemplate(
-  organizationId: string,
-  propertyId: string
-) {
-  return prisma.propertyChecklistTemplate.findFirst({
-    where: {
-      organizationId,
-      propertyId,
-      isPrimary: true,
-      isActive: true,
-    },
-    select: {
-      id: true,
-      title: true,
-      templateType: true,
-      isPrimary: true,
-      isActive: true,
-    },
-    orderBy: {
-      updatedAt: "desc",
-    },
-  })
-}
-
-async function ensureTaskChecklistRun(params: {
-  taskId: string
-  organizationId: string
-  propertyId: string
-  sendCleaningChecklist: boolean
-}) {
-  const { taskId, organizationId, propertyId, sendCleaningChecklist } = params
-
-  if (!sendCleaningChecklist) {
-    const existingRun = await prisma.taskChecklistRun.findUnique({
-      where: { taskId },
-      select: { id: true },
-    })
-
-    if (existingRun) {
-      await prisma.taskChecklistAnswer.deleteMany({
-        where: { checklistRunId: existingRun.id },
-      })
-
-      await prisma.taskChecklistRun.delete({
-        where: { taskId },
-      })
-    }
-
-    return null
-  }
-
-  const primaryTemplate = await findPrimaryChecklistTemplate(
-    organizationId,
-    propertyId
-  )
-
-  if (!primaryTemplate) {
-    return null
-  }
-
-  const existingRun = await prisma.taskChecklistRun.findUnique({
-    where: { taskId },
-    select: {
-      id: true,
-      templateId: true,
-    },
-  })
-
-  if (!existingRun) {
-    return prisma.taskChecklistRun.create({
-      data: {
-        taskId,
-        templateId: primaryTemplate.id,
-        status: "pending",
-      },
-    })
-  }
-
-  if (existingRun.templateId !== primaryTemplate.id) {
-    await prisma.taskChecklistAnswer.deleteMany({
-      where: {
-        checklistRunId: existingRun.id,
-      },
-    })
-
-    return prisma.taskChecklistRun.update({
-      where: { taskId },
-      data: {
-        templateId: primaryTemplate.id,
-        status: "pending",
-        startedAt: null,
-        completedAt: null,
-      },
-    })
-  }
-
-  return prisma.taskChecklistRun.update({
-    where: { taskId },
-    data: {
-      status: "pending",
-      startedAt: null,
-      completedAt: null,
-    },
-  })
 }
 
 async function getLatestPortalAccessForPartner(partnerId: string) {
@@ -453,6 +352,7 @@ export async function POST(request: NextRequest) {
         requiresChecklist: true,
         sendCleaningChecklist: true,
         sendSuppliesChecklist: true,
+        sendIssuesChecklist: true,
         property: {
           select: {
             id: true,
@@ -533,7 +433,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (task.sendCleaningChecklist) {
-      const primaryTemplate = await findPrimaryChecklistTemplate(
+      const primaryTemplate = await findPrimaryCleaningTemplate(
         task.organizationId,
         task.propertyId
       )
@@ -645,23 +545,6 @@ export async function POST(request: NextRequest) {
         },
       })
 
-      if (task.sendCleaningChecklist) {
-        await ensureTaskChecklistRun({
-          taskId: task.id,
-          organizationId: task.organizationId,
-          propertyId: task.propertyId,
-          sendCleaningChecklist: true,
-        })
-      }
-
-      if (task.sendSuppliesChecklist) {
-        await syncTaskSupplyRun({
-          taskId: task.id,
-          propertyId: task.propertyId,
-          sendSuppliesChecklist: true,
-        })
-      }
-
       const assignment = await tx.taskAssignment.create({
         data: {
           taskId,
@@ -754,8 +637,8 @@ export async function POST(request: NextRequest) {
             entityId: previousAssignment.id,
             action: "TASK_ASSIGNMENT_SUPERSEDED",
             message: buildSupersededAssignmentMessage(),
-            actorType: "MANAGER",
-            actorName: "Manager",
+            actorType: "manager",
+            actorName: "Διαχειριστής",
             metadata: {
               supersededByAssignmentId: assignment.id,
               canonicalMessageFormat: "task-assignment-superseded-v1",
@@ -777,8 +660,8 @@ export async function POST(request: NextRequest) {
             partner.name,
             normalizeSystemTaskTitleForLog(task.title)
           ),
-          actorType: "MANAGER",
-          actorName: "Manager",
+          actorType: "manager",
+          actorName: "Διαχειριστής",
           metadata: {
             assignmentStatus: "assigned",
             partnerId: partner.id,
@@ -796,6 +679,27 @@ export async function POST(request: NextRequest) {
       })
 
       return assignment
+    })
+
+    // Canonical run sync after assignment (outside transaction, uses prisma directly)
+    await syncTaskChecklistRun({
+      taskId: task.id,
+      organizationId: task.organizationId,
+      propertyId: task.propertyId,
+      sendCleaningChecklist: task.sendCleaningChecklist,
+    })
+
+    await syncTaskSupplyRun({
+      taskId: task.id,
+      propertyId: task.propertyId,
+      sendSuppliesChecklist: task.sendSuppliesChecklist,
+    })
+
+    await syncTaskIssueRun({
+      taskId: task.id,
+      organizationId: task.organizationId,
+      propertyId: task.propertyId,
+      sendIssuesChecklist: task.sendIssuesChecklist,
     })
 
     // Νέα ανάθεση → task status "assigned" → operational readiness αλλάζει

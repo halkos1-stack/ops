@@ -3,6 +3,13 @@ import { prisma } from "@/lib/prisma"
 import { requireApiAppAccess, canAccessOrganization } from "@/lib/route-access"
 import { createBookingSyncEvent } from "@/lib/bookings/booking-logging"
 import {
+  findPrimaryCleaningTemplate,
+  countActivePropertySupplies,
+  syncTaskChecklistRun,
+  syncTaskSupplyRun,
+} from "@/lib/tasks/task-run-sync"
+import { refreshPropertyReadiness } from "@/lib/readiness/refresh-property-readiness"
+import {
   filterCanonicalOperationalTasks,
   getOperationalTaskValidity,
 } from "@/lib/tasks/ops-task-contract"
@@ -29,56 +36,6 @@ function parseOptionalDateTime(value: unknown) {
   const date = new Date(text)
   if (Number.isNaN(date.getTime())) return null
   return date
-}
-
-async function resolvePrimaryCleaningTemplate(params: {
-  organizationId: string
-  propertyId: string
-}) {
-  return prisma.propertyChecklistTemplate.findFirst({
-    where: {
-      organizationId: params.organizationId,
-      propertyId: params.propertyId,
-      templateType: "main",
-      isActive: true,
-    },
-    select: {
-      id: true,
-      title: true,
-      description: true,
-      templateType: true,
-      isPrimary: true,
-      isActive: true,
-      updatedAt: true,
-      items: {
-        orderBy: {
-          sortOrder: "asc",
-        },
-        select: {
-          id: true,
-          label: true,
-          description: true,
-          itemType: true,
-          isRequired: true,
-          sortOrder: true,
-          category: true,
-          requiresPhoto: true,
-          opensIssueOnFail: true,
-          optionsText: true,
-        },
-      },
-    },
-    orderBy: [{ isPrimary: "desc" }, { updatedAt: "desc" }],
-  })
-}
-
-async function countActivePropertySupplies(propertyId: string) {
-  return prisma.propertySupply.count({
-    where: {
-      propertyId,
-      isActive: true,
-    },
-  })
 }
 
 function normalizeTaskForUi<
@@ -523,10 +480,10 @@ export async function POST(req: NextRequest, context: RouteContext) {
       | null = null
 
     if (sendCleaningChecklist) {
-      primaryCleaningTemplate = await resolvePrimaryCleaningTemplate({
-        organizationId: property.organizationId,
-        propertyId: property.id,
-      })
+      primaryCleaningTemplate = await findPrimaryCleaningTemplate(
+        property.organizationId,
+        property.id
+      )
 
       if (!primaryCleaningTemplate) {
         return NextResponse.json(
@@ -616,25 +573,6 @@ export async function POST(req: NextRequest, context: RouteContext) {
         },
       })
 
-      if (sendCleaningChecklist && primaryCleaningTemplate?.id) {
-        await tx.taskChecklistRun.create({
-          data: {
-            taskId: task.id,
-            templateId: primaryCleaningTemplate.id,
-            status: "pending",
-          },
-        })
-      }
-
-      if (sendSuppliesChecklist) {
-        await tx.taskSupplyRun.create({
-          data: {
-            taskId: task.id,
-            status: "pending",
-          },
-        })
-      }
-
       await tx.activityLog.create({
         data: {
           organizationId: property.organizationId,
@@ -645,8 +583,8 @@ export async function POST(req: NextRequest, context: RouteContext) {
           entityId: task.id,
           action: "TASK_CREATED",
           message: `Δημιουργήθηκε νέα εργασία "${title}".`,
-          actorType: auth.isSuperAdmin ? "SUPER_ADMIN" : auth.organizationRole,
-          actorName: auth.email,
+          actorType: "manager",
+          actorName: "Διαχειριστής",
           metadata: {
             taskType,
             sendCleaningChecklist,
@@ -678,6 +616,21 @@ export async function POST(req: NextRequest, context: RouteContext) {
         },
       })
     }
+
+    await syncTaskChecklistRun({
+      taskId: createdTask.id,
+      organizationId: property.organizationId,
+      propertyId: property.id,
+      sendCleaningChecklist,
+    })
+
+    await syncTaskSupplyRun({
+      taskId: createdTask.id,
+      propertyId: property.id,
+      sendSuppliesChecklist,
+    })
+
+    await refreshPropertyReadiness(property.id)
 
     const payload = await getPropertyTasksPayload(property.id)
 
