@@ -37,7 +37,9 @@ function toPhotoUrls(value: unknown) {
     .map((item) => String(item ?? "").trim())
     .filter(Boolean)
 
-  return urls.length > 0 ? urls : []
+  // Επιστρέφουμε undefined για άδειο array ώστε να μην σβήνονται staged photos
+  // που έχουν ανέβει μέσω του upload path. Μόνο populated array αντικαθιστά.
+  return urls.length > 0 ? urls : undefined
 }
 
 export async function PATCH(req: NextRequest, context: RouteContext) {

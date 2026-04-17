@@ -164,6 +164,11 @@ function safeArray<T>(value: T[] | null | undefined): T[] {
   return Array.isArray(value) ? value : []
 }
 
+function normalizePhotoUrls(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.map((item) => String(item ?? "").trim()).filter(Boolean)
+}
+
 function sortChecklistRun(run: ChecklistRunRecord | null | undefined) {
   if (!run) return null
 
@@ -190,7 +195,7 @@ function sortChecklistRun(run: ChecklistRunRecord | null | undefined) {
         valueNumber: answer.valueNumber,
         valueSelect: answer.valueSelect,
         note: answer.notes ?? null,
-        photoUrls: safeArray(answer.photoUrls as string[] | null | undefined),
+        photoUrls: normalizePhotoUrls(answer.photoUrls),
         issueCreated: Boolean(answer.issueCreated),
         linkedSupplyItemId: null,
         createdAt: answer.createdAt,
@@ -291,7 +296,7 @@ function sortIssueRun(run: IssueRunRecord | null | undefined) {
         valueNumber: null,
         valueSelect: answer.reportType ?? null,
         note: answer.locationText ?? null,
-        photoUrls: safeArray(answer.photoUrls as string[] | null | undefined),
+        photoUrls: normalizePhotoUrls(answer.photoUrls),
         issueCreated: Boolean(answer.createdIssueId),
         linkedSupplyItemId: null,
         createdAt: answer.createdAt,
@@ -1631,7 +1636,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
           action: "TASK_STATUS_UPDATED",
           message: `Η κατάσταση της εργασίας "${existingTask.title}" άλλαξε σε ${data.status}.`,
           actorType: "manager",
-          actorName: "Διαχειριστής",
+          actorName: access.auth.name || access.auth.email || "Διαχειριστής",
           metadata: {
             previousStatus: existingTask.status,
             newStatus: data.status,
