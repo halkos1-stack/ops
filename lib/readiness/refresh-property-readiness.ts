@@ -28,12 +28,17 @@ function toPropertyReadinessEnum(
  * Refreshes the stored readiness of a property.
  *
  * ΑΡΧΙΤΕΚΤΟΝΙΚΗ:
- * 1. Υπολογίζει conditions-based readiness (computePropertyReadiness)
- * 2. Υπολογίζει operational status (computePropertyOperationalStatus)
- *    με πλήρη task / assignment / checklist run δεδομένα
- * 3. Χρησιμοποιεί derivedReadinessStatus ως effective readiness για αποθήκευση
- *    → Turnover pending = "not_ready" ακόμα και αν conditions clean
- *    → Κλείνει το architectural gap: DB readiness = πραγματική επιχειρησιακή αλήθεια
+ * 1. Υπολογίζει καθαρό conditions-based readiness
+ * 2. Υπολογίζει operational status με σωστό conditions fallback
+ * 3. Υπολογίζει τελικό readiness με operational override
+ * 4. Αποθηκεύει στη βάση το derivedReadinessStatus ως canonical επιχειρησιακή αλήθεια
+ *
+ * ΚΑΝΟΝΑΣ:
+ * - αν υπάρχει turnover pending → effective readiness = "not_ready"
+ * - αν ΔΕΝ υπάρχει operational blocker → fallback στο καθαρό conditions readiness
+ *
+ * Αυτό κλείνει την ασυνέπεια όπου το operational fallback μπορούσε να γράφει
+ * "unknown" παρότι υπήρχε καθαρό conditions-based αποτέλεσμα.
  */
 export async function refreshPropertyReadiness(propertyId: string) {
   const now = new Date()
@@ -53,10 +58,6 @@ export async function refreshPropertyReadiness(propertyId: string) {
   }
 
   const [nextBooking, recentBookings, dbConditions, dbTasks] = await Promise.all([
-    // Επόμενη ενεργή κράτηση (για conditions readiness + activeTarget στο operational status)
-    // Αποκλείονται cancelled/canceled κρατήσεις — ευθυγράμμιση με isActiveBookingStatus()
-    // στο property-operational-status.ts, ώστε το αποθηκευμένο nextCheckInAt να αντικατοπτρίζει
-    // μόνο πραγματικές μελλοντικές αφίξεις.
     prisma.booking.findFirst({
       where: {
         organizationId: property.organizationId,
@@ -65,18 +66,21 @@ export async function refreshPropertyReadiness(propertyId: string) {
         status: { notIn: ["cancelled", "canceled"] },
       },
       orderBy: { checkInDate: "asc" },
-      select: { id: true, checkInDate: true, checkOutDate: true, guestName: true, status: true },
+      select: {
+        id: true,
+        checkInDate: true,
+        checkOutDate: true,
+        guestName: true,
+        status: true,
+      },
     }),
 
-    // Πρόσφατες κρατήσεις για operational status (active stay + turnover window)
     prisma.booking.findMany({
       where: {
         organizationId: property.organizationId,
         propertyId: property.id,
         OR: [
-          // Ενεργές τώρα
           { checkInDate: { lte: now }, checkOutDate: { gte: now } },
-          // Πρόσφατο checkout (turnover window ≤ 3 ημέρες)
           { checkOutDate: { gte: threeDaysAgo, lte: now } },
         ],
       },
@@ -89,7 +93,6 @@ export async function refreshPropertyReadiness(propertyId: string) {
       },
     }),
 
-    // Conditions
     prisma.propertyCondition.findMany({
       where: {
         organizationId: property.organizationId,
@@ -124,7 +127,6 @@ export async function refreshPropertyReadiness(propertyId: string) {
       },
     }),
 
-    // Εργασίες με assignment + checklist run statuses για operational status
     prisma.task.findMany({
       where: {
         organizationId: property.organizationId,
@@ -164,7 +166,6 @@ export async function refreshPropertyReadiness(propertyId: string) {
     }),
   ])
 
-  // ─── Conditions snapshot + conditions-based readiness ────────────────────
   const rawConditions: RawPropertyConditionRecord[] = dbConditions.map((condition) =>
     mapDbConditionToRawRecord({
       id: condition.id,
@@ -198,9 +199,41 @@ export async function refreshPropertyReadiness(propertyId: string) {
 
   const snapshot = buildPropertyConditionSnapshot(rawConditions)
 
-  // ─── Operational status (occupancy + turnover window + task proof) ────────
-  // Συνδυάζουμε recentBookings (active stay / recent checkout) +
-  // nextBooking (future check-in) ώστε το activeTarget να υπολογιστεί σωστά.
+  const readinessConditions = snapshot.conditions.map((condition) => ({
+    id: condition.id,
+    propertyId: condition.propertyId,
+    title: condition.title,
+    description: condition.notes,
+    conditionType: condition.conditionType,
+    status: condition.effectiveStatus,
+    blockingStatus: condition.effectiveBlockingStatus,
+    severity: condition.effectiveSeverity,
+    managerDecision: condition.effectiveManagerDecision,
+    sourceType: condition.sourceType,
+    sourceRunId: condition.sourceChecklistRunId,
+    sourceAnswerId: condition.sourceChecklistAnswerId,
+    taskId: condition.sourceTaskId,
+    firstDetectedAt: condition.createdAt,
+    lastDetectedAt: condition.updatedAt,
+    resolvedAt: condition.resolvedAt,
+    dismissedAt: condition.dismissedAt,
+    createdAt: condition.createdAt,
+    updatedAt: condition.updatedAt,
+    propertySupplyId: null,
+    bookingId: null,
+    mergeKey: null,
+    sourceLabel: condition.code,
+    sourceItemId: condition.itemKey,
+    sourceItemLabel: condition.itemLabel,
+    locationText: null,
+  }))
+
+  const conditionsReadiness = computePropertyReadiness({
+    now,
+    nextCheckInAt: nextBooking?.checkInDate ?? null,
+    conditions: readinessConditions,
+  })
+
   const bookingsForOperationalStatus = [
     ...recentBookings.map((b) => ({
       id: b.id,
@@ -224,7 +257,7 @@ export async function refreshPropertyReadiness(propertyId: string) {
 
   const operationalStatusResult = computePropertyOperationalStatus({
     now,
-    readinessStatus: null, // θα χρησιμοποιηθεί μόνο αν δεν υπάρχει turnover window
+    readinessStatus: conditionsReadiness.status,
     bookings: bookingsForOperationalStatus,
     tasks: dbTasks.map((t) => ({
       id: String(t.id),
@@ -246,42 +279,10 @@ export async function refreshPropertyReadiness(propertyId: string) {
     })),
   })
 
-  // ─── Conditions readiness με operational context ──────────────────────────
-  // Αν το operational context δείχνει turnover pending → override σε "not_ready"
   const readiness = computePropertyReadiness({
     now,
     nextCheckInAt: nextBooking?.checkInDate ?? null,
-    conditions: snapshot.conditions.map((condition) => ({
-      id: condition.id,
-      propertyId: condition.propertyId,
-      title: condition.title,
-      description: condition.notes,
-      conditionType: condition.conditionType,
-      status: condition.effectiveStatus,
-      blockingStatus: condition.effectiveBlockingStatus,
-      severity: condition.effectiveSeverity,
-      managerDecision: condition.effectiveManagerDecision,
-      sourceType: condition.sourceType,
-      sourceRunId: condition.sourceChecklistRunId,
-      sourceAnswerId: condition.sourceChecklistAnswerId,
-      taskId: condition.sourceTaskId,
-      firstDetectedAt: condition.createdAt,
-      lastDetectedAt: condition.updatedAt,
-      resolvedAt: condition.resolvedAt,
-      dismissedAt: condition.dismissedAt,
-      createdAt: condition.createdAt,
-      updatedAt: condition.updatedAt,
-      propertySupplyId: null,
-      bookingId: null,
-      mergeKey: null,
-      sourceLabel: condition.code,
-      sourceItemId: condition.itemKey,
-      sourceItemLabel: condition.itemLabel,
-      locationText: null,
-    })),
-    // Παρέχουμε operational context: αν τo derivedReadinessStatus είναι "not_ready"
-    // λόγω turnover pending, η computePropertyReadiness θα override σε "not_ready"
-    // ακόμα και αν δεν υπάρχουν active conditions.
+    conditions: readinessConditions,
     operationalContext:
       operationalStatusResult.derivedReadinessStatus !== "unknown"
         ? {
@@ -291,9 +292,6 @@ export async function refreshPropertyReadiness(propertyId: string) {
         : undefined,
   })
 
-  // ─── Effective readiness = derivedReadinessStatus (canonical truth) ───────
-  // Το derivedReadinessStatus ενσωματώνει τόσο conditions όσο και operational context.
-  // Αυτό αποθηκεύεται στη DB — είναι η αλήθεια που βλέπει ο properties list.
   const effectiveReadinessStatus = operationalStatusResult.derivedReadinessStatus
 
   const latestConditionUpdatedAt =
@@ -327,6 +325,7 @@ export async function refreshPropertyReadiness(propertyId: string) {
     nextBooking,
     rawConditions,
     snapshot,
+    conditionsReadiness,
     readiness,
     operationalStatusResult,
     effectiveReadinessStatus,
