@@ -537,6 +537,7 @@ function buildPropertyReadinessFromConditions(
     bookings
       .filter((booking) => {
         if (!booking.checkInDate) return false;
+        if (!isActiveBookingStatus(booking.status)) return false;
         const checkInDate = new Date(booking.checkInDate);
         return !Number.isNaN(checkInDate.getTime()) && checkInDate >= now;
       })
