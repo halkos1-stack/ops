@@ -1412,6 +1412,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
         propertyId: true,
         bookingId: true,
         source: true,
+        status: true,
         sendCleaningChecklist: true,
         sendSuppliesChecklist: true,
         sendIssuesChecklist: true,
@@ -1442,7 +1443,19 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     }
 
     if (hasOwn(body, "status")) {
-      data.status = toRequiredString(body.status, "status")
+      const requestedStatus = toRequiredString(body.status, "status").toLowerCase()
+
+      if (requestedStatus === "cancelled") {
+        return NextResponse.json(
+          {
+            error:
+              'Για ακύρωση εργασίας χρησιμοποιήστε το endpoint POST /api/tasks/{taskId}/cancel.',
+          },
+          { status: 400 }
+        )
+      }
+
+      data.status = requestedStatus
     }
 
     if (hasOwn(body, "scheduledDate")) {
@@ -1532,12 +1545,16 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     // Canonical completion: αν status → "completed" και completedAt δεν δόθηκε ρητά,
     // auto-set σε now. Αποτρέπει status="completed" + completedAt=null ασυνέπεια
     // που επηρεάζει το operational status computation.
+    // Guard: αν task ήδη "completed", δεν αντικαθιστάται το completedAt — διατηρείται
+    // το αρχικό timestamp για λόγους ακεραιότητας ιστορικού.
     if (
       data.status !== undefined &&
       String(data.status).trim().toLowerCase() === "completed" &&
       data.completedAt === undefined
     ) {
-      data.completedAt = new Date()
+      if (existingTask.status !== "completed") {
+        data.completedAt = new Date()
+      }
     }
 
     const finalSource = String(data.source ?? existingTask.source ?? "manual")
