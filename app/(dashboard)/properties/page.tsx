@@ -28,7 +28,6 @@ import {
   getTodayIssuesBadgeClasses,
   getTodayIssuesLabel,
   buildPropertyTodaySection,
-  matchesMetricFilter,
   matchesTodayMetricFilter,
   normalizeCountryForCreate,
   getDefaultCountry,
@@ -404,14 +403,6 @@ export default function PropertiesPage() {
           matchesTodayMetricFilter(section, metricFilter)
         )
   }, [metricFilter, todaySections])
-
-  const filteredProperties = useMemo(
-    () =>
-      filteredSections
-        .map((section) => section.property)
-        .filter(() => matchesMetricFilter("all")),
-    [filteredSections]
-  )
 
   const counterConfigs = useMemo(() => getCounterConfigs(language), [language])
 
