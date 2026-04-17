@@ -1529,6 +1529,17 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       data.usesCustomizedIssuesChecklist = toOptionalBoolean(body.usesCustomizedIssuesChecklist)
     }
 
+    // Canonical completion: αν status → "completed" και completedAt δεν δόθηκε ρητά,
+    // auto-set σε now. Αποτρέπει status="completed" + completedAt=null ασυνέπεια
+    // που επηρεάζει το operational status computation.
+    if (
+      data.status !== undefined &&
+      String(data.status).trim().toLowerCase() === "completed" &&
+      data.completedAt === undefined
+    ) {
+      data.completedAt = new Date()
+    }
+
     const finalSource = String(data.source ?? existingTask.source ?? "manual")
       .trim()
       .toLowerCase()

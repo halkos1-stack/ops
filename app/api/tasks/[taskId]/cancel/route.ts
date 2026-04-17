@@ -1,45 +1,13 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { sendMailSafe } from "@/lib/mailer"
+import { requireApiAppAccess, canAccessOrganization } from "@/lib/route-access"
+import { refreshPropertyReadiness } from "@/lib/readiness/refresh-property-readiness"
 
 type RouteContext = {
   params: Promise<{
     taskId: string
   }>
-}
-
-type AuthContext = {
-  systemRole?: "SUPER_ADMIN" | "USER"
-  organizationId?: string | null
-}
-
-function getMockAuthFromRequest(req: NextRequest): AuthContext {
-  const systemRole = req.headers.get("x-system-role") as
-    | "SUPER_ADMIN"
-    | "USER"
-    | null
-
-  const organizationId = req.headers.get("x-organization-id")
-
-  return {
-    systemRole: systemRole || "SUPER_ADMIN",
-    organizationId: organizationId || null,
-  }
-}
-
-function canAccessOrganization(
-  auth: AuthContext,
-  organizationId?: string | null
-) {
-  if (auth.systemRole === "SUPER_ADMIN") {
-    return true
-  }
-
-  if (!auth.organizationId) {
-    return false
-  }
-
-  return auth.organizationId === organizationId
 }
 
 function toNullableString(value: unknown) {
@@ -198,7 +166,10 @@ async function sendCancellationEmail(params: {
 
 export async function POST(req: NextRequest, context: RouteContext) {
   try {
-    const auth = getMockAuthFromRequest(req)
+    const access = await requireApiAppAccess()
+    if (!access.ok) return access.response
+    const auth = access.auth
+
     const { taskId } = await context.params
 
     if (!taskId) {
@@ -216,6 +187,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
       select: {
         id: true,
         organizationId: true,
+        propertyId: true,
         status: true,
         title: true,
         scheduledDate: true,
@@ -313,6 +285,10 @@ export async function POST(req: NextRequest, context: RouteContext) {
       } catch (error) {
         console.error("TaskAssignment note update failed:", error)
       }
+    }
+
+    if (existingTask.propertyId) {
+      await refreshPropertyReadiness(existingTask.propertyId)
     }
 
     await sendCancellationEmail({
