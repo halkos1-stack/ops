@@ -1411,6 +1411,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
         organizationId: true,
         propertyId: true,
         bookingId: true,
+        title: true,
         source: true,
         status: true,
         sendCleaningChecklist: true,
@@ -1618,6 +1619,26 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       },
       data,
     })
+
+    if (data.status !== undefined) {
+      await prisma.activityLog.create({
+        data: {
+          organizationId: existingTask.organizationId,
+          propertyId: existingTask.propertyId,
+          taskId: existingTask.id,
+          entityType: "TASK",
+          entityId: existingTask.id,
+          action: "TASK_STATUS_UPDATED",
+          message: `Η κατάσταση της εργασίας "${existingTask.title}" άλλαξε σε ${data.status}.`,
+          actorType: "manager",
+          actorName: "Διαχειριστής",
+          metadata: {
+            previousStatus: existingTask.status,
+            newStatus: data.status,
+          },
+        },
+      })
+    }
 
     const finalSendCleaningChecklist = data.sendCleaningChecklist !== undefined
       ? Boolean(data.sendCleaningChecklist)

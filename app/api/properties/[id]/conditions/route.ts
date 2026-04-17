@@ -684,7 +684,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const resolvedAt = status === "resolved" ? now : null
     const dismissedAt = status === "dismissed" ? now : null
 
-    await prisma.propertyCondition.create({
+    const createdCondition = await prisma.propertyCondition.create({
       data: {
         organizationId: property.organizationId,
         propertyId: property.id,
@@ -710,6 +710,28 @@ export async function POST(request: NextRequest, context: RouteContext) {
         lastDetectedAt,
         resolvedAt,
         dismissedAt,
+      },
+      select: { id: true },
+    })
+
+    await prisma.activityLog.create({
+      data: {
+        organizationId: property.organizationId,
+        propertyId: property.id,
+        taskId: taskId || null,
+        entityType: "PROPERTY_CONDITION",
+        entityId: createdCondition.id,
+        action: "CONDITION_CREATED",
+        message: `Νέα κατάσταση ακινήτου καταγράφηκε: "${title}"`,
+        actorType: "manager",
+        actorName: "Διαχειριστής",
+        metadata: {
+          conditionType,
+          status,
+          blockingStatus,
+          severity,
+          sourceType,
+        },
       },
     })
 

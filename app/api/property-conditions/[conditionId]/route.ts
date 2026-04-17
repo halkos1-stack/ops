@@ -577,6 +577,30 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       })
     )
 
+    await prisma.activityLog.create({
+      data: {
+        organizationId: updatedCondition.organizationId,
+        propertyId: updatedCondition.propertyId,
+        taskId: updatedCondition.taskId || null,
+        entityType: "PROPERTY_CONDITION",
+        entityId: updatedCondition.id,
+        action: "CONDITION_UPDATED",
+        message: `Κατάσταση ακινήτου ενημερώθηκε: "${updatedCondition.title}"`,
+        actorType: "manager",
+        actorName: "Διαχειριστής",
+        metadata: {
+          previousStatus: String(existingCondition.status).toLowerCase(),
+          newStatus: String(updatedCondition.status).toLowerCase(),
+          previousManagerDecision: existingCondition.managerDecision
+            ? String(existingCondition.managerDecision).toLowerCase()
+            : null,
+          newManagerDecision: updatedCondition.managerDecision
+            ? String(updatedCondition.managerDecision).toLowerCase()
+            : null,
+        },
+      },
+    })
+
     // Condition truth αλλάζει → canonical readiness refresh
     const propertyTruth = await refreshPropertyReadiness(updatedCondition.propertyId)
 

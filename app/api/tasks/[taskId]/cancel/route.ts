@@ -299,6 +299,24 @@ export async function POST(req: NextRequest, context: RouteContext) {
       }
     }
 
+    await prisma.activityLog.create({
+      data: {
+        organizationId: existingTask.organizationId,
+        propertyId: existingTask.propertyId,
+        taskId: existingTask.id,
+        entityType: "TASK",
+        entityId: existingTask.id,
+        action: "TASK_CANCELLED",
+        message: `Η εργασία "${existingTask.title}" ακυρώθηκε.${reason ? ` Αιτία: ${reason}` : ""}`,
+        actorType: "manager",
+        actorName: "Διαχειριστής",
+        metadata: {
+          reason: reason || null,
+          previousStatus: existingTask.status,
+        },
+      },
+    })
+
     if (existingTask.propertyId) {
       await refreshPropertyReadiness(existingTask.propertyId)
     }

@@ -382,6 +382,27 @@ export async function POST(req: NextRequest) {
       sendIssuesChecklist,
     })
 
+    // ─── Activity log ─────────────────────────────────────────────────────────
+    await prisma.activityLog.create({
+      data: {
+        organizationId,
+        propertyId,
+        taskId: task.id,
+        entityType: "TASK",
+        entityId: task.id,
+        action: "TASK_CREATED",
+        message: `Νέα εργασία δημιουργήθηκε: "${task.title}"`,
+        actorType: "manager",
+        actorName: "Διαχειριστής",
+        metadata: {
+          taskType,
+          source: taskSource,
+          status: task.status,
+          scheduledDate: scheduledDateValue,
+        },
+      },
+    })
+
     // ─── Readiness refresh ────────────────────────────────────────────────────
     // Νέα εργασία → αλλάζει το operational status του ακινήτου.
     await refreshPropertyReadiness(propertyId)
