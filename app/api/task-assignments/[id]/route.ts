@@ -282,6 +282,29 @@ export async function PUT(request: NextRequest, context: RouteContext) {
       )
     }
 
+    if (status !== undefined && taskStatus === "completed") {
+      return NextResponse.json(
+        { error: "Δεν μπορεί να αλλάξει κατάσταση ανάθεσης σε ολοκληρωμένη εργασία." },
+        { status: 400 }
+      )
+    }
+
+    const assignmentStatus = String(existingAssignment.status || "").toLowerCase()
+    if (status !== undefined) {
+      if (assignmentStatus === "completed") {
+        return NextResponse.json(
+          { error: "Η ανάθεση έχει ολοκληρωθεί και δεν επιτρέπονται αλλαγές κατάστασης." },
+          { status: 400 }
+        )
+      }
+      if (assignmentStatus === "cancelled" || assignmentStatus === "superseded") {
+        return NextResponse.json(
+          { error: "Η ανάθεση βρίσκεται σε τελική κατάσταση και δεν επιτρέπονται αλλαγές κατάστασης." },
+          { status: 400 }
+        )
+      }
+    }
+
     if (status === "rejected" && !rejectionReason?.trim()) {
       return NextResponse.json(
         { error: "Η αιτία απόρριψης είναι υποχρεωτική." },

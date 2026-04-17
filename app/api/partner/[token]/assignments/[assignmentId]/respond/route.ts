@@ -104,6 +104,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
             property: true,
             checklistRun: true,
             supplyRun: true,
+            issueRun: true,
           },
         },
       },
@@ -158,25 +159,45 @@ export async function POST(req: NextRequest, context: RouteContext) {
         })
 
         if (existingAssignment.task.checklistRun) {
-          await tx.taskChecklistRun.update({
-            where: { id: existingAssignment.task.checklistRun.id },
-            data: {
-              status: "pending",
-              startedAt: null,
-              completedAt: null,
-            },
-          })
+          const checklistRunStatus = String(existingAssignment.task.checklistRun.status || "").toLowerCase()
+          if (checklistRunStatus !== "completed") {
+            await tx.taskChecklistRun.update({
+              where: { id: existingAssignment.task.checklistRun.id },
+              data: {
+                status: "pending",
+                startedAt: null,
+                completedAt: null,
+              },
+            })
+          }
         }
 
         if (existingAssignment.task.supplyRun) {
-          await tx.taskSupplyRun.update({
-            where: { id: existingAssignment.task.supplyRun.id },
-            data: {
-              status: "pending",
-              startedAt: null,
-              completedAt: null,
-            },
-          })
+          const supplyRunStatus = String(existingAssignment.task.supplyRun.status || "").toLowerCase()
+          if (supplyRunStatus !== "completed") {
+            await tx.taskSupplyRun.update({
+              where: { id: existingAssignment.task.supplyRun.id },
+              data: {
+                status: "pending",
+                startedAt: null,
+                completedAt: null,
+              },
+            })
+          }
+        }
+
+        if (existingAssignment.task.issueRun) {
+          const issueRunStatus = String(existingAssignment.task.issueRun.status || "").toLowerCase()
+          if (issueRunStatus !== "completed") {
+            await tx.taskIssueRun.update({
+              where: { id: existingAssignment.task.issueRun.id },
+              data: {
+                status: "pending",
+                startedAt: null,
+                completedAt: null,
+              },
+            })
+          }
         }
 
         await tx.activityLog.create({
@@ -232,21 +253,27 @@ export async function POST(req: NextRequest, context: RouteContext) {
       })
 
       if (existingAssignment.task.checklistRun) {
-        await tx.taskChecklistRun.update({
-          where: { id: existingAssignment.task.checklistRun.id },
-          data: {
-            status: "pending",
-          },
-        })
+        const checklistRunStatus = String(existingAssignment.task.checklistRun.status || "").toLowerCase()
+        if (checklistRunStatus !== "completed") {
+          await tx.taskChecklistRun.update({
+            where: { id: existingAssignment.task.checklistRun.id },
+            data: {
+              status: "pending",
+            },
+          })
+        }
       }
 
       if (existingAssignment.task.supplyRun) {
-        await tx.taskSupplyRun.update({
-          where: { id: existingAssignment.task.supplyRun.id },
-          data: {
-            status: "pending",
-          },
-        })
+        const supplyRunStatus = String(existingAssignment.task.supplyRun.status || "").toLowerCase()
+        if (supplyRunStatus !== "completed") {
+          await tx.taskSupplyRun.update({
+            where: { id: existingAssignment.task.supplyRun.id },
+            data: {
+              status: "pending",
+            },
+          })
+        }
       }
 
       await tx.activityLog.create({
