@@ -1,8 +1,6 @@
 import {
   buildDayEntry,
   buildHourRows,
-  getIssuesTone,
-  getSuppliesTone,
   isOpenIssue,
   normalizeDateOnly,
   normalizeTaskStatus,
@@ -16,20 +14,8 @@ import {
   type PropertyIssueLite,
   type PropertyTaskLite,
   type SupplyRow,
-  type Tone,
   type WorkWindow,
 } from "@/lib/properties/property-detail-helpers"
-import {
-  getOperationalStatusBadgeClasses,
-  getOperationalStatusLabel,
-  getOperationalStatusTooltip,
-  getReadinessBadgeClasses,
-  getReadinessLabel,
-  getReadinessTone,
-  normalizeOperationalForUI,
-  normalizeReadinessForUI,
-} from "@/lib/readiness/readiness-ui"
-
 export type {
   CalendarGranularity,
   OccupancyKind,
@@ -40,7 +26,6 @@ export type {
   SupplyState,
   TaskModalState,
   TaskTitleKey,
-  WorkWindow as PropertyWorkWindow,
 } from "@/lib/properties/property-detail-helpers"
 
 export {
@@ -107,7 +92,7 @@ export {
   normalizeReadinessForUI,
 } from "@/lib/readiness/readiness-ui"
 
-export const PROPERTY_DETAIL_CLOSED_TASK_STATUSES = new Set([
+const PROPERTY_DETAIL_CLOSED_TASK_STATUSES = new Set([
   "completed",
   "cancelled",
   "canceled",
@@ -136,34 +121,6 @@ export type PropertySelectedDayEntryInput = {
   anchorDate: Date
   supplyRows: SupplyRow[]
   workWindows: WorkWindow[]
-}
-
-export type PropertyIssueDisplayState = {
-  count: number
-  hasItems: boolean
-  tone: Tone
-}
-
-export type PropertySupplyDisplayState = {
-  count: number
-  hasItems: boolean
-  tone: Tone
-  shortageCount: number
-  mediumCount: number
-}
-
-export type PropertyReadinessDisplay = {
-  status: ReturnType<typeof normalizeReadinessForUI>
-  label: string
-  badgeClassName: string
-  tone: ReturnType<typeof getReadinessTone>
-}
-
-export type PropertyPlanningDisplay = {
-  status: ReturnType<typeof normalizeOperationalForUI>
-  label: string
-  badgeClassName: string
-  tooltip: string
 }
 
 export type CalendarFilterVisibility = {
@@ -284,56 +241,6 @@ export function selectEntryIssueRecords(entry: DayEntry | null): PropertyIssueLi
 
 export function selectEntrySupplyRows(entry: DayEntry | null): SupplyRow[] {
   return entry?.supplyRecords ?? []
-}
-
-export function selectMissingSupplyRows(rows: SupplyRow[]): SupplyRow[] {
-  return rows.filter((row) => row.state === "missing")
-}
-
-export function getIssueDisplayState(
-  issues: PropertyIssueLite[]
-): PropertyIssueDisplayState {
-  return {
-    count: issues.length,
-    hasItems: issues.length > 0,
-    tone: issues.length > 0 ? getIssuesTone(issues) : "slate",
-  }
-}
-
-export function getSupplyDisplayState(
-  rows: SupplyRow[]
-): PropertySupplyDisplayState {
-  return {
-    count: rows.length,
-    hasItems: rows.length > 0,
-    tone: rows.length > 0 ? getSuppliesTone(rows) : "slate",
-    shortageCount: rows.filter((row) => row.state === "missing").length,
-    mediumCount: rows.filter((row) => row.state === "medium").length,
-  }
-}
-
-export function getPropertyReadinessDisplay(
-  language: Language,
-  value: unknown
-): PropertyReadinessDisplay {
-  return {
-    status: normalizeReadinessForUI(value),
-    label: getReadinessLabel(language, value),
-    badgeClassName: getReadinessBadgeClasses(value),
-    tone: getReadinessTone(value),
-  }
-}
-
-export function getPropertyPlanningDisplay(
-  language: Language,
-  value: unknown
-): PropertyPlanningDisplay {
-  return {
-    status: normalizeOperationalForUI(value),
-    label: getOperationalStatusLabel(language, value),
-    badgeClassName: getOperationalStatusBadgeClasses(value),
-    tooltip: getOperationalStatusTooltip(language, value),
-  }
 }
 
 export function getCalendarEntryAttentionState(input: {
