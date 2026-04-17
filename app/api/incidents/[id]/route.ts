@@ -94,6 +94,10 @@ export async function PUT(request: NextRequest, context: RouteContext) {
       where: buildTenantWhere(auth, { id }),
       select: {
         id: true,
+        organizationId: true,
+        propertyId: true,
+        taskId: true,
+        status: true,
       },
     })
 
@@ -146,6 +150,31 @@ export async function PUT(request: NextRequest, context: RouteContext) {
       },
     })
 
+    const incidentPutAction =
+      normalizedNextStatus === "resolved" || normalizedNextStatus === "closed"
+        ? "ISSUE_RESOLVED"
+        : "ISSUE_UPDATED"
+
+    await prisma.activityLog.create({
+      data: {
+        organizationId: existing.organizationId,
+        propertyId: existing.propertyId ?? null,
+        taskId: existing.taskId ?? null,
+        issueId: updated.id,
+        entityType: "ISSUE",
+        entityId: updated.id,
+        action: incidentPutAction,
+        message: `Ζήτημα ενημερώθηκε: "${updated.title}"`,
+        actorType: "manager",
+        actorName: auth.name || auth.email || "Διαχειριστής",
+        metadata: {
+          previousStatus: existing.status,
+          newStatus: updated.status,
+          source: "incidents",
+        },
+      },
+    })
+
     return NextResponse.json(mapIssueToIncidentLike(updated))
   } catch (error) {
     console.error("PUT /api/incidents/[id] error:", error)
@@ -168,6 +197,11 @@ export async function DELETE(_req: NextRequest, context: RouteContext) {
       where: buildTenantWhere(auth, { id }),
       select: {
         id: true,
+        organizationId: true,
+        propertyId: true,
+        taskId: true,
+        title: true,
+        status: true,
       },
     })
 
@@ -177,6 +211,25 @@ export async function DELETE(_req: NextRequest, context: RouteContext) {
         { status: 404 }
       )
     }
+
+    await prisma.activityLog.create({
+      data: {
+        organizationId: existing.organizationId,
+        propertyId: existing.propertyId ?? null,
+        taskId: existing.taskId ?? null,
+        issueId: existing.id,
+        entityType: "ISSUE",
+        entityId: existing.id,
+        action: "ISSUE_DELETED",
+        message: `Ζήτημα διαγράφηκε: "${existing.title}"`,
+        actorType: "manager",
+        actorName: auth.name || auth.email || "Διαχειριστής",
+        metadata: {
+          previousStatus: existing.status,
+          source: "incidents",
+        },
+      },
+    })
 
     await prisma.issue.delete({
       where: {

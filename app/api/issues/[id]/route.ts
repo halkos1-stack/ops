@@ -136,6 +136,10 @@ export async function PUT(req: NextRequest, context: RouteContext) {
       select: {
         id: true,
         organizationId: true,
+        propertyId: true,
+        taskId: true,
+        bookingId: true,
+        status: true,
       },
     })
 
@@ -248,6 +252,32 @@ export async function PUT(req: NextRequest, context: RouteContext) {
       },
     })
 
+    const putAction =
+      normalizedStatus === "resolved" || normalizedStatus === "closed"
+        ? "ISSUE_RESOLVED"
+        : "ISSUE_UPDATED"
+
+    await prisma.activityLog.create({
+      data: {
+        organizationId: existingIssue.organizationId,
+        propertyId: existingIssue.propertyId ?? null,
+        taskId: existingIssue.taskId ?? null,
+        bookingId: existingIssue.bookingId ?? null,
+        issueId: updatedIssue.id,
+        entityType: "ISSUE",
+        entityId: updatedIssue.id,
+        action: putAction,
+        message: `Ζήτημα ενημερώθηκε: "${updatedIssue.title}"`,
+        actorType: "manager",
+        actorName: auth.name || auth.email || "Διαχειριστής",
+        metadata: {
+          previousStatus: existingIssue.status,
+          newStatus: updatedIssue.status,
+          severity: updatedIssue.severity,
+        },
+      },
+    })
+
     return NextResponse.json(updatedIssue)
   } catch (error) {
     console.error("Issue PUT error:", error)
@@ -275,6 +305,10 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       select: {
         id: true,
         organizationId: true,
+        propertyId: true,
+        taskId: true,
+        bookingId: true,
+        status: true,
       },
     })
 
@@ -420,6 +454,33 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
             actorName: true,
             createdAt: true,
           },
+        },
+      },
+    })
+
+    const newStatus = updatedIssue.status?.toLowerCase() ?? null
+    const patchAction =
+      newStatus === "resolved" || newStatus === "closed"
+        ? "ISSUE_RESOLVED"
+        : "ISSUE_UPDATED"
+
+    await prisma.activityLog.create({
+      data: {
+        organizationId: existingIssue.organizationId,
+        propertyId: existingIssue.propertyId ?? null,
+        taskId: existingIssue.taskId ?? null,
+        bookingId: existingIssue.bookingId ?? null,
+        issueId: updatedIssue.id,
+        entityType: "ISSUE",
+        entityId: updatedIssue.id,
+        action: patchAction,
+        message: `Ζήτημα ενημερώθηκε: "${updatedIssue.title}"`,
+        actorType: "manager",
+        actorName: auth.name || auth.email || "Διαχειριστής",
+        metadata: {
+          previousStatus: existingIssue.status,
+          newStatus: updatedIssue.status,
+          severity: updatedIssue.severity,
         },
       },
     })

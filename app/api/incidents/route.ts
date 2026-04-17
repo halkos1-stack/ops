@@ -194,6 +194,27 @@ export async function POST(request: NextRequest) {
       },
     })
 
+    await prisma.activityLog.create({
+      data: {
+        organizationId,
+        propertyId,
+        taskId: taskId ?? null,
+        issueId: issue.id,
+        entityType: "ISSUE",
+        entityId: issue.id,
+        action: "ISSUE_CREATED",
+        message: `Ζήτημα δημιουργήθηκε: "${issue.title}"`,
+        actorType: "manager",
+        actorName: auth.name || auth.email || "Διαχειριστής",
+        metadata: {
+          issueType: issue.issueType,
+          severity: issue.severity,
+          status: issue.status,
+          source: "incidents",
+        },
+      },
+    })
+
     return NextResponse.json(mapIssueToIncidentLike(issue), { status: 201 })
   } catch (error) {
     console.error("POST /api/incidents error:", error)
