@@ -44,6 +44,13 @@ function buildPropertyRelationInput(propertyId: string | null | undefined) {
   }
 }
 
+function getReprocessCandidatePropertyId(params: {
+  isManual: boolean
+  propertyId: string | null
+}) {
+  return params.isManual ? params.propertyId : null
+}
+
 export async function upsertBookingFromNormalizedInput(
   input: NormalizedBookingInput
 ) {
@@ -228,7 +235,10 @@ export async function reprocessBookingById(bookingId: string) {
   const match = await resolveBookingPropertyMatch({
     organizationId: booking.organizationId,
     sourcePlatform: booking.sourcePlatform,
-    propertyId: booking.propertyId,
+    propertyId: getReprocessCandidatePropertyId({
+      isManual: Boolean(booking.isManual),
+      propertyId: booking.propertyId,
+    }),
     externalListingId: booking.externalListingId,
   })
 

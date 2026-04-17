@@ -1,6 +1,7 @@
 ﻿import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { buildTenantWhere, requireApiAppAccess } from "@/lib/route-access"
+import { reprocessBookingsForMapping } from "@/lib/bookings/booking-service"
 import { refreshPropertyReadiness } from "@/lib/readiness/refresh-property-readiness"
 
 type ListingGroup = {
@@ -268,19 +269,10 @@ async function createPropertyAndMapping(params: {
     },
   })
 
-  await prisma.booking.updateMany({
-    where: {
-      organizationId: params.organizationId,
-      sourcePlatform: params.sourcePlatform,
-      externalListingId: params.externalListingId,
-    },
-    data: {
-      propertyId: property.id,
-      needsMapping: false,
-      syncStatus: "READY_FOR_ACTION",
-      lastProcessedAt: new Date(),
-      lastError: null,
-    },
+  const reprocessResult = await reprocessBookingsForMapping({
+    organizationId: params.organizationId,
+    sourcePlatform: params.sourcePlatform,
+    externalListingId: params.externalListingId,
   })
 
   if (affectedBookings.length > 0) {
@@ -302,7 +294,10 @@ async function createPropertyAndMapping(params: {
     })
   }
 
-  return property
+  return {
+    property,
+    reprocessResult,
+  }
 }
 
 export async function GET() {
@@ -370,7 +365,7 @@ export async function POST(req: NextRequest) {
         )
       }
 
-      const property = await createPropertyAndMapping({
+      const result = await createPropertyAndMapping({
         organizationId,
         sourcePlatform,
         externalListingId,
@@ -382,11 +377,11 @@ export async function POST(req: NextRequest) {
         externalPropertyCountry: normalizeText(body.externalPropertyCountry),
       })
 
-      await refreshPropertyReadiness(property.id)
+      await refreshPropertyReadiness(result.property.id)
 
       return NextResponse.json({
         success: true,
-        property,
+        property: result.property,
       })
     }
 
@@ -398,7 +393,7 @@ export async function POST(req: NextRequest) {
         if (listing.propertyId) continue
         if (!listing.externalListingId) continue
 
-        const property = await createPropertyAndMapping({
+        const result = await createPropertyAndMapping({
           organizationId,
           sourcePlatform: listing.sourcePlatform,
           externalListingId: listing.externalListingId,
@@ -410,8 +405,8 @@ export async function POST(req: NextRequest) {
           externalPropertyCountry: listing.externalPropertyCountry,
         })
 
-        await refreshPropertyReadiness(property.id)
-        created.push(property)
+        await refreshPropertyReadiness(result.property.id)
+        created.push(result.property)
       }
 
       return NextResponse.json({

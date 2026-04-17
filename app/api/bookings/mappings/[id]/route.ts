@@ -129,14 +129,41 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       },
     })
 
-    const reprocessResult =
-      updated.status === "ACTIVE"
-        ? await reprocessBookingsForMapping({
-            organizationId: updated.organizationId,
-            sourcePlatform: updated.sourcePlatform,
-            externalListingId: updated.externalListingId,
-          })
-        : { total: 0, bookingIds: [] as string[] }
+    const reprocessedBookingIds = new Set<string>()
+
+    const shouldReprocessPreviousKey =
+      current.sourcePlatform !== updated.sourcePlatform ||
+      current.externalListingId !== updated.externalListingId ||
+      updated.status !== "ACTIVE"
+
+    if (shouldReprocessPreviousKey) {
+      const previousKeyResult = await reprocessBookingsForMapping({
+        organizationId: current.organizationId,
+        sourcePlatform: current.sourcePlatform,
+        externalListingId: current.externalListingId,
+      })
+
+      for (const bookingId of previousKeyResult.bookingIds) {
+        reprocessedBookingIds.add(bookingId)
+      }
+    }
+
+    if (updated.status === "ACTIVE") {
+      const nextKeyResult = await reprocessBookingsForMapping({
+        organizationId: updated.organizationId,
+        sourcePlatform: updated.sourcePlatform,
+        externalListingId: updated.externalListingId,
+      })
+
+      for (const bookingId of nextKeyResult.bookingIds) {
+        reprocessedBookingIds.add(bookingId)
+      }
+    }
+
+    const reprocessResult = {
+      total: reprocessedBookingIds.size,
+      bookingIds: [...reprocessedBookingIds],
+    }
 
     return NextResponse.json({
       success: true,
@@ -183,6 +210,12 @@ export async function DELETE(_req: NextRequest, context: RouteContext) {
       data: {
         status: "INACTIVE",
       },
+    })
+
+    await reprocessBookingsForMapping({
+      organizationId: current.organizationId,
+      sourcePlatform: current.sourcePlatform,
+      externalListingId: current.externalListingId,
     })
 
     return NextResponse.json({
