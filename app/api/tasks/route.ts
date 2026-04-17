@@ -57,6 +57,34 @@ function endOfDay(value: string) {
   return Number.isNaN(date.getTime()) ? null : date
 }
 
+function normalizeTaskType(value: unknown) {
+  return String(value ?? "").trim().toLowerCase()
+}
+
+function resolveCanonicalChecklistFlags(input: {
+  taskType: string
+  requestedCleaning: boolean
+  requestedSupplies: boolean
+  requestedIssues: boolean
+}) {
+  const anyRequested =
+    input.requestedCleaning || input.requestedSupplies || input.requestedIssues
+
+  if (!anyRequested && input.taskType === "cleaning") {
+    return {
+      sendCleaningChecklist: true,
+      sendSuppliesChecklist: false,
+      sendIssuesChecklist: false,
+    }
+  }
+
+  return {
+    sendCleaningChecklist: input.requestedCleaning,
+    sendSuppliesChecklist: input.requestedSupplies,
+    sendIssuesChecklist: input.requestedIssues,
+  }
+}
+
 // ─── Query builder ────────────────────────────────────────────────────────────
 
 function buildTaskWhere(
@@ -191,6 +219,7 @@ export async function POST(req: NextRequest) {
     const taskSource = (toNullableString(body.source) || "manual").toLowerCase()
     const title = String(body.title || "").trim()
     const taskType = String(body.taskType || "").trim()
+    const normalizedTaskType = normalizeTaskType(taskType)
     const scheduledDateValue = toOptionalDate(body.scheduledDate)
 
     if (!propertyId) {
@@ -237,12 +266,25 @@ export async function POST(req: NextRequest) {
     const requiresPhotos = Boolean(body.requiresPhotos)
     const requiresApproval = Boolean(body.requiresApproval)
 
-    const sendCleaningChecklist =
+    const requestedCleaningChecklist =
       body.sendCleaningChecklist === undefined
         ? true
         : Boolean(body.sendCleaningChecklist)
-    const sendSuppliesChecklist = Boolean(body.sendSuppliesChecklist)
-    const sendIssuesChecklist = Boolean(body.sendIssuesChecklist)
+    const requestedSuppliesChecklist = Boolean(body.sendSuppliesChecklist)
+    const requestedIssuesChecklist = Boolean(body.sendIssuesChecklist)
+
+    const canonicalChecklistFlags = resolveCanonicalChecklistFlags({
+      taskType: normalizedTaskType,
+      requestedCleaning: requestedCleaningChecklist,
+      requestedSupplies: requestedSuppliesChecklist,
+      requestedIssues: requestedIssuesChecklist,
+    })
+
+    const sendCleaningChecklist = canonicalChecklistFlags.sendCleaningChecklist
+    const sendSuppliesChecklist = canonicalChecklistFlags.sendSuppliesChecklist
+    const sendIssuesChecklist = canonicalChecklistFlags.sendIssuesChecklist
+    const requiresChecklist =
+      sendCleaningChecklist || sendSuppliesChecklist || sendIssuesChecklist
 
     const usesCustomizedCleaningChecklist = Boolean(body.usesCustomizedCleaningChecklist)
     const usesCustomizedSuppliesChecklist = Boolean(body.usesCustomizedSuppliesChecklist)
@@ -355,7 +397,7 @@ export async function POST(req: NextRequest) {
         scheduledEndTime: toNullableTime(body.scheduledEndTime),
         dueDate: toOptionalDate(body.dueDate),
         requiresPhotos,
-        requiresChecklist: sendCleaningChecklist,
+        requiresChecklist,
         requiresApproval,
         sendCleaningChecklist,
         sendSuppliesChecklist,
@@ -408,6 +450,9 @@ export async function POST(req: NextRequest) {
           source: taskSource,
           status: task.status,
           scheduledDate: scheduledDateValue,
+          sendCleaningChecklist,
+          sendSuppliesChecklist,
+          sendIssuesChecklist,
         },
       },
     })
@@ -431,7 +476,6 @@ export async function POST(req: NextRequest) {
     }
 
     // ─── Readiness refresh ────────────────────────────────────────────────────
-    // Νέα εργασία → αλλάζει το operational status του ακινήτου.
     await refreshPropertyReadiness(propertyId)
 
     // ─── Response ─────────────────────────────────────────────────────────────
