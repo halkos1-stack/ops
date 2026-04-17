@@ -111,6 +111,7 @@ async function getTaskBase(taskId: string) {
       title: true,
       organizationId: true,
       propertyId: true,
+      status: true,
       requiresChecklist: true,
       sendCleaningChecklist: true,
       sendSuppliesChecklist: true,
@@ -430,6 +431,20 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
 
     if (!canAccessOrganization(auth, task.organizationId)) {
       return NextResponse.json({ error: "Δεν έχετε πρόσβαση σε αυτή την εργασία." }, { status: 403 })
+    }
+
+    const taskStatus = String(task.status || "").toLowerCase()
+    if (taskStatus === "cancelled") {
+      return NextResponse.json(
+        { error: "Η εργασία έχει ακυρωθεί και δεν επιτρέπεται η προσαρμογή λιστών." },
+        { status: 400 }
+      )
+    }
+    if (taskStatus === "completed") {
+      return NextResponse.json(
+        { error: "Η εργασία έχει ολοκληρωθεί και δεν επιτρέπεται η προσαρμογή λιστών." },
+        { status: 400 }
+      )
     }
 
     const checklistKey = normalizeChecklistKey(body.checklistKey)

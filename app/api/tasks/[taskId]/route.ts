@@ -1423,6 +1423,20 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "Δεν βρέθηκε εργασία." }, { status: 404 })
     }
 
+    const existingTaskStatus = String(existingTask.status || "").toLowerCase()
+    if (existingTaskStatus === "cancelled") {
+      return NextResponse.json(
+        { error: "Η εργασία έχει ακυρωθεί και δεν επιτρέπονται πλέον αλλαγές." },
+        { status: 400 }
+      )
+    }
+    if (existingTaskStatus === "completed") {
+      return NextResponse.json(
+        { error: "Η εργασία έχει ολοκληρωθεί. Δεν επιτρέπεται η επεξεργασία εκτελεστικής κατάστασης." },
+        { status: 400 }
+      )
+    }
+
     const body = await req.json().catch(() => ({}))
     const data: Prisma.TaskUncheckedUpdateInput = {}
 
