@@ -1328,8 +1328,14 @@ async function getFullProperty(id: string) {
     return ["medium", "low"].includes(String(supply.derivedState));
   });
 
+  const conditionsReadiness = buildPropertyReadinessFromConditions({
+    bookings: property.bookings,
+    conditions: property.conditions,
+    nextCheckInAt: property.nextCheckInAt,
+  });
+
   const operationalStatusResult = computePropertyOperationalStatus({
-    readinessStatus: null,
+    readinessStatus: conditionsReadiness.status,
     bookings: safeArray(property.bookings).map((b) => ({
       id: b.id,
       status: b.status ?? null,
@@ -1423,7 +1429,6 @@ async function getFullProperty(id: string) {
 
   return {
     ...property,
-    // Canonical condition surface — αντικαθιστά το raw DB conditions spread
     conditions: canonicalConditions,
     openConditionCount: canonicalConditionSummary.active,
     openBlockingConditionCount: canonicalConditionSummary.blocking,
