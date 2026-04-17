@@ -317,6 +317,14 @@ export const translations = {
       resolved: "Επιλυμένο",
       closed: "Κλειστό",
     },
+    issueSeverity: {
+      critical: "Κρίσιμη",
+      high: "Υψηλή",
+      urgent: "Επείγουσα",
+      medium: "Μέτρια",
+      warning: "Προειδοποίηση",
+      low: "Χαμηλή",
+    },
     supplyState: {
       missing: "Έλλειψη",
       medium: "Μέτρια",
@@ -443,6 +451,14 @@ export const translations = {
       resolved: "Resolved",
       closed: "Closed",
     },
+    issueSeverity: {
+      critical: "Critical",
+      high: "High",
+      urgent: "Urgent",
+      medium: "Medium",
+      warning: "Warning",
+      low: "Low",
+    },
     supplyState: {
       missing: "Missing",
       medium: "Medium",
@@ -495,7 +511,7 @@ export function normalizeDate(value?: string | null) {
   return date
 }
 
-export function formatLocalDateKey(date: Date) {
+function formatLocalDateKey(date: Date) {
   if (Number.isNaN(date.getTime())) return null
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, "0")
@@ -561,7 +577,7 @@ export function startOfWeek(date: Date) {
   return addDays(base, mondayOffset)
 }
 
-export function getMonthGridStart(date: Date) {
+function getMonthGridStart(date: Date) {
   return startOfWeek(new Date(date.getFullYear(), date.getMonth(), 1))
 }
 
@@ -708,6 +724,11 @@ export function getTaskStatusLabel(language: Language, status?: string | null) {
 export function getIssueStatusLabel(language: Language, status?: string | null) {
   const key = normalizeIssueStatus(status) as keyof (typeof translations)[Language]["issueStatus"]
   return translations[language].issueStatus[key] || status || "—"
+}
+
+export function getIssueSeverityLabel(language: Language, severity?: string | null) {
+  const key = normalizeIssueSeverity(severity) as keyof (typeof translations)[Language]["issueSeverity"]
+  return translations[language].issueSeverity[key] || (severity ? severity.toUpperCase() : "—")
 }
 
 export function getSupplyStateLabel(language: Language, state: SupplyState) {
@@ -1052,11 +1073,9 @@ export function buildIssueTooltip(
 ) {
   return issues
     .map((issue) => {
-      const severity = normalizeIssueSeverity(issue.severity)
-      const severityText = severity ? severity.toUpperCase() : "—"
       return [
         issue.title || translations[language].issues,
-        `${getIssueStatusLabel(language, issue.status)} • ${severityText}`,
+        `${getIssueStatusLabel(language, issue.status)} • ${getIssueSeverityLabel(language, issue.severity)}`,
         issue.description?.trim() || "—",
       ].join("\n")
     })

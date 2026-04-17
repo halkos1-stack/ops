@@ -49,6 +49,7 @@ export {
   getBookingDayKind,
   getBookingDayLabel,
   getIssueStatusLabel,
+  getIssueSeverityLabel,
   getIssuesTone,
   getLatestAssignment,
   getOccupancyTone,
