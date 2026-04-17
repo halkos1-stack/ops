@@ -129,6 +129,32 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    const verifiedProperty = await prisma.property.findFirst({
+      where: { id: propertyId, organizationId },
+      select: { id: true },
+    })
+
+    if (!verifiedProperty) {
+      return NextResponse.json(
+        { error: "Το ακίνητο δεν βρέθηκε ή δεν ανήκει στον οργανισμό." },
+        { status: 404 }
+      )
+    }
+
+    if (taskId) {
+      const verifiedTask = await prisma.task.findFirst({
+        where: { id: taskId, organizationId },
+        select: { id: true },
+      })
+
+      if (!verifiedTask) {
+        return NextResponse.json(
+          { error: "Η εργασία δεν βρέθηκε ή δεν ανήκει στον οργανισμό." },
+          { status: 404 }
+        )
+      }
+    }
+
     const normalizedStatus = status.toLowerCase()
     const resolvedAt =
       normalizedStatus === "resolved" || normalizedStatus === "closed"
