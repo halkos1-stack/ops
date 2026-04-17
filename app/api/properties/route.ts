@@ -468,6 +468,18 @@ function shapePropertyForOperationalViews(property: FullPropertyRow) {
         : undefined,
   })
 
+  // Canonical condition counters — από live readinessConditions, όχι stale DB
+  const activeConditions = readinessConditions.filter(
+    (c) => c.status !== "resolved" && c.status !== "dismissed"
+  )
+  const canonicalOpenConditionCount = activeConditions.length
+  const canonicalOpenBlockingConditionCount = activeConditions.filter(
+    (c) => c.blockingStatus === "blocking"
+  ).length
+  const canonicalOpenWarningConditionCount = activeConditions.filter(
+    (c) => c.blockingStatus === "warning"
+  ).length
+
   return {
     ...property,
     // Canonical tasks μόνο (φιλτραρισμένα)
@@ -477,6 +489,10 @@ function shapePropertyForOperationalViews(property: FullPropertyRow) {
     readinessStatus: readinessResult.status,
     readinessReasonsText: readinessResult.reasons.map((r) => r.message).join("\n"),
     readinessUpdatedAt: readinessResult.computedAt,
+    // Canonical condition counters — αντικαθιστά stale DB counters
+    openConditionCount: canonicalOpenConditionCount,
+    openBlockingConditionCount: canonicalOpenBlockingConditionCount,
+    openWarningConditionCount: canonicalOpenWarningConditionCount,
     // Operational status για σελίδες που το χρειάζονται
     operationalStatus: operationalStatusResult.operationalStatus,
     operationalStatusLabel: operationalStatusResult.label,
