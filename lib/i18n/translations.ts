@@ -2198,3 +2198,65 @@ export function getSupplyReplenishmentHistoryTexts(language: AppLanguage) {
     noValue: "—",
   }
 }
+
+export function getSuppliesHistoryPageTexts(language: AppLanguage) {
+  if (language === "en") {
+    return {
+      pageTitle: "Supplies management",
+      pageSubtitle:
+        "Complete replenishment history across all properties. Use the filters to narrow by date range or property.",
+      filterProperty: "Property",
+      filterAllProperties: "All properties",
+      filterFrom: "From",
+      filterTo: "To",
+      filterReset: "Reset",
+      loggedAt: "Date",
+      performedBy: "Performed by",
+      property: "Property",
+      supplyItem: "Supply",
+      stateBefore: "Before",
+      stateAfter: "After",
+      quantityBefore: "Qty before",
+      quantityAdded: "Qty added",
+      quantityAfter: "Qty after",
+      notes: "Notes",
+      adminManual: "Manual (admin)",
+      noLogs: "No replenishment records found for the selected filters.",
+      noLogsHint:
+        "Records are created automatically when a partner submits supplies or when an admin manually updates stock.",
+      stateLabels: { missing: "Missing", medium: "Medium", full: "Full" },
+      noValue: "—",
+      loading: "Loading...",
+      locale: "en-GB",
+    }
+  }
+
+  return {
+    pageTitle: "Διαχείριση αναλωσίμων",
+    pageSubtitle:
+      "Πλήρες ιστορικό συμπλήρωσης αναλωσίμων σε όλα τα ακίνητα. Χρησιμοποίησε τα φίλτρα για εύρος ημερομηνιών ή συγκεκριμένο ακίνητο.",
+    filterProperty: "Ακίνητο",
+    filterAllProperties: "Όλα τα ακίνητα",
+    filterFrom: "Από",
+    filterTo: "Έως",
+    filterReset: "Επαναφορά",
+    loggedAt: "Ημερομηνία",
+    performedBy: "Εκτελέστηκε από",
+    property: "Ακίνητο",
+    supplyItem: "Αναλώσιμο",
+    stateBefore: "Πριν",
+    stateAfter: "Μετά",
+    quantityBefore: "Ποσ. πριν",
+    quantityAdded: "Ποσ. προστέθηκε",
+    quantityAfter: "Ποσ. μετά",
+    notes: "Σημειώσεις",
+    adminManual: "Χειροκίνητη (διαχειριστής)",
+    noLogs: "Δεν βρέθηκαν εγγραφές συμπλήρωσης για τα επιλεγμένα φίλτρα.",
+    noLogsHint:
+      "Οι εγγραφές δημιουργούνται αυτόματα όταν ο συνεργάτης υποβάλλει αναλώσιμα ή όταν ο διαχειριστής χειροκίνητα ενημερώνει το απόθεμα.",
+    stateLabels: { missing: "Έλλειψη", medium: "Μέτρια", full: "Πλήρης" },
+    noValue: "—",
+    loading: "Φόρτωση...",
+    locale: "el-GR",
+  }
+}
