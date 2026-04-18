@@ -122,20 +122,20 @@ export async function computePropertyReadinessSnapshot(
     }),
   ])
 
-  const criticalSupplyBlockersCount =
-    canonicalTruth.readiness.counts.blockingConditions
+  const effectiveReadinessStatus = canonicalTruth.effectiveReadinessStatus
+  const blockingConditionsCount = canonicalTruth.snapshot.summary.blocking
 
   return {
     propertyId: input.propertyId,
     organizationId: input.organizationId,
-    readinessStatus: toSnapshotStatus(canonicalTruth.readiness.status),
+    readinessStatus: toSnapshotStatus(effectiveReadinessStatus),
     readinessUpdatedAt:
       canonicalTruth.updatedProperty.readinessUpdatedAt ?? now,
     openTasksCount,
     openIssuesCount,
     activeAlertsCount,
-    criticalSupplyBlockersCount,
-    totalBlockersCount: canonicalTruth.readiness.counts.blockingConditions,
+    criticalSupplyBlockersCount: blockingConditionsCount,
+    totalBlockersCount: blockingConditionsCount,
     nextCheckInAt: canonicalTruth.updatedProperty.nextCheckInAt ?? null,
     hasUpcomingCheckInWithin3Hours: isWithinNextThreeHours(
       canonicalTruth.updatedProperty.nextCheckInAt ?? null,
