@@ -183,6 +183,18 @@ function normalizeStoredReadinessStatus(value: unknown): "ready" | "borderline" 
   return "unknown"
 }
 
+function deriveRequiresChecklist(input: {
+  sendCleaningChecklist: boolean
+  sendSuppliesChecklist: boolean
+  sendIssuesChecklist: boolean
+}) {
+  return (
+    input.sendCleaningChecklist ||
+    input.sendSuppliesChecklist ||
+    input.sendIssuesChecklist
+  )
+}
+
 function sortChecklistRun(run: ChecklistRunRecord | null | undefined) {
   if (!run) return null
 
@@ -1486,10 +1498,6 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       data.requiresPhotos = toOptionalBoolean(body.requiresPhotos)
     }
 
-    if (hasOwn(body, "requiresChecklist")) {
-      data.requiresChecklist = toOptionalBoolean(body.requiresChecklist)
-    }
-
     if (hasOwn(body, "requiresApproval")) {
       data.requiresApproval = toOptionalBoolean(body.requiresApproval)
     }
@@ -1569,6 +1577,22 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       }
     }
 
+    const finalSendCleaningChecklist = data.sendCleaningChecklist !== undefined
+      ? Boolean(data.sendCleaningChecklist)
+      : existingTask.sendCleaningChecklist
+    const finalSendSuppliesChecklist = data.sendSuppliesChecklist !== undefined
+      ? Boolean(data.sendSuppliesChecklist)
+      : existingTask.sendSuppliesChecklist
+    const finalSendIssuesChecklist = data.sendIssuesChecklist !== undefined
+      ? Boolean(data.sendIssuesChecklist)
+      : existingTask.sendIssuesChecklist
+
+    data.requiresChecklist = deriveRequiresChecklist({
+      sendCleaningChecklist: finalSendCleaningChecklist,
+      sendSuppliesChecklist: finalSendSuppliesChecklist,
+      sendIssuesChecklist: finalSendIssuesChecklist,
+    })
+
     await prisma.task.update({
       where: {
         id: taskId,
@@ -1595,16 +1619,6 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
         },
       })
     }
-
-    const finalSendCleaningChecklist = data.sendCleaningChecklist !== undefined
-      ? Boolean(data.sendCleaningChecklist)
-      : existingTask.sendCleaningChecklist
-    const finalSendSuppliesChecklist = data.sendSuppliesChecklist !== undefined
-      ? Boolean(data.sendSuppliesChecklist)
-      : existingTask.sendSuppliesChecklist
-    const finalSendIssuesChecklist = data.sendIssuesChecklist !== undefined
-      ? Boolean(data.sendIssuesChecklist)
-      : existingTask.sendIssuesChecklist
 
     await syncTaskChecklistRun({
       taskId,
