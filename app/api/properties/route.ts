@@ -1,23 +1,17 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { requireApiAppAccess } from "@/lib/route-access"
-import { refreshPropertyReadinessSnapshot } from "@/lib/properties/readiness-snapshot"
+import { refreshPropertyReadiness } from "@/lib/readiness/refresh-property-readiness"
 import { buildCanonicalSupplySnapshot } from "@/lib/supplies/compute-supply-state"
 import {
   filterCanonicalOperationalTasks,
   getOperationalTaskValidity,
 } from "@/lib/tasks/ops-task-contract"
-import {
-  computePropertyReadiness,
-  type ReadinessConditionInput,
-} from "@/lib/readiness/compute-property-readiness"
 import { computePropertyOperationalStatus } from "@/lib/readiness/property-operational-status"
-
-// ─── Utility types ────────────────────────────────────────────────────────────
 
 type LooseRecord = Record<string, unknown>
 
-// ─── Utility functions ────────────────────────────────────────────────────────
+type CanonicalReadinessStatus = "ready" | "borderline" | "not_ready" | "unknown"
 
 function safeArray<T>(value: T[] | null | undefined): T[] {
   return Array.isArray(value) ? value : []
@@ -74,6 +68,30 @@ function buildOrganizationPrefix(name: string) {
   return cleaned.padEnd(3, "X")
 }
 
+function mapStoredReadinessStatus(value: unknown): CanonicalReadinessStatus {
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase()
+
+  if (normalized === "ready") return "ready"
+  if (normalized === "borderline") return "borderline"
+  if (normalized === "not_ready") return "not_ready"
+  if (normalized === "unknown") return "unknown"
+
+  if (normalized === "ready") return "ready"
+  if (normalized === "borderline") return "borderline"
+  if (normalized === "not_ready") return "not_ready"
+  if (normalized === "unknown") return "unknown"
+
+  const upper = String(value ?? "").trim().toUpperCase()
+  if (upper === "READY") return "ready"
+  if (upper === "BORDERLINE") return "borderline"
+  if (upper === "NOT_READY") return "not_ready"
+  if (upper === "UNKNOWN") return "unknown"
+
+  return "unknown"
+}
+
 async function generateNextPropertyCode(
   organizationId: string,
   organizationName: string
@@ -111,8 +129,6 @@ async function generateNextPropertyCode(
   return `${prefix}${String(nextNumber).padStart(4, "0")}`
 }
 
-// ─── Prisma query helpers ─────────────────────────────────────────────────────
-
 async function getFullPropertyList(where: Record<string, unknown>) {
   return prisma.property.findMany({
     where,
@@ -131,7 +147,6 @@ async function getFullPropertyList(where: Record<string, unknown>) {
           status: true,
         },
       },
-
       bookings: {
         select: {
           id: true,
@@ -147,7 +162,6 @@ async function getFullPropertyList(where: Record<string, unknown>) {
         },
         take: 10,
       },
-
       tasks: {
         select: {
           id: true,
@@ -208,7 +222,6 @@ async function getFullPropertyList(where: Record<string, unknown>) {
         },
         take: 20,
       },
-
       issues: {
         select: {
           id: true,
@@ -227,7 +240,6 @@ async function getFullPropertyList(where: Record<string, unknown>) {
         },
         take: 20,
       },
-
       propertySupplies: {
         select: {
           id: true,
@@ -265,7 +277,6 @@ async function getFullPropertyList(where: Record<string, unknown>) {
         },
         take: 50,
       },
-
       conditions: {
         select: {
           id: true,
@@ -289,63 +300,9 @@ async function getFullPropertyList(where: Record<string, unknown>) {
 
 type FullPropertyRow = Awaited<ReturnType<typeof getFullPropertyList>>[number]
 
-// ─── Condition mapper ─────────────────────────────────────────────────────────
-
-function mapConditionToReadinessInput(
-  condition: FullPropertyRow["conditions"][number]
-): ReadinessConditionInput {
-  return {
-    id: condition.id,
-    propertyId: condition.propertyId,
-    conditionType: String(condition.conditionType).toLowerCase() as
-      | "supply"
-      | "issue"
-      | "damage",
-    status: String(condition.status).toLowerCase() as
-      | "open"
-      | "monitoring"
-      | "resolved"
-      | "dismissed",
-    blockingStatus: String(condition.blockingStatus).toLowerCase() as
-      | "blocking"
-      | "non_blocking"
-      | "warning",
-    severity: String(condition.severity).toLowerCase() as
-      | "low"
-      | "medium"
-      | "high"
-      | "critical",
-    managerDecision: condition.managerDecision
-      ? (String(condition.managerDecision).toLowerCase() as
-          | "allow_with_issue"
-          | "block_until_resolved"
-          | "monitor"
-          | "resolved"
-          | "dismissed")
-      : null,
-    title: condition.title ?? null,
-  }
-}
-
-// ─── Property shaping ─────────────────────────────────────────────────────────
-
-/**
- * Μετατρέπει raw Prisma property σε operational view.
- *
- * Κανονική σειρά εκτέλεσης:
- * 1. Supply canonical state
- * 2. Καθαρό conditions-based readiness
- * 3. Operational status με conditions fallback
- * 4. Live readiness με operational override
- *
- * Τα live πεδία αντικαθιστούν τις stale DB τιμές στο response.
- */
 function shapePropertyForOperationalViews(property: FullPropertyRow) {
-  const now = new Date()
-
   const allTasks = (Array.isArray(property?.tasks) ? property.tasks : []) as LooseRecord[]
 
-  // ─── Supply canonical state ───────────────────────────────────────────────
   const propertySupplies = (Array.isArray(property?.propertySupplies) ? property.propertySupplies : []).map((supply) => {
     const s = supply as LooseRecord & {
       isActive?: boolean | null
@@ -391,7 +348,9 @@ function shapePropertyForOperationalViews(property: FullPropertyRow) {
   })
 
   const invalidOperationalTaskCount = allTasks.filter(
-    (task) => getOperationalTaskValidity(task as { source?: unknown; bookingId?: unknown }).isCanonicalOperational !== true
+    (task) =>
+      getOperationalTaskValidity(task as { source?: unknown; bookingId?: unknown })
+        .isCanonicalOperational !== true
   ).length
 
   type RawTaskRow = LooseRecord & {
@@ -401,18 +360,10 @@ function shapePropertyForOperationalViews(property: FullPropertyRow) {
   }
   const canonicalTasks = filterCanonicalOperationalTasks(allTasks as RawTaskRow[])
 
-  const readinessConditions: ReadinessConditionInput[] = safeArray(
-    property.conditions
-  ).map(mapConditionToReadinessInput)
-
-  const conditionsReadiness = computePropertyReadiness({
-    now,
-    nextCheckInAt: property.nextCheckInAt ?? null,
-    conditions: readinessConditions,
-  })
+  const storedReadinessStatus = mapStoredReadinessStatus(property.readinessStatus)
 
   const operationalStatusResult = computePropertyOperationalStatus({
-    readinessStatus: conditionsReadiness.status,
+    readinessStatus: storedReadinessStatus,
     bookings: safeArray(property.bookings).map((b) => ({
       id: b.id,
       status: b.status ?? null,
@@ -455,49 +406,24 @@ function shapePropertyForOperationalViews(property: FullPropertyRow) {
     }),
   })
 
-  const readinessResult = computePropertyReadiness({
-    now,
-    nextCheckInAt: property.nextCheckInAt ?? null,
-    conditions: readinessConditions,
-    operationalContext:
-      operationalStatusResult.derivedReadinessStatus !== "unknown"
-        ? {
-            derivedReadinessStatus: operationalStatusResult.derivedReadinessStatus,
-            operationalReason: operationalStatusResult.reason.en,
-          }
-        : undefined,
-  })
-
-  const activeConditions = readinessConditions.filter(
-    (c) => c.status !== "resolved" && c.status !== "dismissed"
-  )
-  const canonicalOpenConditionCount = activeConditions.length
-  const canonicalOpenBlockingConditionCount = activeConditions.filter(
-    (c) => c.blockingStatus === "blocking"
-  ).length
-  const canonicalOpenWarningConditionCount = activeConditions.filter(
-    (c) => c.blockingStatus === "warning"
-  ).length
-
   return {
     ...property,
     tasks: canonicalTasks,
     propertySupplies,
-    readinessStatus: readinessResult.status,
-    readinessReasonsText: readinessResult.reasons.map((r) => r.message).join("\n"),
-    readinessUpdatedAt: readinessResult.computedAt,
-    openConditionCount: canonicalOpenConditionCount,
-    openBlockingConditionCount: canonicalOpenBlockingConditionCount,
-    openWarningConditionCount: canonicalOpenWarningConditionCount,
+    readinessStatus: storedReadinessStatus,
+    readinessReasonsText: property.readinessReasonsText ?? "",
+    readinessUpdatedAt: property.readinessUpdatedAt,
+    openConditionCount: property.openConditionCount ?? 0,
+    openBlockingConditionCount: property.openBlockingConditionCount ?? 0,
+    openWarningConditionCount: property.openWarningConditionCount ?? 0,
     operationalStatus: operationalStatusResult.operationalStatus,
     operationalStatusLabel: operationalStatusResult.label,
+    nextCheckInAt: property.nextCheckInAt ?? null,
     auditSummary: {
       invalidOperationalTaskCount,
     },
   }
 }
-
-// ─── Request helpers ──────────────────────────────────────────────────────────
 
 function isBasePropertyListRequest(input: {
   status: string | null
@@ -512,8 +438,6 @@ function isBasePropertyListRequest(input: {
     !String(input.search || "").trim()
   )
 }
-
-// ─── Route handlers ───────────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
   try {
@@ -756,10 +680,7 @@ export async function POST(req: NextRequest) {
       },
     })
 
-    await refreshPropertyReadinessSnapshot({
-      propertyId: created.id,
-      organizationId,
-    })
+    await refreshPropertyReadiness(created.id)
 
     const property = await prisma.property.findUnique({
       where: {
@@ -777,7 +698,6 @@ export async function POST(req: NextRequest) {
             status: true,
           },
         },
-
         bookings: {
           select: {
             id: true,
@@ -793,7 +713,6 @@ export async function POST(req: NextRequest) {
           },
           take: 10,
         },
-
         tasks: {
           select: {
             id: true,
@@ -854,7 +773,6 @@ export async function POST(req: NextRequest) {
           },
           take: 20,
         },
-
         issues: {
           select: {
             id: true,
@@ -873,7 +791,6 @@ export async function POST(req: NextRequest) {
           },
           take: 20,
         },
-
         propertySupplies: {
           select: {
             id: true,
@@ -911,7 +828,6 @@ export async function POST(req: NextRequest) {
           },
           take: 50,
         },
-
         conditions: {
           select: {
             id: true,
@@ -929,7 +845,6 @@ export async function POST(req: NextRequest) {
           },
           take: 50,
         },
-
         issueTemplates: {
           include: {
             items: {
