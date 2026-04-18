@@ -43,18 +43,8 @@ export type PropertyOperationalStatus =
   | "not_ready"
   | "unknown"
 
-/**
- * Ετοιμότητα ως canonical output της επιχειρησιακής κατάστασης.
- * Turnover pending → πάντα "not_ready".
- * Occupied + conditions ready → "ready".
- * Conditions → αντίστοιχα.
- */
 export type DerivedReadinessStatus = "ready" | "borderline" | "not_ready" | "unknown"
 
-/**
- * Η επόμενη πλησιέστερη άφιξη — το μοναδικό booking για το οποίο παράγεται
- * readiness verdict. Όλα τα επόμενα bookings είναι planning targets.
- */
 export type ActiveReadinessTarget = {
   bookingId: string
   checkInDate: Date
@@ -62,10 +52,6 @@ export type ActiveReadinessTarget = {
   guestName: string | null
 }
 
-/**
- * Μελλοντικές αφίξεις μετά το active readiness target.
- * Λαμβάνουν planning state μόνο — δεν παράγεται readiness verdict γι' αυτές.
- */
 export type PlanningTarget = {
   bookingId: string
   checkInDate: Date
@@ -78,6 +64,8 @@ export type OperationalStatusBooking = {
   status: string | null
   checkInDate: string | Date | null
   checkOutDate: string | Date | null
+  checkInTime?: string | null
+  checkOutTime?: string | null
   guestName?: string | null
 }
 
@@ -102,7 +90,6 @@ export type OperationalStatusTask = {
 
 export type PropertyOperationalStatusInput = {
   now?: Date
-  /** Τρέχον readiness status από canonical conditions */
   readinessStatus: string | null | undefined
   bookings: OperationalStatusBooking[]
   tasks: OperationalStatusTask[]
@@ -123,13 +110,7 @@ export type PropertyOperationalStatusResult = {
   operationalStatus: PropertyOperationalStatus
   label: { el: string; en: string }
   reason: { el: string; en: string }
-  /** Hover/tooltip: πλήρης εξήγηση για το UI */
   explanation: { el: string; en: string }
-  /**
-   * Canonical readiness output — ενοποιεί operational context + conditions.
-   * Χρησιμοποιείται στο API route για να παράγει το readinessSummary.status.
-   * ΚΑΝΟΝΑΣ: turnover pending → πάντα "not_ready", ανεξάρτητα conditions.
-   */
   derivedReadinessStatus: DerivedReadinessStatus
   alertActive: boolean
   alertTask: {
@@ -143,28 +124,16 @@ export type PropertyOperationalStatusResult = {
     checkInDate: Date
     checkOutDate: Date
   } | null
-  /** Η εργασία που οδηγεί την τρέχουσα κατάσταση (για turnover window states) */
   relevantTask: OperationalRelevantTask | null
-  /** Backward compat alias — ίδιο με relevantTask όταν είναι καθαριστική */
   pendingCleaningTask: {
     id: string
     title: string
     status: string
     scheduledDate: Date | null
   } | null
-  /**
-   * Η επόμενη πλησιέστερη άφιξη — για αυτή αξιολογείται το readiness verdict.
-   * null αν δεν υπάρχει μελλοντική κράτηση.
-   */
   activeTarget: ActiveReadinessTarget | null
-  /**
-   * Μελλοντικές αφίξεις μετά το activeTarget — planning state μόνο.
-   * Δεν παράγεται readiness verdict γι' αυτές.
-   */
   planningTargets: PlanningTarget[]
 }
-
-// ─── Internal helpers ────────────────────────────────────────────────────────
 
 function toDateOrNull(value: string | Date | null | undefined): Date | null {
   if (!value) return null
@@ -173,16 +142,39 @@ function toDateOrNull(value: string | Date | null | undefined): Date | null {
   return Number.isNaN(parsed.getTime()) ? null : parsed
 }
 
+function withTimeOrDefault(
+  dateValue: string | Date | null | undefined,
+  timeValue: string | null | undefined,
+  fallbackHour: number,
+  fallbackMinute: number
+): Date | null {
+  const date = toDateOrNull(dateValue)
+  if (!date) return null
+
+  const next = new Date(date)
+  if (timeValue && /^\d{2}:\d{2}$/.test(timeValue)) {
+    const [hours, minutes] = timeValue.split(":").map(Number)
+    next.setHours(hours, minutes, 0, 0)
+    return next
+  }
+
+  next.setHours(fallbackHour, fallbackMinute, 0, 0)
+  return next
+}
+
+function getBookingCheckInAt(booking: OperationalStatusBooking): Date | null {
+  return withTimeOrDefault(booking.checkInDate, booking.checkInTime ?? null, 15, 0)
+}
+
+function getBookingCheckOutAt(booking: OperationalStatusBooking): Date | null {
+  return withTimeOrDefault(booking.checkOutDate, booking.checkOutTime ?? null, 11, 0)
+}
+
 function isActiveBookingStatus(status: string | null | undefined): boolean {
   const s = String(status ?? "").trim().toLowerCase()
   return s !== "cancelled" && s !== "canceled"
 }
 
-/**
- * Επιστρέφει true αν το task status αντιστοιχεί σε "κλειστή" εργασία.
- * Συμπεριλαμβάνει: completed, cancelled, canceled, not_executed, missed.
- * Ευθυγραμμισμένο με property-calendar.ts isTaskClosed().
- */
 function isCompletedOrCancelledTaskStatus(status: string): boolean {
   const s = String(status ?? "").trim().toLowerCase()
   return (
@@ -225,18 +217,14 @@ function isCleaningOrTurnoverTask(task: OperationalStatusTask): boolean {
   return type === "cleaning" || task.sendCleaningChecklist === true
 }
 
-/**
- * Επιστρέφει true αν η εργασία είναι προγραμματισμένη εντός ενεργής διαμονής.
- * In-stay tasks εξαιρούνται από την αξιολόγηση turnover window readiness.
- */
 function isInStayTask(
   task: OperationalStatusTask,
   stayBooking: OperationalStatusBooking
 ): boolean {
   const scheduledDate = toDateOrNull(task.scheduledDate)
   if (!scheduledDate) return false
-  const checkIn = toDateOrNull(stayBooking.checkInDate)
-  const checkOut = toDateOrNull(stayBooking.checkOutDate)
+  const checkIn = getBookingCheckInAt(stayBooking)
+  const checkOut = getBookingCheckOutAt(stayBooking)
   if (!checkIn || !checkOut) return false
   return scheduledDate >= checkIn && scheduledDate < checkOut
 }
@@ -251,16 +239,6 @@ function normalizeReadinessToConditionsStatus(
   return "unknown"
 }
 
-/**
- * Canonical derivation: παράγει DerivedReadinessStatus από operational context.
- *
- * ΚΑΝΟΝΑΣ:
- * - Turnover pending (no_task_coverage / task_unaccepted / task_in_progress / awaiting_proof)
- *   → "not_ready" ανεξάρτητα conditions.
- *   Αιτιολόγηση: η απόδειξη ετοιμότητας δεν έχει επιστραφεί ακόμα.
- * - occupied → conditions-based (property ετοιμάστηκε πριν check-in, conditions είναι η αλήθεια)
- * - ready / borderline / not_ready / unknown → απευθείας από conditions fallback
- */
 function deriveReadinessStatus(
   operationalStatus: PropertyOperationalStatus,
   inputReadinessStatus: string | null | undefined
@@ -274,13 +252,17 @@ function deriveReadinessStatus(
     return "not_ready"
   }
 
-  // occupied / ready / borderline / not_ready / unknown → conditions-based
-  return normalizeReadinessToConditionsStatus(inputReadinessStatus !== null && inputReadinessStatus !== undefined
-    ? inputReadinessStatus
-    : operationalStatus === "ready" ? "ready"
-    : operationalStatus === "borderline" ? "borderline"
-    : operationalStatus === "not_ready" ? "not_ready"
-    : "unknown")
+  return normalizeReadinessToConditionsStatus(
+    inputReadinessStatus !== null && inputReadinessStatus !== undefined
+      ? inputReadinessStatus
+      : operationalStatus === "ready"
+        ? "ready"
+        : operationalStatus === "borderline"
+          ? "borderline"
+          : operationalStatus === "not_ready"
+            ? "not_ready"
+            : "unknown"
+  )
 }
 
 function toRelevantTask(task: OperationalStatusTask): OperationalRelevantTask {
@@ -296,10 +278,6 @@ function toRelevantTask(task: OperationalStatusTask): OperationalRelevantTask {
   }
 }
 
-/**
- * Εντοπίζει το active readiness target: η πλησιέστερη μελλοντική κράτηση.
- * Μόνο το turnover window πριν από αυτή αξιολογείται για readiness verdict.
- */
 function findFutureBookingsSorted(
   bookings: OperationalStatusBooking[],
   now: Date
@@ -307,18 +285,63 @@ function findFutureBookingsSorted(
   return bookings
     .filter((b) => {
       if (!isActiveBookingStatus(b.status)) return false
-      const checkIn = toDateOrNull(b.checkInDate)
+      const checkIn = getBookingCheckInAt(b)
       if (!checkIn) return false
       return checkIn > now
     })
     .sort((a, b) => {
-      const aDate = toDateOrNull(a.checkInDate)!
-      const bDate = toDateOrNull(b.checkInDate)!
+      const aDate = getBookingCheckInAt(a)!
+      const bDate = getBookingCheckInAt(b)!
       return aDate.getTime() - bDate.getTime()
     })
 }
 
-// ─── Labels ──────────────────────────────────────────────────────────────────
+function findRecentCheckoutForActiveTarget(
+  bookings: OperationalStatusBooking[],
+  activeTargetRaw: OperationalStatusBooking | null,
+  now: Date
+): OperationalStatusBooking | null {
+  const threeDaysMs = 3 * 24 * 60 * 60 * 1000
+
+  if (activeTargetRaw) {
+    const activeTargetCheckIn = getBookingCheckInAt(activeTargetRaw)
+    if (!activeTargetCheckIn) return null
+
+    const priorCheckouts = bookings
+      .filter((booking) => {
+        if (!isActiveBookingStatus(booking.status)) return false
+        if (booking.id === activeTargetRaw.id) return false
+        const checkOut = getBookingCheckOutAt(booking)
+        if (!checkOut) return false
+        if (checkOut > now) return false
+        if (checkOut >= activeTargetCheckIn) return false
+        return activeTargetCheckIn.getTime() - checkOut.getTime() <= threeDaysMs
+      })
+      .sort((a, b) => {
+        const aCheckOut = getBookingCheckOutAt(a)!
+        const bCheckOut = getBookingCheckOutAt(b)!
+        return bCheckOut.getTime() - aCheckOut.getTime()
+      })
+
+    return priorCheckouts[0] ?? null
+  }
+
+  const threeDaysAgo = new Date(now.getTime() - threeDaysMs)
+  const recentCheckouts = bookings
+    .filter((booking) => {
+      if (!isActiveBookingStatus(booking.status)) return false
+      const checkOut = getBookingCheckOutAt(booking)
+      if (!checkOut) return false
+      return checkOut <= now && checkOut >= threeDaysAgo
+    })
+    .sort((a, b) => {
+      const aCheckOut = getBookingCheckOutAt(a)!
+      const bCheckOut = getBookingCheckOutAt(b)!
+      return bCheckOut.getTime() - aCheckOut.getTime()
+    })
+
+  return recentCheckouts[0] ?? null
+}
 
 const LABELS: Record<PropertyOperationalStatus, { el: string; en: string }> = {
   occupied: { el: "Έχει φιλοξενούμενους", en: "Occupied" },
@@ -331,8 +354,6 @@ const LABELS: Record<PropertyOperationalStatus, { el: string; en: string }> = {
   not_ready: { el: "Μη έτοιμο", en: "Not ready" },
   unknown: { el: "Άγνωστη κατάσταση", en: "Unknown status" },
 }
-
-// ─── Short reasons (για header / badge subtitle) ─────────────────────────────
 
 const REASONS: Record<PropertyOperationalStatus, { el: string; en: string }> = {
   occupied: {
@@ -373,8 +394,6 @@ const REASONS: Record<PropertyOperationalStatus, { el: string; en: string }> = {
   },
 }
 
-// ─── Full tooltip explanations (Τι; Γιατί; Τι πρέπει να γίνει;) ──────────────
-
 const EXPLANATIONS: Record<PropertyOperationalStatus, { el: string; en: string }> = {
   occupied: {
     el: "Το ακίνητο βρίσκεται σε φάση ενεργής διαμονής. Το επιχειρησιακό παράθυρο προετοιμασίας για τον επόμενο επισκέπτη ξεκινά μετά την αναχώρηση. Η ετοιμότητα αξιολογείται στο επόμενο turnover.",
@@ -414,8 +433,6 @@ const EXPLANATIONS: Record<PropertyOperationalStatus, { el: string; en: string }
   },
 }
 
-// ─── Alert finder ─────────────────────────────────────────────────────────────
-
 function findAlertTask(
   tasks: OperationalStatusTask[],
   now: Date
@@ -433,8 +450,6 @@ function findAlertTask(
   return { id: alerting.id, title: alerting.title, alertAt }
 }
 
-// ─── Main function ─────────────────────────────────────────────────────────────
-
 export function computePropertyOperationalStatus(
   input: PropertyOperationalStatusInput
 ): PropertyOperationalStatusResult {
@@ -442,39 +457,35 @@ export function computePropertyOperationalStatus(
   const bookings = Array.isArray(input.bookings) ? input.bookings : []
   const tasks = Array.isArray(input.tasks) ? input.tasks : []
 
-  // ─── Active readiness target + planning targets ───────────────────────────
-  // Active target = η πλησιέστερη μελλοντική άφιξη (μόνο αυτή παράγει readiness verdict).
-  // Planning targets = όλες οι επόμενες αφίξεις (planning state μόνο).
   const futureBookings = findFutureBookingsSorted(bookings, now)
   const activeTargetRaw = futureBookings[0] ?? null
   const activeTarget: ActiveReadinessTarget | null = activeTargetRaw
     ? {
         bookingId: activeTargetRaw.id,
-        checkInDate: toDateOrNull(activeTargetRaw.checkInDate)!,
-        checkOutDate: toDateOrNull(activeTargetRaw.checkOutDate),
+        checkInDate: getBookingCheckInAt(activeTargetRaw)!,
+        checkOutDate: getBookingCheckOutAt(activeTargetRaw),
         guestName: activeTargetRaw.guestName ?? null,
       }
     : null
 
   const planningTargets: PlanningTarget[] = futureBookings.slice(1).map((b) => ({
     bookingId: b.id,
-    checkInDate: toDateOrNull(b.checkInDate)!,
-    checkOutDate: toDateOrNull(b.checkOutDate),
+    checkInDate: getBookingCheckInAt(b)!,
+    checkOutDate: getBookingCheckOutAt(b),
     guestName: b.guestName ?? null,
   }))
 
-  // ─── 1. OCCUPIED: ενεργή διαμονή τώρα ────────────────────────────────────
   const occupiedBooking = bookings.find((booking) => {
     if (!isActiveBookingStatus(booking.status)) return false
-    const checkIn = toDateOrNull(booking.checkInDate)
-    const checkOut = toDateOrNull(booking.checkOutDate)
+    const checkIn = getBookingCheckInAt(booking)
+    const checkOut = getBookingCheckOutAt(booking)
     if (!checkIn || !checkOut) return false
     return now >= checkIn && now < checkOut
   })
 
   if (occupiedBooking) {
-    const checkIn = toDateOrNull(occupiedBooking.checkInDate)!
-    const checkOut = toDateOrNull(occupiedBooking.checkOutDate)!
+    const checkIn = getBookingCheckInAt(occupiedBooking)!
+    const checkOut = getBookingCheckOutAt(occupiedBooking)!
     const alertTask = findAlertTask(tasks, now)
 
     return {
@@ -498,42 +509,22 @@ export function computePropertyOperationalStatus(
     }
   }
 
-  // ─── 2. TURNOVER WINDOW: πρόσφατο checkout (≤ 3 ημέρες) ─────────────────
-  // ΚΑΝΟΝΑΣ: αξιολογείται μόνο για το active readiness target.
-  // Εάν δεν υπάρχει active target (δεν υπάρχει μελλοντική κράτηση), το turnover
-  // window αξιολογείται κανονικά για το general readiness state του ακινήτου.
-  const threeDaysAgo = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000)
-
-  const recentCheckout = bookings.find((booking) => {
-    if (!isActiveBookingStatus(booking.status)) return false
-    const checkOut = toDateOrNull(booking.checkOutDate)
-    if (!checkOut) return false
-    return checkOut <= now && checkOut >= threeDaysAgo
-  })
+  const recentCheckout = findRecentCheckoutForActiveTarget(bookings, activeTargetRaw, now)
 
   if (recentCheckout) {
-    // Βρίσκουμε την πιο σχετική εργασία για το τρέχον turnover.
-    // Εξαιρούμε:
-    //   - Κλειστές εργασίες (completed / cancelled / not_executed / missed)
-    //   - Μη-καθαριστικές εργασίες
-    //   - Εργασίες συνδεδεμένες με άλλη κράτηση
-    //   - Εργασίες προγραμματισμένες πριν το checkout (pre-stay / in-stay tasks)
     const relevantTaskRaw = tasks.find((task) => {
       if (isCompletedOrCancelledTaskStatus(task.status)) return false
       if (!isCleaningOrTurnoverTask(task)) return false
       if (task.bookingId && task.bookingId !== recentCheckout.id) return false
-      // Εξαίρεση in-stay tasks: εργασίες προγραμματισμένες εντός της διαμονής
-      // που μόλις τελείωσε δεν αφορούν το turnover window
       if (isInStayTask(task, recentCheckout)) return false
       const scheduledDate = toDateOrNull(task.scheduledDate)
-      const checkOut = toDateOrNull(recentCheckout.checkOutDate)
+      const checkOut = getBookingCheckOutAt(recentCheckout)
       if (scheduledDate && checkOut && scheduledDate < checkOut) return false
       return true
     })
 
     const alertTask = findAlertTask(tasks, now)
 
-    // 2a. Δεν υπάρχει εργασία → no_task_coverage
     if (!relevantTaskRaw) {
       return {
         operationalStatus: "no_task_coverage",
@@ -553,7 +544,6 @@ export function computePropertyOperationalStatus(
 
     const relevant = toRelevantTask(relevantTaskRaw)
 
-    // 2b. Εργασία υπάρχει αλλά δεν έχει αποδεχτεί ο συνεργάτης → task_unaccepted
     if (isUnacceptedTaskStatus(relevantTaskRaw.status)) {
       return {
         operationalStatus: "task_unaccepted",
@@ -576,9 +566,7 @@ export function computePropertyOperationalStatus(
       }
     }
 
-    // 2c. Εργασία αποδεκτή / in_progress
     if (isAcceptedTaskStatus(relevantTaskRaw.status)) {
-      // Εκκρεμούν απαιτούμενες λίστες → awaiting_proof
       if (hasAnyListRequired(relevantTaskRaw) && !hasAllRequiredListsSubmitted(relevantTaskRaw)) {
         return {
           operationalStatus: "awaiting_proof",
@@ -601,7 +589,6 @@ export function computePropertyOperationalStatus(
         }
       }
 
-      // Δεν απαιτούνται λίστες ή έχουν υποβληθεί → task_in_progress
       return {
         operationalStatus: "task_in_progress",
         label: LABELS.task_in_progress,
@@ -622,22 +609,18 @@ export function computePropertyOperationalStatus(
         planningTargets,
       }
     }
-
-    // 2d. Εργασία ολοκληρώθηκε / missed / not_executed → fall through to conditions
-    // (οι conditions δημιουργήθηκαν από τις λίστες, αυτές καθορίζουν το τελικό status)
   }
 
-  // ─── 3. Alert check (overlay) ────────────────────────────────────────────
   const alertTask = findAlertTask(tasks, now)
-
-  // ─── 4. FALLBACK: readiness από conditions ───────────────────────────────
   const conditionsStatus = normalizeReadinessToConditionsStatus(input.readinessStatus)
-  // Map conditions status to operational status enum values
   const operationalStatus: PropertyOperationalStatus =
-    conditionsStatus === "ready" ? "ready"
-    : conditionsStatus === "borderline" ? "borderline"
-    : conditionsStatus === "not_ready" ? "not_ready"
-    : "unknown"
+    conditionsStatus === "ready"
+      ? "ready"
+      : conditionsStatus === "borderline"
+        ? "borderline"
+        : conditionsStatus === "not_ready"
+          ? "not_ready"
+          : "unknown"
 
   return {
     operationalStatus,
@@ -655,11 +638,6 @@ export function computePropertyOperationalStatus(
   }
 }
 
-// ─── UI helpers ───────────────────────────────────────────────────────────────
-
-/**
- * Επιστρέφει Tailwind CSS classes για το operational status badge.
- */
 export function getOperationalStatusTone(status: PropertyOperationalStatus): string {
   switch (status) {
     case "occupied":
@@ -684,9 +662,6 @@ export function getOperationalStatusTone(status: PropertyOperationalStatus): str
   }
 }
 
-/**
- * Normalizes a raw string value from the API into a canonical PropertyOperationalStatus.
- */
 export function normalizeOperationalStatus(value: unknown): PropertyOperationalStatus {
   const s = String(value ?? "").trim().toLowerCase()
   if (s === "occupied") return "occupied"
@@ -697,16 +672,10 @@ export function normalizeOperationalStatus(value: unknown): PropertyOperationalS
   if (s === "ready") return "ready"
   if (s === "borderline" || s === "needs_attention") return "borderline"
   if (s === "not_ready") return "not_ready"
-  // Backward compat: παλιά τιμή
   if (s === "waiting_cleaning") return "task_unaccepted"
   return "unknown"
 }
 
-/**
- * Επιστρέφει αν η κατάσταση υποδηλώνει ότι η εκτέλεση είναι εκκρεμής
- * (δηλ. turnover window ενεργό και εκτέλεση δεν έχει αποδειχθεί).
- * Σε αυτές τις καταστάσεις: derivedReadinessStatus = "not_ready" πάντα.
- */
 export function isOperationallyPending(status: PropertyOperationalStatus): boolean {
   return ["no_task_coverage", "task_unaccepted", "task_in_progress", "awaiting_proof"].includes(
     status
