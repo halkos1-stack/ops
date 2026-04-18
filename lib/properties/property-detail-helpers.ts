@@ -295,6 +295,9 @@ export const translations = {
       "Ενημέρωση βασικών στοιχείων ακινήτου χωρίς έξοδο από τη σελίδα.",
     editPartnerHint:
       "Ορισμός ή αλλαγή προεπιλεγμένου συνεργάτη για το ακίνητο.",
+    suppliesHistory: "Ιστορικό αναλωσίμων",
+    suppliesHistoryHint:
+      "Προβολή του πλήρους ιστορικού συμπλήρωσης αναλωσίμων για το συγκεκριμένο ακίνητο.",
     managementTitle: "Κεντρική διαχείριση ακινήτου",
     managementSubtitle:
       "Οι βασικές ενέργειες παραμένουν συγκεντρωμένες εδώ, ενώ η επιχειρησιακή εικόνα δίνεται στο ημερολόγιο.",
@@ -429,6 +432,9 @@ export const translations = {
     editListsHint: "Open the property lists used in the readiness flow.",
     editPropertyHint: "Update core property fields without leaving this page.",
     editPartnerHint: "Set or change the default partner for this property.",
+    suppliesHistory: "Supplies history",
+    suppliesHistoryHint:
+      "View the full replenishment history for this property.",
     managementTitle: "Property management center",
     managementSubtitle:
       "Core actions stay here, while the operational picture is shown in the calendar.",

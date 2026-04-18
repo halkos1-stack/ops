@@ -2202,7 +2202,7 @@ export function getSupplyReplenishmentHistoryTexts(language: AppLanguage) {
 export function getSuppliesHistoryPageTexts(language: AppLanguage) {
   if (language === "en") {
     return {
-      pageTitle: "Supplies management",
+      pageTitle: "Supplies history",
       pageSubtitle:
         "Complete replenishment history across all properties. Use the filters to narrow by date range or property.",
       filterProperty: "Property",
@@ -2232,7 +2232,7 @@ export function getSuppliesHistoryPageTexts(language: AppLanguage) {
   }
 
   return {
-    pageTitle: "Διαχείριση αναλωσίμων",
+    pageTitle: "Ιστορικό αναλωσίμων",
     pageSubtitle:
       "Πλήρες ιστορικό συμπλήρωσης αναλωσίμων σε όλα τα ακίνητα. Χρησιμοποίησε τα φίλτρα για εύρος ημερομηνιών ή συγκεκριμένο ακίνητο.",
     filterProperty: "Ακίνητο",

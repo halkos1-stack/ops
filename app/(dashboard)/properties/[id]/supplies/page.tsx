@@ -276,6 +276,7 @@ function getTexts(language: Language) {
       quantityBased: "Count based",
       directStateBased: "Direct state",
       historyFilterAll: "All supplies",
+      viewHistory: "Supplies history",
     }
   }
 
@@ -350,6 +351,7 @@ function getTexts(language: Language) {
     quantityBased: "Με καταμέτρηση",
     directStateBased: "Με άμεση κατάσταση",
     historyFilterAll: "Όλα τα αναλώσιμα",
+    viewHistory: "Ιστορικό αναλωσίμων",
   }
 }
 
@@ -1064,6 +1066,12 @@ export default function PropertySuppliesPage() {
             </div>
 
             <div className="flex shrink-0 flex-wrap gap-2">
+              <Link
+                href={`/supplies?propertyId=${propertyId}`}
+                className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                {t.viewHistory}
+              </Link>
               <button
                 type="button"
                 onClick={() => setPopupOpen(true)}

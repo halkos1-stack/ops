@@ -987,6 +987,18 @@ export default function PropertyDetailPage() {
                   </button>
                 }
               />
+              <ManagementCard
+                title={t.suppliesHistory}
+                hint={t.suppliesHistoryHint}
+                action={
+                  <Link
+                    href={`/supplies?propertyId=${property.id}`}
+                    className="inline-flex rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    {t.suppliesHistory}
+                  </Link>
+                }
+              />
             </div>
           </section>
         ) : (
