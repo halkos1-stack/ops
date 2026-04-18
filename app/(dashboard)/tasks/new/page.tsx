@@ -39,9 +39,21 @@ type ChecklistTemplate = {
   items?: Array<{ id: string }>
 }
 
+type IssueTemplate = {
+  id: string
+  title: string
+  isPrimary: boolean
+  isActive: boolean
+  items?: Array<{ id: string }>
+}
+
 type ChecklistResponse = {
   templates?: ChecklistTemplate[]
   primaryTemplate?: ChecklistTemplate | null
+}
+
+type IssueTemplateResponse = {
+  template?: IssueTemplate | null
 }
 
 type PropertySuppliesResponse = {
@@ -84,6 +96,8 @@ function getTexts(language: "el" | "en") {
         "The property does not have a primary cleaning checklist.",
       missingSuppliesChecklist:
         "The property does not have active supplies for sending a supplies checklist.",
+      missingIssuesChecklist:
+        "The property does not have a primary issues and damages checklist.",
       selectSection: "You must select at least one task section.",
       setAlertTime: "You must define an alert time.",
       taskCreateFailed: "Failed to create task.",
@@ -126,17 +140,21 @@ function getTexts(language: "el" | "en") {
       sectionsTitle: "Task sections",
       sendCleaningChecklist: "Send cleaning checklist",
       sendSuppliesChecklist: "Send supplies checklist",
+      sendIssuesChecklist: "Send issues and damages checklist",
       requiresPhotos: "Requires photos",
       requiresApproval: "Requires approval",
       primaryCleaningChecklist: "Primary cleaning checklist",
+      primaryIssuesChecklist: "Primary issues and damages checklist",
       notDefined: "Not defined",
       activePropertySupplies: "Active property supplies",
       sectionsHelp:
-        "If a cleaning checklist is sent, the primary property checklist is used. If a supplies checklist is sent, only the active property supplies are used.",
+        "If a cleaning checklist is sent, the primary property checklist is used. If a supplies checklist is sent, only the active property supplies are used. If an issues checklist is sent, the primary issues and damages checklist is used.",
       missingCleaningHelp:
         "To send a cleaning checklist, the property must first have a primary cleaning checklist.",
       missingSuppliesHelp:
         "To send a supplies checklist, the property must first have active supplies.",
+      missingIssuesHelp:
+        "To send an issues and damages checklist, the property must first have a primary issues and damages checklist.",
       createAndAssign: "Create and assign task",
       saving: "Saving...",
       cleaning: "Cleaning",
@@ -170,6 +188,8 @@ function getTexts(language: "el" | "en") {
       "Το ακίνητο δεν έχει κύρια λίστα καθαριότητας.",
     missingSuppliesChecklist:
       "Το ακίνητο δεν έχει ενεργά αναλώσιμα για αποστολή λίστας.",
+    missingIssuesChecklist:
+      "Το ακίνητο δεν έχει κύρια λίστα βλαβών και ζημιών.",
     selectSection: "Πρέπει να επιλέξεις τουλάχιστον μία ενότητα εργασίας.",
     setAlertTime: "Πρέπει να ορίσεις ώρα alert.",
     taskCreateFailed: "Αποτυχία δημιουργίας εργασίας.",
@@ -212,17 +232,21 @@ function getTexts(language: "el" | "en") {
     sectionsTitle: "Ενότητες εργασίας",
     sendCleaningChecklist: "Αποστολή λίστας καθαριότητας",
     sendSuppliesChecklist: "Αποστολή λίστας αναλωσίμων",
+    sendIssuesChecklist: "Αποστολή λίστας βλαβών και ζημιών",
     requiresPhotos: "Απαιτεί φωτογραφίες",
     requiresApproval: "Απαιτεί έγκριση",
     primaryCleaningChecklist: "Βασική λίστα καθαριότητας",
+    primaryIssuesChecklist: "Βασική λίστα βλαβών και ζημιών",
     notDefined: "Δεν έχει οριστεί",
     activePropertySupplies: "Ενεργά αναλώσιμα ακινήτου",
     sectionsHelp:
-      "Αν σταλεί λίστα καθαριότητας, χρησιμοποιείται η βασική λίστα του ακινήτου. Αν σταλεί λίστα αναλωσίμων, χρησιμοποιούνται μόνο τα ενεργά αναλώσιμα του ακινήτου.",
+      "Αν σταλεί λίστα καθαριότητας, χρησιμοποιείται η βασική λίστα του ακινήτου. Αν σταλεί λίστα αναλωσίμων, χρησιμοποιούνται μόνο τα ενεργά αναλώσιμα του ακινήτου. Αν σταλεί λίστα βλαβών και ζημιών, χρησιμοποιείται η βασική λίστα βλαβών και ζημιών του ακινήτου.",
     missingCleaningHelp:
       "Για να σταλεί λίστα καθαριότητας, πρέπει πρώτα να υπάρχει βασική λίστα καθαριότητας στο ακίνητο.",
     missingSuppliesHelp:
       "Για να σταλεί λίστα αναλωσίμων, πρέπει πρώτα να υπάρχουν ενεργά αναλώσιμα στο ακίνητο.",
+    missingIssuesHelp:
+      "Για να σταλεί λίστα βλαβών και ζημιών, πρέπει πρώτα να υπάρχει βασική λίστα βλαβών και ζημιών στο ακίνητο.",
     createAndAssign: "Δημιουργία και ανάθεση εργασίας",
     saving: "Αποθήκευση...",
     cleaning: "Καθαρισμός",
@@ -272,6 +296,7 @@ export default function NewTaskPage() {
   const [properties, setProperties] = useState<Property[]>([])
   const [partners, setPartners] = useState<Partner[]>([])
   const [primaryTemplate, setPrimaryTemplate] = useState<ChecklistTemplate | null>(null)
+  const [primaryIssueTemplate, setPrimaryIssueTemplate] = useState<IssueTemplate | null>(null)
   const [activeSuppliesCount, setActiveSuppliesCount] = useState(0)
 
   const [propertyId, setPropertyId] = useState(propertyIdFromUrl)
@@ -289,6 +314,7 @@ export default function NewTaskPage() {
 
   const [sendCleaningChecklist, setSendCleaningChecklist] = useState(true)
   const [sendSuppliesChecklist, setSendSuppliesChecklist] = useState(false)
+  const [sendIssuesChecklist, setSendIssuesChecklist] = useState(false)
   const [requiresPhotos, setRequiresPhotos] = useState(false)
   const [requiresApproval, setRequiresApproval] = useState(false)
 
@@ -302,6 +328,7 @@ export default function NewTaskPage() {
 
   const canSendCleaningChecklist = Boolean(primaryTemplate)
   const canSendSuppliesChecklist = activeSuppliesCount > 0
+  const canSendIssuesChecklist = Boolean(primaryIssueTemplate)
 
   async function loadBaseData() {
     try {
@@ -341,20 +368,25 @@ export default function NewTaskPage() {
   async function loadPropertyDetails(currentPropertyId: string) {
     if (!currentPropertyId) {
       setPrimaryTemplate(null)
+      setPrimaryIssueTemplate(null)
       setActiveSuppliesCount(0)
       setPartnerId("")
       setSendCleaningChecklist(false)
       setSendSuppliesChecklist(false)
+      setSendIssuesChecklist(false)
       return
     }
 
     try {
-      const [propertyRes, checklistRes, suppliesRes] = await Promise.all([
+      const [propertyRes, checklistRes, suppliesRes, issuesRes] = await Promise.all([
         fetch(`/api/properties/${currentPropertyId}`, { cache: "no-store" }),
         fetch(`/api/property-checklists/${currentPropertyId}`, {
           cache: "no-store",
         }),
         fetch(`/api/properties/${currentPropertyId}/supplies`, {
+          cache: "no-store",
+        }),
+        fetch(`/api/property-checklists/${currentPropertyId}/issues`, {
           cache: "no-store",
         }),
       ])
@@ -365,6 +397,9 @@ export default function NewTaskPage() {
         | null
       const suppliesData = (await suppliesRes.json().catch(() => null)) as
         | PropertySuppliesResponse
+        | null
+      const issuesData = (await issuesRes.json().catch(() => null)) as
+        | IssueTemplateResponse
         | null
 
       if (propertyRes.ok) {
@@ -378,6 +413,9 @@ export default function NewTaskPage() {
       const nextPrimaryTemplate =
         checklistRes.ok && checklistData ? checklistData.primaryTemplate || null : null
 
+      const nextPrimaryIssueTemplate =
+        issuesRes.ok && issuesData ? issuesData.template || null : null
+
       const suppliesArray =
         suppliesRes.ok && suppliesData
           ? Array.isArray(suppliesData.activeSupplies)
@@ -390,16 +428,20 @@ export default function NewTaskPage() {
       const nextActiveSuppliesCount = suppliesArray.length
 
       setPrimaryTemplate(nextPrimaryTemplate)
+      setPrimaryIssueTemplate(nextPrimaryIssueTemplate)
       setActiveSuppliesCount(nextActiveSuppliesCount)
 
       setSendCleaningChecklist(Boolean(nextPrimaryTemplate))
       setSendSuppliesChecklist(nextActiveSuppliesCount > 0)
+      setSendIssuesChecklist(Boolean(nextPrimaryIssueTemplate))
     } catch (loadError) {
       console.error("Σφάλμα φόρτωσης στοιχείων ακινήτου:", loadError)
       setPrimaryTemplate(null)
+      setPrimaryIssueTemplate(null)
       setActiveSuppliesCount(0)
       setSendCleaningChecklist(false)
       setSendSuppliesChecklist(false)
+      setSendIssuesChecklist(false)
     }
   }
 
@@ -412,10 +454,12 @@ export default function NewTaskPage() {
       void loadPropertyDetails(propertyId)
     } else {
       setPrimaryTemplate(null)
+      setPrimaryIssueTemplate(null)
       setActiveSuppliesCount(0)
       setPartnerId("")
       setSendCleaningChecklist(false)
       setSendSuppliesChecklist(false)
+      setSendIssuesChecklist(false)
     }
   }, [propertyId])
 
@@ -430,6 +474,12 @@ export default function NewTaskPage() {
       setSendSuppliesChecklist(false)
     }
   }, [canSendSuppliesChecklist, sendSuppliesChecklist])
+
+  useEffect(() => {
+    if (!canSendIssuesChecklist && sendIssuesChecklist) {
+      setSendIssuesChecklist(false)
+    }
+  }, [canSendIssuesChecklist, sendIssuesChecklist])
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -464,7 +514,11 @@ export default function NewTaskPage() {
         throw new Error(texts.missingSuppliesChecklist)
       }
 
-      if (!sendCleaningChecklist && !sendSuppliesChecklist) {
+      if (sendIssuesChecklist && !primaryIssueTemplate) {
+        throw new Error(texts.missingIssuesChecklist)
+      }
+
+      if (!sendCleaningChecklist && !sendSuppliesChecklist && !sendIssuesChecklist) {
         throw new Error(texts.selectSection)
       }
 
@@ -491,7 +545,7 @@ export default function NewTaskPage() {
           requiresApproval,
           sendCleaningChecklist,
           sendSuppliesChecklist,
-          requiresChecklist: sendCleaningChecklist,
+          sendIssuesChecklist,
           source: "manual",
           alertEnabled,
           alertAt: alertEnabled ? alertAt : null,
@@ -547,6 +601,7 @@ export default function NewTaskPage() {
       setNotes("")
       setSendCleaningChecklist(Boolean(primaryTemplate))
       setSendSuppliesChecklist(activeSuppliesCount > 0)
+      setSendIssuesChecklist(Boolean(primaryIssueTemplate))
       setRequiresPhotos(false)
       setRequiresApproval(false)
       setSaveAsDefaultPartner(false)
@@ -814,12 +869,23 @@ export default function NewTaskPage() {
                 onChange: setSendSuppliesChecklist,
                 disabled: !canSendSuppliesChecklist,
               },
+              {
+                label: texts.sendIssuesChecklist,
+                checked: sendIssuesChecklist,
+                onChange: setSendIssuesChecklist,
+                disabled: !canSendIssuesChecklist,
+              },
             ]}
             footer={
               <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700">
                 <div>
                   <strong>{texts.primaryCleaningChecklist}:</strong>{" "}
                   {primaryTemplate ? primaryTemplate.title : texts.notDefined}
+                </div>
+
+                <div>
+                  <strong>{texts.primaryIssuesChecklist}:</strong>{" "}
+                  {primaryIssueTemplate ? primaryIssueTemplate.title : texts.notDefined}
                 </div>
 
                 <div>
@@ -834,6 +900,10 @@ export default function NewTaskPage() {
 
                 {!canSendSuppliesChecklist ? (
                   <div className="text-xs text-amber-600">{texts.missingSuppliesHelp}</div>
+                ) : null}
+
+                {!canSendIssuesChecklist ? (
+                  <div className="text-xs text-red-600">{texts.missingIssuesHelp}</div>
                 ) : null}
               </div>
             }
