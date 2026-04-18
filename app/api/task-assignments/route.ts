@@ -8,7 +8,9 @@ import { createExpiryDate, createSecureToken } from "@/lib/tokens"
 import { sendMailSafe } from "@/lib/mailer"
 import { refreshPropertyReadiness } from "@/lib/readiness/refresh-property-readiness"
 import {
+  countActivePropertySupplies,
   findPrimaryCleaningTemplate,
+  findPrimaryIssueTemplate,
   syncTaskChecklistRun,
   syncTaskSupplyRun,
   syncTaskIssueRun,
@@ -195,6 +197,7 @@ export async function GET(request: NextRequest) {
             requiresApproval: true,
             sendCleaningChecklist: true,
             sendSuppliesChecklist: true,
+            sendIssuesChecklist: true,
             property: {
               select: {
                 id: true,
@@ -449,6 +452,37 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    if (task.sendSuppliesChecklist) {
+      const activeSuppliesCount = await countActivePropertySupplies(task.propertyId)
+
+      if (activeSuppliesCount === 0) {
+        return NextResponse.json(
+          {
+            error:
+              "Δεν μπορεί να σταλεί λίστα αναλωσίμων γιατί το ακίνητο δεν έχει ενεργά αναλώσιμα.",
+          },
+          { status: 400 }
+        )
+      }
+    }
+
+    if (task.sendIssuesChecklist) {
+      const primaryIssueTemplate = await findPrimaryIssueTemplate(
+        task.organizationId,
+        task.propertyId
+      )
+
+      if (!primaryIssueTemplate) {
+        return NextResponse.json(
+          {
+            error:
+              "Δεν μπορεί να σταλεί λίστα βλαβών και ζημιών γιατί το ακίνητο δεν έχει ενεργή βασική λίστα αναφοράς.",
+          },
+          { status: 400 }
+        )
+      }
+    }
+
     const existingAssignments = await prisma.taskAssignment.findMany({
       where: {
         taskId,
@@ -569,6 +603,7 @@ export async function POST(request: NextRequest) {
               requiresApproval: true,
               sendCleaningChecklist: true,
               sendSuppliesChecklist: true,
+              sendIssuesChecklist: true,
               property: {
                 select: {
                   id: true,
@@ -672,6 +707,7 @@ export async function POST(request: NextRequest) {
             portalLink,
             sendCleaningChecklist: task.sendCleaningChecklist,
             sendSuppliesChecklist: task.sendSuppliesChecklist,
+            sendIssuesChecklist: task.sendIssuesChecklist,
             saveAsDefaultPartner,
             canonicalMessageFormat: "task-assigned-partner-v1",
           },
