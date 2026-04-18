@@ -29,6 +29,24 @@ function normalizeSupplyMode(value: unknown) {
     : "direct_state"
 }
 
+function normalizeStoredReadinessStatus(
+  value: unknown
+): "ready" | "borderline" | "not_ready" | "unknown" {
+  const normalized = String(value ?? "").trim().toLowerCase()
+  if (normalized === "ready") return "ready"
+  if (normalized === "borderline") return "borderline"
+  if (normalized === "not_ready") return "not_ready"
+  if (normalized === "unknown") return "unknown"
+
+  const upper = String(value ?? "").trim().toUpperCase()
+  if (upper === "READY") return "ready"
+  if (upper === "BORDERLINE") return "borderline"
+  if (upper === "NOT_READY") return "not_ready"
+  if (upper === "UNKNOWN") return "unknown"
+
+  return "unknown"
+}
+
 function toPortalFillLevel(state: "missing" | "medium" | "full") {
   if (state === "missing") return "low"
   if (state === "medium") return "medium"
@@ -169,6 +187,13 @@ const taskAssignmentWithDetailsArgs =
               country: true,
               type: true,
               status: true,
+              readinessStatus: true,
+              readinessUpdatedAt: true,
+              readinessReasonsText: true,
+              nextCheckInAt: true,
+              openConditionCount: true,
+              openBlockingConditionCount: true,
+              openWarningConditionCount: true,
               propertySupplies: {
                 orderBy: [
                   {
@@ -412,6 +437,9 @@ export async function GET(_req: NextRequest, context: RouteContext) {
 
     const taskStatus = normalizeStatus(latestAssignment.task.status)
     const isCancelled = taskStatus === "cancelled"
+    const storedReadinessStatus = normalizeStoredReadinessStatus(
+      latestAssignment.task.property.readinessStatus
+    )
 
     const payload = {
       isCancelled,
@@ -463,6 +491,17 @@ export async function GET(_req: NextRequest, context: RouteContext) {
           country: latestAssignment.task.property.country,
           type: latestAssignment.task.property.type,
           status: latestAssignment.task.property.status,
+          readiness: {
+            status: storedReadinessStatus,
+            updatedAt: latestAssignment.task.property.readinessUpdatedAt,
+            reasonsText: latestAssignment.task.property.readinessReasonsText,
+            nextCheckInAt: latestAssignment.task.property.nextCheckInAt,
+            openConditionCount: latestAssignment.task.property.openConditionCount,
+            openBlockingConditionCount:
+              latestAssignment.task.property.openBlockingConditionCount,
+            openWarningConditionCount:
+              latestAssignment.task.property.openWarningConditionCount,
+          },
           supplies: activePropertySupplies.map((propertySupply) =>
             buildPartnerSupplyPayload({
               propertySupply,
