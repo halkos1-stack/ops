@@ -93,7 +93,6 @@ function toNullableTrimmedString(value: unknown) {
   return text === "" ? null : text
 }
 
-
 const taskAssignmentWithSupplyArgs =
   Prisma.validator<Prisma.TaskAssignmentDefaultArgs>()({
     include: {
@@ -145,6 +144,14 @@ const taskAssignmentWithSupplyArgs =
             },
           },
           checklistRun: true,
+          issueRun: {
+            select: {
+              id: true,
+              status: true,
+              startedAt: true,
+              completedAt: true,
+            },
+          },
         },
       },
     },
@@ -418,10 +425,6 @@ export async function POST(req: NextRequest, context: RouteContext) {
               }
         )
 
-        // Προσδιορισμός finalStateAfterReplenishment:
-        // Αν ο partner δήλωσε quantityFound (πριν) και quantityReplenished (προστέθηκε),
-        // τότε η τελική κατάσταση είναι η canonical computed state.
-        // Αν δεν υπάρχει quantityReplenished, η τελική = η δηλωθείσα κατάσταση.
         const finalState = canonical.fillLevel
 
         const answerWriteData = {
@@ -468,7 +471,6 @@ export async function POST(req: NextRequest, context: RouteContext) {
         }
 
         if (mode === "submit") {
-          // Αποθήκευση κατάστασης πριν την ενημέρωση για το log
           const stateBefore = propertySupply.fillLevel
 
           await tx.propertySupply.update({
@@ -492,7 +494,6 @@ export async function POST(req: NextRequest, context: RouteContext) {
             },
           })
 
-          // Γράψιμο immutable ιστορικού συμπλήρωσης
           await tx.supplyReplenishmentLog.create({
             data: {
               organizationId: latestAssignment.task.property.organizationId,
@@ -566,7 +567,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
                   : propertySupply.isCritical
                     ? "MEDIUM"
                     : "LOW",
-                  evidence: {
+              evidence: {
                 fillLevel: computedState,
                 quantityValue:
                   canonical.stateMode === "numeric_thresholds"
@@ -602,6 +603,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
         include: {
           checklistRun: true,
           supplyRun: true,
+          issueRun: true,
         },
       })
 
@@ -613,7 +615,11 @@ export async function POST(req: NextRequest, context: RouteContext) {
         !refreshedTask?.supplyRun ||
         refreshedTask.supplyRun.status === "completed"
 
-      if (mode === "submit" && cleaningCompleted && suppliesCompleted) {
+      const issuesCompleted =
+        !refreshedTask?.issueRun ||
+        refreshedTask.issueRun.status === "completed"
+
+      if (mode === "submit" && cleaningCompleted && suppliesCompleted && issuesCompleted) {
         await tx.taskAssignment.update({
           where: {
             id: latestAssignment.id,
@@ -658,6 +664,8 @@ export async function POST(req: NextRequest, context: RouteContext) {
             taskSupplyRunId: supplyRun.id,
             mode,
             answersCount: incomingAnswers.length,
+            sendIssuesChecklist: latestAssignment.task.sendIssuesChecklist,
+            issueRunStatus: latestAssignment.task.issueRun?.status || null,
           },
         },
       })
