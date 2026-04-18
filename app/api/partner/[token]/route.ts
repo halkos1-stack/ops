@@ -24,6 +24,24 @@ function isCancelledTaskStatus(value: unknown) {
   return normalizeStatus(value) === "cancelled"
 }
 
+function normalizeStoredReadinessStatus(
+  value: unknown
+): "ready" | "borderline" | "not_ready" | "unknown" {
+  const normalized = String(value ?? "").trim().toLowerCase()
+  if (normalized === "ready") return "ready"
+  if (normalized === "borderline") return "borderline"
+  if (normalized === "not_ready") return "not_ready"
+  if (normalized === "unknown") return "unknown"
+
+  const upper = String(value ?? "").trim().toUpperCase()
+  if (upper === "READY") return "ready"
+  if (upper === "BORDERLINE") return "borderline"
+  if (upper === "NOT_READY") return "not_ready"
+  if (upper === "UNKNOWN") return "unknown"
+
+  return "unknown"
+}
+
 export async function GET(_req: NextRequest, context: RouteContext) {
   try {
     const { token } = await context.params
@@ -64,6 +82,13 @@ export async function GET(_req: NextRequest, context: RouteContext) {
                         address: true,
                         city: true,
                         region: true,
+                        readinessStatus: true,
+                        readinessUpdatedAt: true,
+                        readinessReasonsText: true,
+                        nextCheckInAt: true,
+                        openConditionCount: true,
+                        openBlockingConditionCount: true,
+                        openWarningConditionCount: true,
                       },
                     },
                     checklistRun: {
@@ -171,7 +196,22 @@ export async function GET(_req: NextRequest, context: RouteContext) {
           scheduledDate: assignment.task.scheduledDate,
           scheduledStartTime: assignment.task.scheduledStartTime,
           scheduledEndTime: assignment.task.scheduledEndTime,
-          property: assignment.task.property,
+          property: {
+            ...assignment.task.property,
+            readiness: {
+              status: normalizeStoredReadinessStatus(
+                assignment.task.property.readinessStatus
+              ),
+              updatedAt: assignment.task.property.readinessUpdatedAt,
+              reasonsText: assignment.task.property.readinessReasonsText,
+              nextCheckInAt: assignment.task.property.nextCheckInAt,
+              openConditionCount: assignment.task.property.openConditionCount,
+              openBlockingConditionCount:
+                assignment.task.property.openBlockingConditionCount,
+              openWarningConditionCount:
+                assignment.task.property.openWarningConditionCount,
+            },
+          },
           checklistRun: assignment.task.checklistRun,
           supplyRun: assignment.task.supplyRun,
         },
