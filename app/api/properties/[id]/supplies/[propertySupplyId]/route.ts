@@ -134,7 +134,7 @@ function shapePropertySupply(row: {
   }
 }
 
-async function buildResponse(propertyId: string) {
+async function buildResponse(propertyId: string, targetPropertySupplyId?: string) {
   const property = await prisma.property.findUnique({
     where: { id: propertyId },
     select: {
@@ -187,6 +187,80 @@ async function buildResponse(propertyId: string) {
     },
   })
 
+  // Φόρτωση replenishment logs για το συγκεκριμένο PropertySupply (ή όλα αν δεν έχει δοθεί) — graceful degradation
+  let replenishmentLogs: unknown[] = []
+  try {
+    replenishmentLogs = await (prisma as Record<string, unknown>).supplyReplenishmentLog !== undefined
+      ? await (prisma as unknown as { supplyReplenishmentLog: { findMany: (args: unknown) => Promise<unknown[]> } }).supplyReplenishmentLog.findMany({
+          where: targetPropertySupplyId
+            ? { propertySupplyId: targetPropertySupplyId }
+            : { propertyId },
+          orderBy: { loggedAt: "desc" as const },
+          take: 20,
+          select: {
+            id: true,
+            propertySupplyId: true,
+            supplyItemId: true,
+            taskId: true,
+            quantityBefore: true,
+            quantityAdded: true,
+            quantityAfter: true,
+            stateBefore: true,
+            stateAfter: true,
+            performedBy: true,
+            notes: true,
+            loggedAt: true,
+            supplyItem: {
+              select: {
+                id: true,
+                code: true,
+                name: true,
+                nameEl: true,
+                nameEn: true,
+              },
+            },
+          },
+        })
+      : []
+  } catch {
+    replenishmentLogs = []
+  }
+
+  // Consumption logs — graceful degradation
+  let consumptionLogs: unknown[] = []
+  try {
+    const whereClause = targetPropertySupplyId
+      ? { propertySupplyId: targetPropertySupplyId }
+      : { propertySupplyId: { in: property.propertySupplies.map((s) => s.id) } }
+
+    consumptionLogs = await prisma.supplyConsumption.findMany({
+      where: whereClause,
+      orderBy: { createdAt: "desc" as const },
+      take: 20,
+      select: {
+        id: true,
+        taskId: true,
+        supplyItemId: true,
+        propertySupplyId: true,
+        quantity: true,
+        unit: true,
+        notes: true,
+        createdAt: true,
+        supplyItem: {
+          select: {
+            id: true,
+            code: true,
+            name: true,
+            nameEl: true,
+            nameEn: true,
+          },
+        },
+      },
+    })
+  } catch {
+    consumptionLogs = []
+  }
+
   return {
     property: {
       id: property.id,
@@ -202,6 +276,42 @@ async function buildResponse(propertyId: string) {
     },
     activeSupplies: property.propertySupplies.map(shapePropertySupply),
     supplyTemplate,
+    replenishmentLogs,
+    consumptionLogs,
+  }
+}
+
+export async function GET(_request: NextRequest, context: RouteContext) {
+  try {
+    const access = await requireApiAppAccess()
+    if (!access.ok) return access.response
+
+    const auth = access.auth
+    const { id, propertySupplyId } = await context.params
+    const property = await getPropertyBase(id)
+
+    if (!property) {
+      return NextResponse.json({ error: "Property was not found." }, { status: 404 })
+    }
+
+    if (!canAccessOrganization(auth, property.organizationId)) {
+      return NextResponse.json(
+        { error: "You do not have access to this property." },
+        { status: 403 }
+      )
+    }
+
+    const payload = await buildResponse(property.id, propertySupplyId)
+    return NextResponse.json(payload)
+  } catch (error) {
+    console.error(
+      "GET /api/properties/[id]/supplies/[propertySupplyId] error:",
+      error
+    )
+    return NextResponse.json(
+      { error: "Failed to load property supply." },
+      { status: 500 }
+    )
   }
 }
 
@@ -241,6 +351,23 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         { status: 404 }
       )
     }
+
+    // Snapshot κατάστασης πριν την αλλαγή για το log
+    const snapshotBefore = buildCanonicalSupplySnapshot({
+      isActive: true,
+      stateMode: propertySupply.stateMode,
+      fillLevel: propertySupply.fillLevel,
+      currentStock: propertySupply.currentStock,
+      mediumThreshold: propertySupply.mediumThreshold,
+      fullThreshold: propertySupply.fullThreshold,
+      minimumThreshold: propertySupply.minimumThreshold,
+      reorderThreshold: propertySupply.reorderThreshold,
+      warningThreshold: propertySupply.warningThreshold,
+      targetLevel: propertySupply.targetLevel,
+      targetStock: propertySupply.targetStock,
+      trackingMode: propertySupply.trackingMode,
+      supplyMinimumStock: propertySupply.supplyItem.minimumStock,
+    })
 
     const validation = validateSupplyModeInput({
       stateMode: body?.stateMode ?? propertySupply.stateMode,
@@ -289,6 +416,59 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       },
     })
 
+    // Snapshot κατάστασης μετά την αλλαγή
+    const snapshotAfter = buildCanonicalSupplySnapshot({
+      isActive: true,
+      stateMode: canonical.stateMode,
+      fillLevel: canonical.fillLevel,
+      currentStock: canonical.currentStock,
+      mediumThreshold: canonical.mediumThreshold,
+      fullThreshold: canonical.fullThreshold,
+      minimumThreshold: canonical.minimumThreshold,
+      reorderThreshold: canonical.reorderThreshold,
+      warningThreshold: canonical.warningThreshold,
+      targetLevel: canonical.targetLevel,
+      targetStock: canonical.targetStock,
+      trackingMode: canonical.trackingMode,
+      supplyMinimumStock: propertySupply.supplyItem.minimumStock,
+    })
+
+    // Γράψε SupplyReplenishmentLog αν άλλαξε κατάσταση ή απόθεμα — graceful degradation
+    try {
+      const stockChanged =
+        canonical.currentStock !== propertySupply.currentStock
+      const stateChanged =
+        snapshotAfter.derivedState !== snapshotBefore.derivedState
+
+      if (stockChanged || stateChanged) {
+        await (prisma as unknown as {
+          supplyReplenishmentLog: {
+            create: (args: unknown) => Promise<unknown>
+          }
+        }).supplyReplenishmentLog.create({
+          data: {
+            organizationId: property.organizationId,
+            propertyId: property.id,
+            propertySupplyId: propertySupply.id,
+            supplyItemId: propertySupply.supplyItemId,
+            quantityBefore: snapshotBefore.currentStock,
+            quantityAfter: canonical.currentStock,
+            quantityAdded: stockChanged
+              ? canonical.currentStock - (snapshotBefore.currentStock ?? 0)
+              : null,
+            stateBefore: snapshotBefore.derivedState,
+            stateAfter: snapshotAfter.derivedState,
+            performedBy: "admin_manual",
+            notes: body?.notes
+              ? String(body.notes).trim() || null
+              : null,
+          },
+        })
+      }
+    } catch {
+      // Graceful degradation — δεν αποτυγχάνει η PATCH αν δεν έχει τρέξει migration ακόμα
+    }
+
     await syncPropertySupplyTemplate({
       propertyId: property.id,
       organizationId: property.organizationId,
@@ -296,7 +476,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     await resyncMutablePropertySupplyRuns(property.id)
     await refreshPropertyReadiness(property.id)
 
-    const payload = await buildResponse(property.id)
+    const payload = await buildResponse(property.id, propertySupplyId)
     return NextResponse.json(payload)
   } catch (error) {
     console.error(

@@ -186,6 +186,8 @@ type ChecklistFormValue = {
 type SupplyFormValue = {
   fillLevel: string
   quantityValue: number | null
+  quantityFound: number | null
+  quantityReplenished: number | null
   notes: string
 }
 
@@ -212,6 +214,8 @@ function getEmptySupplyFormValue(): SupplyFormValue {
   return {
     fillLevel: "",
     quantityValue: null,
+    quantityFound: null,
+    quantityReplenished: null,
     notes: "",
   }
 }
@@ -403,6 +407,8 @@ function getTaskPageTexts(language: PortalLanguage) {
       suppliesSaveSuccess: "Supplies progress was saved.",
       suppliesSubmitSuccess: "Supplies were submitted successfully.",
       supplyNotes: "Supply notes",
+      quantityFound: "Quantity found (before replenishment)",
+      quantityReplenished: "Quantity replenished (added)",
       popupClose: "Close",
       checklistPopupTitle: "Cleaning checklist",
       suppliesPopupTitle: "Supplies",
@@ -517,6 +523,8 @@ function getTaskPageTexts(language: PortalLanguage) {
     suppliesSaveSuccess: "Η πρόοδος των αναλωσίμων αποθηκεύτηκε.",
     suppliesSubmitSuccess: "Τα αναλώσιμα υποβλήθηκαν επιτυχώς.",
     supplyNotes: "Σημειώσεις αναλωσίμου",
+    quantityFound: "Ποσότητα που βρέθηκε (πριν τη συμπλήρωση)",
+    quantityReplenished: "Ποσότητα που συμπληρώθηκε (που προστέθηκε)",
     popupClose: "Κλείσιμο",
     checklistPopupTitle: "Λίστα καθαριότητας",
     suppliesPopupTitle: "Αναλώσιμα",
@@ -787,6 +795,8 @@ export default function PartnerPortalTaskPage() {
       nextValues[supply.id] = {
         fillLevel: existing?.fillLevel || supply.fillLevel || "",
         quantityValue: supply.isCountBased ? existingQty : null,
+        quantityFound: null,
+        quantityReplenished: null,
         notes: existing?.notes || supply.notes || "",
       }
     }
@@ -1093,6 +1103,15 @@ export default function PartnerPortalTaskPage() {
           propertySupplyId: supply.id,
           fillLevel: supply.isCountBased ? null : value.fillLevel || null,
           quantityValue: supply.isCountBased ? value.quantityValue : null,
+          quantityFound:
+            value.quantityFound !== null && Number.isFinite(value.quantityFound)
+              ? value.quantityFound
+              : null,
+          quantityReplenished:
+            value.quantityReplenished !== null &&
+            Number.isFinite(value.quantityReplenished)
+              ? value.quantityReplenished
+              : null,
           notes: value.notes || null,
         }
       })
@@ -1905,6 +1924,60 @@ export default function PartnerPortalTaskPage() {
                           </button>
                         </div>
                       )}
+                    </div>
+
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div>
+                        <label className="mb-2 block text-sm font-medium text-slate-700">
+                          {t.quantityFound}
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          disabled={!canEditSupplies}
+                          value={
+                            value.quantityFound === null ||
+                            value.quantityFound === undefined
+                              ? ""
+                              : value.quantityFound
+                          }
+                          onChange={(e) => {
+                            const raw = e.target.value
+                            const num = raw === "" ? null : Number(raw)
+                            updateSupplyValue(supply.id, {
+                              quantityFound:
+                                num !== null && Number.isFinite(num) ? num : null,
+                            })
+                          }}
+                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-slate-400 disabled:bg-slate-50"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="mb-2 block text-sm font-medium text-slate-700">
+                          {t.quantityReplenished}
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          disabled={!canEditSupplies}
+                          value={
+                            value.quantityReplenished === null ||
+                            value.quantityReplenished === undefined
+                              ? ""
+                              : value.quantityReplenished
+                          }
+                          onChange={(e) => {
+                            const raw = e.target.value
+                            const num = raw === "" ? null : Number(raw)
+                            updateSupplyValue(supply.id, {
+                              quantityReplenished:
+                                num !== null && Number.isFinite(num) ? num : null,
+                            })
+                          }}
+                          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none focus:border-slate-400 disabled:bg-slate-50"
+                        />
+                      </div>
                     </div>
 
                     <div>

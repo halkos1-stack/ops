@@ -2142,3 +2142,59 @@ export function getPropertyChecklistManagementTexts(language: AppLanguage) {
       "Αυτή η σελίδα και ο επεξεργαστής λίστας καθαριότητας της εργασίας πρέπει να παραμένουν οπτικά και δομικά ευθυγραμμισμένοι.",
   }
 }
+
+export function getSupplyReplenishmentHistoryTexts(language: AppLanguage) {
+  if (language === "en") {
+    return {
+      sectionTitle: "Supply history",
+      sectionSubtitle:
+        "Replenishment log per supply. Records are created automatically when a partner submits supplies or when an admin manually updates stock.",
+      filterAll: "All supplies",
+      filterPlaceholder: "Filter by supply",
+      noLogs: "No replenishment records found.",
+      loggedAt: "Date",
+      performedBy: "Performed by",
+      stateBefore: "State before",
+      stateAfter: "State after",
+      quantityBefore: "Qty before",
+      quantityAdded: "Qty added",
+      quantityAfter: "Qty after",
+      quantityFound: "Qty found",
+      quantityReplenished: "Qty replenished",
+      before: "Before",
+      after: "After",
+      adminManual: "Manual (admin)",
+      partnerLabel: "Partner",
+      replenishment: "Replenishment",
+      consumption: "Consumption",
+      manualUpdate: "Manual update",
+      noValue: "—",
+    }
+  }
+
+  return {
+    sectionTitle: "Ιστορικό αναλωσίμων",
+    sectionSubtitle:
+      "Καταγραφή συμπληρώσεων ανά αναλώσιμο. Οι εγγραφές δημιουργούνται αυτόματα όταν ο συνεργάτης υποβάλλει αναλώσιμα ή όταν ο διαχειριστής χειροκίνητα ενημερώνει το απόθεμα.",
+    filterAll: "Όλα τα αναλώσιμα",
+    filterPlaceholder: "Φιλτράρισμα ανά αναλώσιμο",
+    noLogs: "Δεν βρέθηκαν εγγραφές συμπλήρωσης.",
+    loggedAt: "Ημερομηνία",
+    performedBy: "Εκτελέστηκε από",
+    stateBefore: "Κατάσταση πριν",
+    stateAfter: "Κατάσταση μετά",
+    quantityBefore: "Ποσ. πριν",
+    quantityAdded: "Ποσ. που προστέθηκε",
+    quantityAfter: "Ποσ. μετά",
+    quantityFound: "Ποσότητα που βρέθηκε",
+    quantityReplenished: "Ποσότητα που συμπληρώθηκε",
+    before: "Πριν",
+    after: "Μετά",
+    adminManual: "Χειροκίνητη ενημέρωση (διαχειριστής)",
+    partnerLabel: "Συνεργάτης",
+    replenishment: "Συμπλήρωση",
+    consumption: "Κατανάλωση",
+    manualUpdate: "Χειροκίνητη ενημέρωση",
+    noValue: "—",
+  }
+}

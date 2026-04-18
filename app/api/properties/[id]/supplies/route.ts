@@ -202,6 +202,79 @@ async function buildResponse(propertyId: string) {
 
   if (!property) return null
 
+  // Φόρτωση replenishment logs (τελευταίες 10 ανά PropertySupply) — try/catch για graceful degradation αν το migration δεν έχει τρέξει ακόμα
+  let replenishmentLogs: unknown[] = []
+  try {
+    replenishmentLogs = await (prisma as Record<string, unknown>).supplyReplenishmentLog !== undefined
+      ? await (prisma as unknown as { supplyReplenishmentLog: { findMany: (args: unknown) => Promise<unknown[]> } }).supplyReplenishmentLog.findMany({
+          where: { propertyId },
+          orderBy: { loggedAt: "desc" as const },
+          take: 50,
+          select: {
+            id: true,
+            propertySupplyId: true,
+            supplyItemId: true,
+            taskId: true,
+            quantityBefore: true,
+            quantityAdded: true,
+            quantityAfter: true,
+            stateBefore: true,
+            stateAfter: true,
+            performedBy: true,
+            notes: true,
+            loggedAt: true,
+            supplyItem: {
+              select: {
+                id: true,
+                code: true,
+                name: true,
+                nameEl: true,
+                nameEn: true,
+              },
+            },
+          },
+        })
+      : []
+  } catch {
+    replenishmentLogs = []
+  }
+
+  // Φόρτωση consumption logs (SupplyConsumption με propertySupplyId) — try/catch για graceful degradation
+  let consumptionLogs: unknown[] = []
+  try {
+    const supplyIds = property.propertySupplies.map((s) => s.id)
+    if (supplyIds.length > 0) {
+      consumptionLogs = await prisma.supplyConsumption.findMany({
+        where: {
+          propertySupplyId: { in: supplyIds },
+        },
+        orderBy: { createdAt: "desc" as const },
+        take: 50,
+        select: {
+          id: true,
+          taskId: true,
+          supplyItemId: true,
+          propertySupplyId: true,
+          quantity: true,
+          unit: true,
+          notes: true,
+          createdAt: true,
+          supplyItem: {
+            select: {
+              id: true,
+              code: true,
+              name: true,
+              nameEl: true,
+              nameEn: true,
+            },
+          },
+        },
+      })
+    }
+  } catch {
+    consumptionLogs = []
+  }
+
   const customMarker = buildCustomSupplyMarker(property.id)
   const customSupplyItems = await prisma.supplyItem.findMany({
     where: {
@@ -270,6 +343,8 @@ async function buildResponse(propertyId: string) {
     supplies: activeSupplies,
     builtInCatalog,
     customCatalog,
+    replenishmentLogs,
+    consumptionLogs,
   }
 }
 

@@ -9,6 +9,7 @@ import {
   buildCanonicalSupplySnapshot,
   buildCanonicalSupplyWriteData,
 } from "@/lib/supplies/compute-supply-state"
+import { getSupplyReplenishmentHistoryTexts } from "@/lib/i18n/translations"
 
 type Language = "el" | "en"
 type SupplyFilter = "all" | "missing" | "medium" | "full"
@@ -76,6 +77,46 @@ type CustomCatalogRow = {
   propertySupplyId?: string | null
 }
 
+type ReplenishmentLogEntry = {
+  id: string
+  propertySupplyId: string
+  supplyItemId: string
+  taskId?: string | null
+  quantityBefore?: number | null
+  quantityAdded?: number | null
+  quantityAfter?: number | null
+  stateBefore?: string | null
+  stateAfter: string
+  performedBy?: string | null
+  notes?: string | null
+  loggedAt: string
+  supplyItem?: {
+    id: string
+    code: string
+    name: string
+    nameEl?: string | null
+    nameEn?: string | null
+  } | null
+}
+
+type ConsumptionLogEntry = {
+  id: string
+  taskId: string
+  supplyItemId: string
+  propertySupplyId?: string | null
+  quantity: number
+  unit: string
+  notes?: string | null
+  createdAt: string
+  supplyItem?: {
+    id: string
+    code: string
+    name: string
+    nameEl?: string | null
+    nameEn?: string | null
+  } | null
+}
+
 type SuppliesPayload = {
   property: {
     id: string
@@ -91,6 +132,8 @@ type SuppliesPayload = {
   activeSupplies: PropertySupply[]
   builtInCatalog: BuiltInCatalogRow[]
   customCatalog: CustomCatalogRow[]
+  replenishmentLogs?: ReplenishmentLogEntry[]
+  consumptionLogs?: ConsumptionLogEntry[]
 }
 
 type SupplyEditorState = {
@@ -232,6 +275,7 @@ function getTexts(language: Language) {
       noNumericData: "No numeric setup",
       quantityBased: "Count based",
       directStateBased: "Direct state",
+      historyFilterAll: "All supplies",
     }
   }
 
@@ -305,6 +349,7 @@ function getTexts(language: Language) {
     noNumericData: "Δεν έχουν οριστεί αριθμητικά όρια",
     quantityBased: "Με καταμέτρηση",
     directStateBased: "Με άμεση κατάσταση",
+    historyFilterAll: "Όλα τα αναλώσιμα",
   }
 }
 
@@ -467,6 +512,182 @@ function Modal({
   )
 }
 
+function SupplyHistorySection({
+  logs,
+  allLogs,
+  supplyRows,
+  historyFilter,
+  setHistoryFilter,
+  lang,
+  locale,
+}: {
+  logs: ReplenishmentLogEntry[]
+  allLogs: ReplenishmentLogEntry[]
+  supplyRows: DecoratedSupplyRow[]
+  historyFilter: string
+  setHistoryFilter: (v: string) => void
+  lang: Language
+  locale: string
+}) {
+  const th = getSupplyReplenishmentHistoryTexts(lang)
+
+  function formatLogState(state?: string | null) {
+    if (!state) return th.noValue
+    if (state === "missing") return lang === "en" ? "Missing" : "Έλλειψη"
+    if (state === "medium") return lang === "en" ? "Medium" : "Μέτρια"
+    if (state === "full") return lang === "en" ? "Full" : "Πλήρης"
+    return state
+  }
+
+  function formatLogPerformedBy(value?: string | null) {
+    if (!value) return th.noValue
+    if (value === "admin_manual") return th.adminManual
+    return value
+  }
+
+  function formatQty(value?: number | null) {
+    if (value === null || value === undefined) return th.noValue
+    return String(value)
+  }
+
+  function formatLogDate(value: string) {
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return "—"
+    return new Intl.DateTimeFormat(locale, {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(date)
+  }
+
+  function getLogSupplyName(log: ReplenishmentLogEntry) {
+    if (!log.supplyItem) {
+      const supplyRow = supplyRows.find((r) => r.id === log.propertySupplyId)
+      return supplyRow?.displayName || log.supplyItemId
+    }
+    return resolveSupplyDisplayName(lang, log.supplyItem)
+  }
+
+  function stateColor(state?: string | null) {
+    if (state === "missing") return "bg-red-50 text-red-700 ring-1 ring-red-200"
+    if (state === "medium")
+      return "bg-amber-50 text-amber-700 ring-1 ring-amber-200"
+    return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
+  }
+
+  return (
+    <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-xl font-bold text-slate-950">{th.sectionTitle}</h2>
+          <p className="mt-1 max-w-2xl text-sm text-slate-500">{th.sectionSubtitle}</p>
+        </div>
+
+        <div className="shrink-0">
+          <select
+            value={historyFilter}
+            onChange={(e) => setHistoryFilter(e.target.value)}
+            className="rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-900"
+          >
+            <option value="all">{th.filterAll}</option>
+            {supplyRows.map((row) => (
+              <option key={row.id} value={row.id}>
+                {row.displayName}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {logs.length === 0 ? (
+        <div className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-500">
+          {th.noLogs}
+        </div>
+      ) : (
+        <div className="mt-4 space-y-3">
+          {logs.map((log) => (
+            <div
+              key={log.id}
+              className="rounded-2xl border border-slate-200 p-4"
+            >
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <div className="font-semibold text-slate-900">
+                    {getLogSupplyName(log)}
+                  </div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    {th.loggedAt}: {formatLogDate(log.loggedAt)}
+                    {" · "}
+                    {th.performedBy}: {formatLogPerformedBy(log.performedBy)}
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {log.stateBefore ? (
+                    <span
+                      className={`rounded-full px-2.5 py-1 text-xs font-semibold ${stateColor(log.stateBefore)}`}
+                    >
+                      {th.before}: {formatLogState(log.stateBefore)}
+                    </span>
+                  ) : null}
+                  <span className="text-slate-300">→</span>
+                  <span
+                    className={`rounded-full px-2.5 py-1 text-xs font-semibold ${stateColor(log.stateAfter)}`}
+                  >
+                    {th.after}: {formatLogState(log.stateAfter)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                    {th.quantityBefore}
+                  </div>
+                  <div className="mt-1 text-sm font-semibold text-slate-900">
+                    {formatQty(log.quantityBefore)}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                    {th.quantityAdded}
+                  </div>
+                  <div className="mt-1 text-sm font-semibold text-slate-900">
+                    {formatQty(log.quantityAdded)}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                    {th.quantityAfter}
+                  </div>
+                  <div className="mt-1 text-sm font-semibold text-slate-900">
+                    {formatQty(log.quantityAfter)}
+                  </div>
+                </div>
+
+                {log.notes ? (
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 sm:col-span-1">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                      Notes
+                    </div>
+                    <div className="mt-1 truncate text-sm text-slate-700">
+                      {log.notes}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
 export default function PropertySuppliesPage() {
   const params = useParams()
   const propertyId = Array.isArray(params?.id) ? params.id[0] : params?.id
@@ -482,6 +703,7 @@ export default function PropertySuppliesPage() {
   const [filter, setFilter] = useState<SupplyFilter>("all")
   const [customName, setCustomName] = useState("")
   const [editingRow, setEditingRow] = useState<SupplyEditorState | null>(null)
+  const [historyFilter, setHistoryFilter] = useState<string>("all")
 
   async function loadData() {
     if (!propertyId) return
@@ -569,6 +791,15 @@ export default function PropertySuppliesPage() {
   const editorPreview = useMemo(() => {
     return editingRow ? getEditorPreview(editingRow) : null
   }, [editingRow])
+
+  const replenishmentLogs = data?.replenishmentLogs || []
+
+  const filteredReplenishmentLogs = useMemo(() => {
+    if (historyFilter === "all") return replenishmentLogs
+    return replenishmentLogs.filter(
+      (log) => log.propertySupplyId === historyFilter
+    )
+  }, [replenishmentLogs, historyFilter])
 
   function openEditor(row: DecoratedSupplyRow) {
     setEditingRow({
@@ -992,6 +1223,18 @@ export default function PropertySuppliesPage() {
               </div>
             </section>
           </>
+        ) : null}
+
+        {replenishmentLogs.length > 0 ? (
+          <SupplyHistorySection
+            logs={filteredReplenishmentLogs}
+            allLogs={replenishmentLogs}
+            supplyRows={supplyRows}
+            historyFilter={historyFilter}
+            setHistoryFilter={setHistoryFilter}
+            lang={lang}
+            locale={t.locale}
+          />
         ) : null}
       </div>
 
