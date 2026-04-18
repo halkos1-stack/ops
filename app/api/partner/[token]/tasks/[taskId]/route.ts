@@ -310,6 +310,70 @@ const taskAssignmentWithDetailsArgs =
               },
             },
           },
+          issueRun: {
+            include: {
+              template: {
+                include: {
+                  items: {
+                    orderBy: {
+                      sortOrder: "asc",
+                    },
+                    select: {
+                      id: true,
+                      label: true,
+                      labelEn: true,
+                      description: true,
+                      sortOrder: true,
+                      itemType: true,
+                      isRequired: true,
+                      allowsIssue: true,
+                      allowsDamage: true,
+                      defaultIssueType: true,
+                      defaultSeverity: true,
+                      requiresPhoto: true,
+                      affectsHostingByDefault: true,
+                      urgentByDefault: true,
+                      locationHint: true,
+                    },
+                  },
+                },
+              },
+              items: {
+                orderBy: {
+                  sortOrder: "asc",
+                },
+                select: {
+                  id: true,
+                  propertyTemplateItemId: true,
+                  label: true,
+                  labelEn: true,
+                  description: true,
+                  sortOrder: true,
+                  itemType: true,
+                  isRequired: true,
+                  allowsIssue: true,
+                  allowsDamage: true,
+                  defaultIssueType: true,
+                  defaultSeverity: true,
+                  requiresPhoto: true,
+                  affectsHostingByDefault: true,
+                  urgentByDefault: true,
+                  locationHint: true,
+                },
+              },
+              answers: {
+                include: {
+                  templateItem: {
+                    select: {
+                      id: true,
+                      label: true,
+                      labelEn: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
           issues: {
             orderBy: {
               createdAt: "desc",
@@ -478,6 +542,7 @@ export async function GET(_req: NextRequest, context: RouteContext) {
         requiresApproval: latestAssignment.task.requiresApproval,
         sendCleaningChecklist: latestAssignment.task.sendCleaningChecklist,
         sendSuppliesChecklist: latestAssignment.task.sendSuppliesChecklist,
+        sendIssuesChecklist: latestAssignment.task.sendIssuesChecklist,
         notes: latestAssignment.task.notes,
         resultNotes: latestAssignment.task.resultNotes,
         property: {
@@ -604,6 +669,77 @@ export async function GET(_req: NextRequest, context: RouteContext) {
                   propertySupply: propertySupplyPayload,
                 }
               }),
+            }
+          : null,
+        issueRun: latestAssignment.task.issueRun
+          ? {
+              id: latestAssignment.task.issueRun.id,
+              status: latestAssignment.task.issueRun.status,
+              startedAt: latestAssignment.task.issueRun.startedAt,
+              completedAt: latestAssignment.task.issueRun.completedAt,
+              template: latestAssignment.task.issueRun.template
+                ? {
+                    id: latestAssignment.task.issueRun.template.id,
+                    title: latestAssignment.task.issueRun.template.title,
+                    description:
+                      latestAssignment.task.issueRun.template.description,
+                    items:
+                      latestAssignment.task.issueRun.template.items.map((item) => ({
+                        id: item.id,
+                        label: item.label,
+                        labelEn: item.labelEn,
+                        description: item.description,
+                        sortOrder: item.sortOrder,
+                        itemType: item.itemType,
+                        isRequired: item.isRequired,
+                        allowsIssue: item.allowsIssue,
+                        allowsDamage: item.allowsDamage,
+                        defaultIssueType: item.defaultIssueType,
+                        defaultSeverity: item.defaultSeverity,
+                        requiresPhoto: item.requiresPhoto,
+                        affectsHostingByDefault: item.affectsHostingByDefault,
+                        urgentByDefault: item.urgentByDefault,
+                        locationHint: item.locationHint,
+                      })),
+                  }
+                : null,
+              items: latestAssignment.task.issueRun.items.map((item) => ({
+                id: item.id,
+                propertyTemplateItemId: item.propertyTemplateItemId,
+                label: item.label,
+                labelEn: item.labelEn,
+                description: item.description,
+                sortOrder: item.sortOrder,
+                itemType: item.itemType,
+                isRequired: item.isRequired,
+                allowsIssue: item.allowsIssue,
+                allowsDamage: item.allowsDamage,
+                defaultIssueType: item.defaultIssueType,
+                defaultSeverity: item.defaultSeverity,
+                requiresPhoto: item.requiresPhoto,
+                affectsHostingByDefault: item.affectsHostingByDefault,
+                urgentByDefault: item.urgentByDefault,
+                locationHint: item.locationHint,
+              })),
+              answers: latestAssignment.task.issueRun.answers.map((answer) => ({
+                id: answer.id,
+                reportType: answer.reportType,
+                title: answer.title,
+                description: answer.description,
+                severity: answer.severity,
+                affectsHosting: answer.affectsHosting,
+                requiresImmediateAction: answer.requiresImmediateAction,
+                locationText: answer.locationText,
+                photoUrls: answer.photoUrls,
+                createdIssueId: answer.createdIssueId,
+                templateItem: answer.templateItem
+                  ? {
+                      id: answer.templateItem.id,
+                      label: answer.templateItem.label,
+                      labelEn: answer.templateItem.labelEn,
+                    }
+                  : null,
+              })),
             }
           : null,
         issues: latestAssignment.task.issues,
