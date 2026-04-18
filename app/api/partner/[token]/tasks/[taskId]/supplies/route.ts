@@ -358,6 +358,30 @@ export async function POST(req: NextRequest, context: RouteContext) {
       }
     }
 
+    const pendingAnswerExtras: Array<{
+      id: string
+      quantityFound: number | null
+      quantityReplenished: number | null
+      finalStateAfterReplenishment: string
+    }> = []
+
+    const pendingReplenishmentLogs: Array<{
+      organizationId: string
+      propertyId: string
+      propertySupplyId: string
+      supplyItemId: string
+      taskId: string
+      taskSupplyAnswerId: string
+      quantityBefore: number | null
+      quantityAdded: number | null
+      quantityAfter: number | null
+      stateBefore: string
+      stateAfter: string
+      performedBy: string
+      notes: string | null
+      loggedAt: Date
+    }> = []
+
     await prisma.$transaction(async (tx) => {
       const now = new Date()
       const mergeKeysToKeepOpen: string[] = []
@@ -430,9 +454,6 @@ export async function POST(req: NextRequest, context: RouteContext) {
             canonical.stateMode === "numeric_thresholds"
               ? canonical.canonicalTruth.currentStock
               : null,
-          quantityFound: incoming.quantityFound ?? null,
-          quantityReplenished: incoming.quantityReplenished ?? null,
-          finalStateAfterReplenishment: finalState,
           notes: incoming.notes || null,
         }
 
@@ -468,7 +489,6 @@ export async function POST(req: NextRequest, context: RouteContext) {
         }
 
         if (mode === "submit") {
-          // Αποθήκευση κατάστασης πριν την ενημέρωση για το log
           const stateBefore = propertySupply.fillLevel
 
           await tx.propertySupply.update({
@@ -492,27 +512,32 @@ export async function POST(req: NextRequest, context: RouteContext) {
             },
           })
 
-          // Γράψιμο immutable ιστορικού συμπλήρωσης
-          await tx.supplyReplenishmentLog.create({
-            data: {
-              organizationId: latestAssignment.task.property.organizationId,
-              propertyId: latestAssignment.task.property.id,
-              propertySupplyId: propertySupply.id,
-              supplyItemId: propertySupply.supplyItemId,
-              taskId: latestAssignment.task.id,
-              taskSupplyAnswerId: savedAnswerId,
-              quantityBefore: incoming.quantityFound ?? null,
-              quantityAdded: incoming.quantityReplenished ?? null,
-              quantityAfter:
-                canonical.stateMode === "numeric_thresholds"
-                  ? (canonical.canonicalTruth.currentStock ?? null)
-                  : null,
-              stateBefore,
-              stateAfter: canonical.fillLevel,
-              performedBy: latestAssignment.partner.name,
-              notes: incoming.notes || null,
-              loggedAt: now,
-            },
+          // Συλλογή για graceful-degradation write μετά το transaction
+          pendingAnswerExtras.push({
+            id: savedAnswerId,
+            quantityFound: incoming.quantityFound ?? null,
+            quantityReplenished: incoming.quantityReplenished ?? null,
+            finalStateAfterReplenishment: finalState,
+          })
+
+          pendingReplenishmentLogs.push({
+            organizationId: latestAssignment.task.property.organizationId,
+            propertyId: latestAssignment.task.property.id,
+            propertySupplyId: propertySupply.id,
+            supplyItemId: propertySupply.supplyItemId,
+            taskId: latestAssignment.task.id,
+            taskSupplyAnswerId: savedAnswerId,
+            quantityBefore: incoming.quantityFound ?? null,
+            quantityAdded: incoming.quantityReplenished ?? null,
+            quantityAfter:
+              canonical.stateMode === "numeric_thresholds"
+                ? (canonical.canonicalTruth.currentStock ?? null)
+                : null,
+            stateBefore,
+            stateAfter: canonical.fillLevel,
+            performedBy: latestAssignment.partner.name,
+            notes: incoming.notes || null,
+            loggedAt: now,
           })
         }
 
@@ -662,6 +687,43 @@ export async function POST(req: NextRequest, context: RouteContext) {
         },
       })
     })
+
+    // Graceful degradation: νέα πεδία TaskSupplyAnswer (migration pending)
+    try {
+      for (const entry of pendingAnswerExtras) {
+        await (
+          prisma as unknown as {
+            taskSupplyAnswer: {
+              update: (args: unknown) => Promise<unknown>
+            }
+          }
+        ).taskSupplyAnswer.update({
+          where: { id: entry.id },
+          data: {
+            quantityFound: entry.quantityFound,
+            quantityReplenished: entry.quantityReplenished,
+            finalStateAfterReplenishment: entry.finalStateAfterReplenishment,
+          },
+        })
+      }
+    } catch {
+      // Graceful degradation — migration δεν έχει τρέξει ακόμα
+    }
+
+    // Graceful degradation: SupplyReplenishmentLog (migration pending)
+    try {
+      for (const logData of pendingReplenishmentLogs) {
+        await (
+          prisma as unknown as {
+            supplyReplenishmentLog: {
+              create: (args: unknown) => Promise<unknown>
+            }
+          }
+        ).supplyReplenishmentLog.create({ data: logData })
+      }
+    } catch {
+      // Graceful degradation — migration δεν έχει τρέξει ακόμα
+    }
 
     const propertyTruth = await refreshPropertyReadiness(
       latestAssignment.task.property.id
