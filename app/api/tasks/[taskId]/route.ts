@@ -18,9 +18,7 @@ import {
   syncTaskIssueRun,
 } from "@/lib/tasks/task-run-sync"
 import {
-  computePropertyReadiness,
   getReadinessStatusLabel,
-  type ReadinessConditionInput,
 } from "@/lib/readiness/compute-property-readiness"
 import { computePropertyOperationalStatus } from "@/lib/readiness/property-operational-status"
 import { refreshPropertyReadiness } from "@/lib/readiness/refresh-property-readiness"
@@ -167,6 +165,22 @@ function safeArray<T>(value: T[] | null | undefined): T[] {
 function normalizePhotoUrls(value: unknown): string[] {
   if (!Array.isArray(value)) return []
   return value.map((item) => String(item ?? "").trim()).filter(Boolean)
+}
+
+function normalizeStoredReadinessStatus(value: unknown): "ready" | "borderline" | "not_ready" | "unknown" {
+  const normalized = String(value ?? "").trim().toLowerCase()
+  if (normalized === "ready") return "ready"
+  if (normalized === "borderline") return "borderline"
+  if (normalized === "not_ready") return "not_ready"
+  if (normalized === "unknown") return "unknown"
+
+  const upper = String(value ?? "").trim().toUpperCase()
+  if (upper === "READY") return "ready"
+  if (upper === "BORDERLINE") return "borderline"
+  if (upper === "NOT_READY") return "not_ready"
+  if (upper === "UNKNOWN") return "unknown"
+
+  return "unknown"
 }
 
 function sortChecklistRun(run: ChecklistRunRecord | null | undefined) {
@@ -368,44 +382,6 @@ function mapDbConditionToExtended(condition: {
   }
 }
 
-function mapRawConditionToReadinessInput(
-  condition: ExtendedRawPropertyConditionRecord
-): ReadinessConditionInput {
-  return {
-    id: condition.id,
-    propertyId: condition.propertyId,
-    conditionType: condition.conditionType as "supply" | "issue" | "damage",
-    status: condition.status as "open" | "monitoring" | "resolved" | "dismissed",
-    blockingStatus: condition.blockingStatus as "blocking" | "non_blocking" | "warning",
-    severity: condition.severity as "low" | "medium" | "high" | "critical",
-    managerDecision: (condition.managerDecision ?? null) as
-      | "allow_with_issue"
-      | "block_until_resolved"
-      | "monitor"
-      | "resolved"
-      | "dismissed"
-      | null,
-    title: condition.title ?? null,
-    description: condition.description ?? condition.managerNotes ?? null,
-    firstDetectedAt: condition.firstDetectedAt ?? null,
-    lastDetectedAt: condition.lastDetectedAt ?? null,
-    createdAt: condition.createdAt ?? null,
-    updatedAt: condition.updatedAt ?? null,
-    resolvedAt: condition.resolvedAt ?? null,
-    dismissedAt: condition.dismissedAt ?? null,
-    sourceType: condition.sourceType ?? null,
-    sourceLabel: condition.sourceLabel ?? null,
-    sourceItemId: condition.sourceItemId ?? null,
-    sourceItemLabel: condition.sourceItemLabel ?? null,
-    sourceRunId: condition.sourceRunId ?? null,
-    sourceAnswerId: condition.sourceAnswerId ?? null,
-    taskId: condition.taskId ?? null,
-    bookingId: condition.bookingId ?? null,
-    propertySupplyId: condition.propertySupplyId ?? null,
-    mergeKey: condition.mergeKey ?? null,
-  }
-}
-
 async function resolveTaskId(context: RouteContext) {
   const params = await context.params
   return String(params.taskId || "").trim()
@@ -462,7 +438,13 @@ async function getTaskPayload(taskId: string, auth: RouteAccessContext) {
           country: true,
           type: true,
           status: true,
+          readinessStatus: true,
+          readinessUpdatedAt: true,
+          readinessReasonsText: true,
           nextCheckInAt: true,
+          openConditionCount: true,
+          openBlockingConditionCount: true,
+          openWarningConditionCount: true,
           defaultPartner: {
             select: {
               id: true,
@@ -801,12 +783,23 @@ async function getTaskPayload(taskId: string, auth: RouteAccessContext) {
   const propertyBookingsPromise = task.propertyId
     ? prisma.booking.findMany({
         where: { propertyId: task.propertyId, ...tenantWhere },
-        select: { id: true, status: true, checkInDate: true, checkOutDate: true, guestName: true },
+        select: {
+          id: true,
+          status: true,
+          checkInDate: true,
+          checkOutDate: true,
+          checkInTime: true,
+          checkOutTime: true,
+          guestName: true,
+        },
         orderBy: { checkInDate: "asc" },
         take: 20,
       })
     : Promise.resolve(
-        [] as { id: string; status: string | null; checkInDate: Date | null; checkOutDate: Date | null; guestName: string | null }[]
+        [] as {
+          id: string; status: string | null; checkInDate: Date | null; checkOutDate: Date | null;
+          checkInTime: string | null; checkOutTime: string | null; guestName: string | null
+        }[]
       )
 
   const propertyAllTasksPromise = task.propertyId
@@ -1125,13 +1118,17 @@ async function getTaskPayload(taskId: string, auth: RouteAccessContext) {
     })) as LooseRecord[]
   )
 
+  const storedReadinessStatus = normalizeStoredReadinessStatus(task.property?.readinessStatus)
+
   const operationalStatusResult = computePropertyOperationalStatus({
-    readinessStatus: null,
+    readinessStatus: storedReadinessStatus,
     bookings: propertyBookings.map((b) => ({
       id: b.id,
       status: b.status as string | null,
       checkInDate: b.checkInDate ?? null,
       checkOutDate: b.checkOutDate ?? null,
+      checkInTime: b.checkInTime ?? null,
+      checkOutTime: b.checkOutTime ?? null,
       guestName: b.guestName ?? null,
     })),
     tasks: normalizedPropertyTasks.map((t) => {
@@ -1160,55 +1157,6 @@ async function getTaskPayload(taskId: string, auth: RouteAccessContext) {
         issueRunStatus: issueRun?.status ?? null,
       }
     }),
-  })
-
-  const readinessConditionInputs: ReadinessConditionInput[] = propertyConditions.map(
-    (condition) =>
-      mapRawConditionToReadinessInput(
-        mapDbConditionToExtended({
-          id: condition.id,
-          propertyId: condition.propertyId,
-          taskId: condition.taskId,
-          bookingId: condition.bookingId,
-          propertySupplyId: condition.propertySupplyId,
-          mergeKey: condition.mergeKey ?? null,
-          title: condition.title,
-          description: condition.description,
-          sourceType: condition.sourceType,
-          sourceLabel: condition.sourceLabel,
-          sourceItemId: condition.sourceItemId,
-          sourceItemLabel: condition.sourceItemLabel,
-          sourceRunId: condition.sourceRunId,
-          sourceAnswerId: condition.sourceAnswerId,
-          conditionType: String(condition.conditionType).toLowerCase(),
-          status: String(condition.status).toLowerCase(),
-          blockingStatus: String(condition.blockingStatus).toLowerCase(),
-          severity: String(condition.severity).toLowerCase(),
-          managerDecision: condition.managerDecision
-            ? String(condition.managerDecision).toLowerCase()
-            : null,
-          managerNotes: condition.managerNotes,
-          firstDetectedAt: condition.firstDetectedAt ?? null,
-          lastDetectedAt: condition.lastDetectedAt ?? null,
-          createdAt: condition.createdAt,
-          updatedAt: condition.updatedAt,
-          resolvedAt: condition.resolvedAt,
-          dismissedAt: condition.dismissedAt,
-        })
-      )
-  )
-
-  const readinessResult = computePropertyReadiness({
-    now: new Date(),
-    nextCheckInAt: task.property?.nextCheckInAt ?? null,
-    conditions: readinessConditionInputs,
-    operationalContext:
-      operationalStatusResult.derivedReadinessStatus !== "unknown"
-        ? {
-            derivedReadinessStatus: operationalStatusResult.derivedReadinessStatus,
-            operationalReason: operationalStatusResult.reason.en,
-          }
-        : undefined,
   })
 
   const warnings: Array<{ code: string; title: string; message: string; severity: string }> = []
@@ -1267,6 +1215,8 @@ async function getTaskPayload(taskId: string, auth: RouteAccessContext) {
     })
   }
 
+  const readinessReasonSummary = String(task.property?.readinessReasonsText ?? "").trim()
+
   const shapedTask = {
     id: task.id,
     opsValidity: getOperationalTaskValidity(task),
@@ -1301,12 +1251,14 @@ async function getTaskPayload(taskId: string, auth: RouteAccessContext) {
           status: task.property.status,
           nextCheckInAt: task.property.nextCheckInAt,
           defaultPartner: task.property.defaultPartner,
-          readinessStatus: readinessResult.status,
-          readinessUpdatedAt: readinessResult.computedAt,
-          readinessReasonsText: readinessResult.reasons.map((r) => r.message).join("\n"),
-          openConditionCount: propertyConditionSnapshot.summary.active,
-          openBlockingConditionCount: propertyConditionSnapshot.summary.blocking,
-          openWarningConditionCount: propertyConditionSnapshot.summary.warning,
+          readinessStatus: storedReadinessStatus,
+          readinessUpdatedAt: task.property.readinessUpdatedAt,
+          readinessReasonsText: task.property.readinessReasonsText,
+          openConditionCount: task.property.openConditionCount ?? propertyConditionSnapshot.summary.active,
+          openBlockingConditionCount:
+            task.property.openBlockingConditionCount ?? propertyConditionSnapshot.summary.blocking,
+          openWarningConditionCount:
+            task.property.openWarningConditionCount ?? propertyConditionSnapshot.summary.warning,
         }
       : null,
     booking: task.booking,
@@ -1343,17 +1295,21 @@ async function getTaskPayload(taskId: string, auth: RouteAccessContext) {
     legacyIssues: issues,
     warnings,
     readiness: {
-      status: readinessResult.status,
-      statusLabel: getReadinessStatusLabel(readinessResult.status, "el"),
-      score: readinessResult.score,
-      explain: readinessResult.explain,
-      reasons: readinessResult.reasons,
-      reasonSummary: readinessResult.reasons.map((r) => r.message),
-      summary: readinessResult.reasons.map((r) => r.message).join(" · ") || null,
-      blockingCount: propertyConditionSnapshot.summary.blocking,
-      warningCount: propertyConditionSnapshot.summary.warning,
-      openConditionsCount: propertyConditionSnapshot.summary.active,
-      nextCheckInAt: task.property?.nextCheckInAt ?? readinessResult.nextCheckInAt ?? null,
+      status: storedReadinessStatus,
+      statusLabel: getReadinessStatusLabel(storedReadinessStatus, "el"),
+      explain: readinessReasonSummary ? [readinessReasonSummary] : [],
+      reasons: propertyConditionSnapshot.reasons,
+      reasonSummary: readinessReasonSummary ? [readinessReasonSummary] : [],
+      summary: readinessReasonSummary || null,
+      blockingCount: task.property?.openBlockingConditionCount ?? propertyConditionSnapshot.summary.blocking,
+      warningCount: task.property?.openWarningConditionCount ?? propertyConditionSnapshot.summary.warning,
+      openConditionsCount: task.property?.openConditionCount ?? propertyConditionSnapshot.summary.active,
+      nextCheckInAt: task.property?.nextCheckInAt ?? null,
+      operationalStatus: operationalStatusResult.operationalStatus,
+      operationalDerivedReadinessStatus: operationalStatusResult.derivedReadinessStatus,
+      operationalReason: operationalStatusResult.reason,
+      activeTarget: operationalStatusResult.activeTarget,
+      planningTargets: operationalStatusResult.planningTargets,
     },
     sendCleaningChecklist: Boolean(task.sendCleaningChecklist),
     sendSuppliesChecklist: Boolean(task.sendSuppliesChecklist),
@@ -1562,11 +1518,6 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       data.usesCustomizedIssuesChecklist = toOptionalBoolean(body.usesCustomizedIssuesChecklist)
     }
 
-    // Canonical completion: αν status → "completed" και completedAt δεν δόθηκε ρητά,
-    // auto-set σε now. Αποτρέπει status="completed" + completedAt=null ασυνέπεια
-    // που επηρεάζει το operational status computation.
-    // Guard: αν task ήδη "completed", δεν αντικαθιστάται το completedAt — διατηρείται
-    // το αρχικό timestamp για λόγους ακεραιότητας ιστορικού.
     if (
       data.status !== undefined &&
       String(data.status).trim().toLowerCase() === "completed" &&
