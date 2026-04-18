@@ -33,11 +33,6 @@ export async function GET(_request: NextRequest, context: RouteContext) {
       )
     }
 
-    // Canonical path: refreshPropertyReadiness υπολογίζει readiness + operational context
-    // και γράφει στη DB ως ενιαία ατομική πράξη.
-    // ΚΑΝΟΝΑΣ: δεν γράφουμε στη DB ξεχωριστά από εδώ — το canonical write path
-    // είναι μόνο το refreshPropertyReadiness ώστε να μην overwrite-αρεται το
-    // derivedReadinessStatus που ενσωματώνει operational context (turnover pending).
     const result = await refreshPropertyReadiness(propertyId)
 
     const {
@@ -72,8 +67,8 @@ export async function GET(_request: NextRequest, context: RouteContext) {
             }
           : null,
         readiness: {
-          status: readiness.status,
-          label: getReadinessStatusLabel(readiness.status, "el"),
+          status: effectiveReadinessStatus,
+          label: getReadinessStatusLabel(effectiveReadinessStatus, "el"),
           score: readiness.score,
           explain: readiness.explain,
           reasons: readiness.reasons,
@@ -82,8 +77,9 @@ export async function GET(_request: NextRequest, context: RouteContext) {
           activeConditionIds: readiness.activeConditionIds,
           blockingConditionIds: readiness.blockingConditionIds,
           warningConditionIds: readiness.warningConditionIds,
-          computedAt: readiness.computedAt,
-          nextCheckInAt: readiness.nextCheckInAt,
+          computedAt: updatedProperty.readinessUpdatedAt ?? readiness.computedAt,
+          nextCheckInAt: updatedProperty.nextCheckInAt ?? readiness.nextCheckInAt,
+          conditionsReadinessStatus: readiness.status,
         },
         operationalStatus: {
           status: operationalStatusResult.operationalStatus,
