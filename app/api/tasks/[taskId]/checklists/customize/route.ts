@@ -68,6 +68,18 @@ function normalizeItemType(value: unknown) {
   return "boolean"
 }
 
+function deriveRequiresChecklist(input: {
+  sendCleaningChecklist: boolean
+  sendSuppliesChecklist: boolean
+  sendIssuesChecklist: boolean
+}) {
+  return (
+    input.sendCleaningChecklist ||
+    input.sendSuppliesChecklist ||
+    input.sendIssuesChecklist
+  )
+}
+
 function sanitizeChecklistItems(value: unknown): SanitizedChecklistItem[] {
   const items = ensureArray(value)
 
@@ -458,6 +470,11 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       await prisma.task.update({
         where: { id: taskId },
         data: {
+          requiresChecklist: deriveRequiresChecklist({
+            sendCleaningChecklist: task.sendCleaningChecklist,
+            sendSuppliesChecklist: isActive,
+            sendIssuesChecklist: task.sendIssuesChecklist,
+          }),
           sendSuppliesChecklist: isActive,
           usesCustomizedSuppliesChecklist: false,
         },
@@ -501,7 +518,11 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
         await prisma.task.update({
           where: { id: taskId },
           data: {
-            requiresChecklist: false,
+            requiresChecklist: deriveRequiresChecklist({
+              sendCleaningChecklist: false,
+              sendSuppliesChecklist: task.sendSuppliesChecklist,
+              sendIssuesChecklist: task.sendIssuesChecklist,
+            }),
             sendCleaningChecklist: false,
             usesCustomizedCleaningChecklist: false,
           },
@@ -607,7 +628,11 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       await prisma.task.update({
         where: { id: taskId },
         data: {
-          requiresChecklist: true,
+          requiresChecklist: deriveRequiresChecklist({
+            sendCleaningChecklist: true,
+            sendSuppliesChecklist: task.sendSuppliesChecklist,
+            sendIssuesChecklist: task.sendIssuesChecklist,
+          }),
           sendCleaningChecklist: true,
           usesCustomizedCleaningChecklist: true,
         },
@@ -640,6 +665,11 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       await prisma.task.update({
         where: { id: taskId },
         data: {
+          requiresChecklist: deriveRequiresChecklist({
+            sendCleaningChecklist: task.sendCleaningChecklist,
+            sendSuppliesChecklist: task.sendSuppliesChecklist,
+            sendIssuesChecklist: false,
+          }),
           sendIssuesChecklist: false,
           usesCustomizedIssuesChecklist: false,
         },
@@ -739,6 +769,11 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     await prisma.task.update({
       where: { id: taskId },
       data: {
+        requiresChecklist: deriveRequiresChecklist({
+          sendCleaningChecklist: task.sendCleaningChecklist,
+          sendSuppliesChecklist: task.sendSuppliesChecklist,
+          sendIssuesChecklist: true,
+        }),
         sendIssuesChecklist: true,
         usesCustomizedIssuesChecklist: true,
       },
