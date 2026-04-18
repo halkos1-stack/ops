@@ -25,8 +25,6 @@ import {
 import { createBookingSyncEvent } from "@/lib/bookings/booking-logging"
 import { refreshPropertyReadiness } from "@/lib/readiness/refresh-property-readiness"
 
-// ─── Local parsing helpers ────────────────────────────────────────────────────
-
 function toNullableString(value: unknown) {
   if (value === undefined || value === null) return null
   const text = String(value).trim()
@@ -85,7 +83,17 @@ function resolveCanonicalChecklistFlags(input: {
   }
 }
 
-// ─── Query builder ────────────────────────────────────────────────────────────
+function deriveRequiresChecklist(input: {
+  sendCleaningChecklist: boolean
+  sendSuppliesChecklist: boolean
+  sendIssuesChecklist: boolean
+}) {
+  return (
+    input.sendCleaningChecklist ||
+    input.sendSuppliesChecklist ||
+    input.sendIssuesChecklist
+  )
+}
 
 function buildTaskWhere(
   auth: RouteAccessContext,
@@ -137,8 +145,6 @@ function buildTaskWhere(
   return where
 }
 
-// ─── GET ──────────────────────────────────────────────────────────────────────
-
 export async function GET(req: NextRequest) {
   try {
     const access = await requireApiAppAccess()
@@ -182,8 +188,6 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// ─── POST ─────────────────────────────────────────────────────────────────────
-
 export async function POST(req: NextRequest) {
   try {
     const access = await requireApiAppAccess()
@@ -195,7 +199,6 @@ export async function POST(req: NextRequest) {
     const body = await req.json()
     const auth = access.auth
 
-    // ─── Organization access ─────────────────────────────────────────────────
     const organizationId =
       toNullableString(body.organizationId) || auth.organizationId || null
 
@@ -213,7 +216,6 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // ─── Required fields ──────────────────────────────────────────────────────
     const propertyId = String(body.propertyId || "").trim()
     const bookingId = toNullableString(body.bookingId)
     const taskSource = (toNullableString(body.source) || "manual").toLowerCase()
@@ -262,13 +264,12 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // ─── Checklist flags ──────────────────────────────────────────────────────
     const requiresPhotos = Boolean(body.requiresPhotos)
     const requiresApproval = Boolean(body.requiresApproval)
 
     const requestedCleaningChecklist =
       body.sendCleaningChecklist === undefined
-        ? true
+        ? false
         : Boolean(body.sendCleaningChecklist)
     const requestedSuppliesChecklist = Boolean(body.sendSuppliesChecklist)
     const requestedIssuesChecklist = Boolean(body.sendIssuesChecklist)
@@ -283,14 +284,16 @@ export async function POST(req: NextRequest) {
     const sendCleaningChecklist = canonicalChecklistFlags.sendCleaningChecklist
     const sendSuppliesChecklist = canonicalChecklistFlags.sendSuppliesChecklist
     const sendIssuesChecklist = canonicalChecklistFlags.sendIssuesChecklist
-    const requiresChecklist =
-      sendCleaningChecklist || sendSuppliesChecklist || sendIssuesChecklist
+    const requiresChecklist = deriveRequiresChecklist({
+      sendCleaningChecklist,
+      sendSuppliesChecklist,
+      sendIssuesChecklist,
+    })
 
     const usesCustomizedCleaningChecklist = Boolean(body.usesCustomizedCleaningChecklist)
     const usesCustomizedSuppliesChecklist = Boolean(body.usesCustomizedSuppliesChecklist)
     const usesCustomizedIssuesChecklist = Boolean(body.usesCustomizedIssuesChecklist)
 
-    // ─── Alert ────────────────────────────────────────────────────────────────
     const alertEnabled = Boolean(body.alertEnabled)
     let alertAt: Date | null = null
 
@@ -307,7 +310,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ─── Entity validation ────────────────────────────────────────────────────
     const property = await prisma.property.findFirst({
       where: { id: propertyId, organizationId },
       select: { id: true, defaultPartnerId: true },
@@ -344,7 +346,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ─── Checklist prerequisite validation ───────────────────────────────────
     if (sendCleaningChecklist) {
       const primaryTemplate = await findPrimaryCleaningTemplate(organizationId, propertyId)
       if (!primaryTemplate) {
@@ -380,7 +381,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ─── Task creation ────────────────────────────────────────────────────────
     const task = await prisma.task.create({
       data: {
         organizationId,
@@ -411,7 +411,6 @@ export async function POST(req: NextRequest) {
       },
     })
 
-    // ─── Sync checklist runs ──────────────────────────────────────────────────
     await syncTaskChecklistRun({
       taskId: task.id,
       organizationId,
@@ -432,7 +431,6 @@ export async function POST(req: NextRequest) {
       sendIssuesChecklist,
     })
 
-    // ─── Activity log ─────────────────────────────────────────────────────────
     await prisma.activityLog.create({
       data: {
         organizationId,
@@ -475,10 +473,8 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    // ─── Readiness refresh ────────────────────────────────────────────────────
     await refreshPropertyReadiness(propertyId)
 
-    // ─── Response ─────────────────────────────────────────────────────────────
     const fullTask = await prisma.task.findUnique({
       where: { id: task.id },
       include: taskDetailsInclude,
