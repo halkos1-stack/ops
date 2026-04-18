@@ -279,6 +279,10 @@ function getEffectiveStatus(
     return "dismissed"
   }
 
+  if (managerDecision === "monitor") {
+    return "monitoring"
+  }
+
   return status
 }
 
@@ -295,6 +299,18 @@ function getEffectiveBlockingStatus(
 
   if (managerDecision === "block_until_resolved") {
     return "blocking"
+  }
+
+  if (managerDecision === "allow_with_issue") {
+    if (blockingStatus === "blocking") {
+      return "warning"
+    }
+
+    return blockingStatus
+  }
+
+  if (managerDecision === "monitor") {
+    return "warning"
   }
 
   return blockingStatus

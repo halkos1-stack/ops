@@ -4,9 +4,11 @@ import { requireApiAppAccess, canAccessOrganization } from "@/lib/route-access"
 import { createBookingSyncEvent } from "@/lib/bookings/booking-logging"
 import {
   findPrimaryCleaningTemplate,
+  findPrimaryIssueTemplate,
   countActivePropertySupplies,
   syncTaskChecklistRun,
   syncTaskSupplyRun,
+  syncTaskIssueRun,
 } from "@/lib/tasks/task-run-sync"
 import { refreshPropertyReadiness } from "@/lib/readiness/refresh-property-readiness"
 import {
@@ -38,12 +40,25 @@ function parseOptionalDateTime(value: unknown) {
   return date
 }
 
+function deriveRequiresChecklist(input: {
+  sendCleaningChecklist: boolean
+  sendSuppliesChecklist: boolean
+  sendIssuesChecklist: boolean
+}) {
+  return (
+    input.sendCleaningChecklist ||
+    input.sendSuppliesChecklist ||
+    input.sendIssuesChecklist
+  )
+}
+
 function normalizeTaskForUi<
   T extends {
     source: string
     bookingId: string | null
     checklistRun: unknown
     supplyRun: unknown
+    issueRun: unknown
   },
 >(task: T) {
   return {
@@ -51,8 +66,10 @@ function normalizeTaskForUi<
     opsValidity: getOperationalTaskValidity(task),
     cleaningChecklistRun: task.checklistRun ?? null,
     suppliesChecklistRun: task.supplyRun ?? null,
+    issuesChecklistRun: task.issueRun ?? null,
     checklistRun: task.checklistRun ?? null,
     supplyRun: task.supplyRun ?? null,
+    issueRun: task.issueRun ?? null,
   }
 }
 
@@ -118,6 +135,47 @@ async function getPropertyTasksPayload(propertyId: string) {
           requiresPhoto: true,
           opensIssueOnFail: true,
           optionsText: true,
+        },
+      },
+    },
+  })
+
+  const propertyIssueTemplate = await prisma.propertyIssueTemplate.findFirst({
+    where: {
+      propertyId,
+      isPrimary: true,
+      isActive: true,
+    },
+    orderBy: [{ updatedAt: "desc" }],
+    select: {
+      id: true,
+      propertyId: true,
+      title: true,
+      description: true,
+      isPrimary: true,
+      isActive: true,
+      createdAt: true,
+      updatedAt: true,
+      items: {
+        orderBy: {
+          sortOrder: "asc",
+        },
+        select: {
+          id: true,
+          label: true,
+          labelEn: true,
+          description: true,
+          sortOrder: true,
+          itemType: true,
+          isRequired: true,
+          allowsIssue: true,
+          allowsDamage: true,
+          defaultIssueType: true,
+          defaultSeverity: true,
+          requiresPhoto: true,
+          affectsHostingByDefault: true,
+          urgentByDefault: true,
+          locationHint: true,
         },
       },
     },
@@ -250,6 +308,28 @@ async function getPropertyTasksPayload(propertyId: string) {
           },
         },
       },
+      issueRun: {
+        include: {
+          template: {
+            select: {
+              id: true,
+              title: true,
+              description: true,
+              isPrimary: true,
+              isActive: true,
+            },
+          },
+          answers: {
+            select: {
+              id: true,
+              title: true,
+              reportType: true,
+              createdIssueId: true,
+              createdAt: true,
+            },
+          },
+        },
+      },
       issues: {
         select: {
           id: true,
@@ -307,6 +387,7 @@ async function getPropertyTasksPayload(propertyId: string) {
   const property = {
     ...propertyBase,
     checklistTemplates,
+    propertyIssueTemplate,
     propertySupplies,
     issues,
     tasks,
@@ -315,6 +396,7 @@ async function getPropertyTasksPayload(propertyId: string) {
   return {
     property,
     checklistTemplates,
+    propertyIssueTemplate,
     propertySupplies,
     issues,
     bookings,
@@ -435,8 +517,9 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
     const sendCleaningChecklist = Boolean(body.sendCleaningChecklist)
     const sendSuppliesChecklist = Boolean(body.sendSuppliesChecklist)
+    const sendIssuesChecklist = Boolean(body.sendIssuesChecklist)
 
-    if (!sendCleaningChecklist && !sendSuppliesChecklist) {
+    if (!sendCleaningChecklist && !sendSuppliesChecklist && !sendIssuesChecklist) {
       return NextResponse.json(
         { error: "Πρέπει να επιλεγεί τουλάχιστον μία ενότητα εργασίας." },
         { status: 400 }
@@ -479,6 +562,14 @@ export async function POST(req: NextRequest, context: RouteContext) {
         }
       | null = null
 
+    let primaryIssueTemplate:
+      | {
+          id: string
+          title: string
+          description: string | null
+        }
+      | null = null
+
     if (sendCleaningChecklist) {
       primaryCleaningTemplate = await findPrimaryCleaningTemplate(
         property.organizationId,
@@ -504,6 +595,23 @@ export async function POST(req: NextRequest, context: RouteContext) {
           {
             error:
               "Δεν υπάρχουν ενεργά αναλώσιμα για αποστολή λίστας αναλωσίμων.",
+          },
+          { status: 400 }
+        )
+      }
+    }
+
+    if (sendIssuesChecklist) {
+      primaryIssueTemplate = await findPrimaryIssueTemplate(
+        property.organizationId,
+        property.id
+      )
+
+      if (!primaryIssueTemplate) {
+        return NextResponse.json(
+          {
+            error:
+              "Δεν υπάρχει ενεργή βασική λίστα βλαβών και ζημιών για αυτό το ακίνητο.",
           },
           { status: 400 }
         )
@@ -545,6 +653,12 @@ export async function POST(req: NextRequest, context: RouteContext) {
       }
     }
 
+    const requiresChecklist = deriveRequiresChecklist({
+      sendCleaningChecklist,
+      sendSuppliesChecklist,
+      sendIssuesChecklist,
+    })
+
     const createdTask = await prisma.$transaction(async (tx) => {
       const task = await tx.task.create({
         data: {
@@ -562,10 +676,11 @@ export async function POST(req: NextRequest, context: RouteContext) {
           scheduledEndTime: toNullableText(body.scheduledEndTime),
           dueDate: body.dueDate ? new Date(body.dueDate) : null,
           requiresPhotos: Boolean(body.requiresPhotos),
-          requiresChecklist: sendCleaningChecklist,
+          requiresChecklist,
           requiresApproval: Boolean(body.requiresApproval),
           sendCleaningChecklist,
           sendSuppliesChecklist,
+          sendIssuesChecklist,
           alertEnabled,
           alertAt,
           notes: toNullableText(body.notes),
@@ -589,7 +704,9 @@ export async function POST(req: NextRequest, context: RouteContext) {
             taskType,
             sendCleaningChecklist,
             sendSuppliesChecklist,
+            sendIssuesChecklist,
             checklistTemplateId: primaryCleaningTemplate?.id || null,
+            issueTemplateId: primaryIssueTemplate?.id || null,
             alertEnabled,
             alertAt,
           },
@@ -628,6 +745,13 @@ export async function POST(req: NextRequest, context: RouteContext) {
       taskId: createdTask.id,
       propertyId: property.id,
       sendSuppliesChecklist,
+    })
+
+    await syncTaskIssueRun({
+      taskId: createdTask.id,
+      organizationId: property.organizationId,
+      propertyId: property.id,
+      sendIssuesChecklist,
     })
 
     await refreshPropertyReadiness(property.id)

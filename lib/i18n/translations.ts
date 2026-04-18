@@ -119,7 +119,7 @@ export function getBookingsModuleTexts(language: AppLanguage) {
         historyButton: "Booking history",
         listTitle: "Bookings list",
         listDescription:
-          "Tasks linked to booking and property are created from here.",
+          "From here the manager can create a controlled task linked to the booking and the property.",
         all: "All",
         active: "Active",
         withoutTasks: "Without task",
@@ -155,9 +155,10 @@ export function getBookingsModuleTexts(language: AppLanguage) {
           "The manager can define an exact alert time for the task.",
         alertEnabled: "Enabled",
         alertAt: "Alert time",
-        checklistsTitle: "Task checklists",
+        checklistsTitle: "Task execution sections",
         sendCleaningChecklist: "Send cleaning checklist",
         sendSuppliesChecklist: "Send supplies checklist",
+        sendIssuesChecklist: "Send issues and damages checklist",
         titlePlaceholder: "If empty, a suggested title will be used",
         descriptionPlaceholder: "Optional description",
         notesPlaceholder: "Internal notes for the task",
@@ -199,7 +200,7 @@ export function getBookingsModuleTexts(language: AppLanguage) {
         propertyCard: "Property",
         linkedTasksCard: "Linked tasks",
         syncHistoryCard: "Sync history",
-        createTaskCard: "New task from booking",
+        createTaskCard: "Controlled task from booking",
         noTasks: "There are no tasks from this booking yet.",
         noHistory: "There is no history yet.",
         noProperty: "This booking has not been matched with a property yet.",
@@ -284,7 +285,7 @@ export function getBookingsModuleTexts(language: AppLanguage) {
       historyButton: "Ιστορικό κρατήσεων",
       listTitle: "Λίστα κρατήσεων",
       listDescription:
-        "Από εδώ δημιουργείται εργασία συνδεδεμένη με την κράτηση και το ακίνητο.",
+        "Από εδώ ο διαχειριστής δημιουργεί ελεγχόμενη εργασία συνδεδεμένη με την κράτηση και το ακίνητο.",
       all: "Όλες",
       active: "Ενεργές",
       withoutTasks: "Χωρίς εργασία",
@@ -320,9 +321,10 @@ export function getBookingsModuleTexts(language: AppLanguage) {
         "Ο διαχειριστής μπορεί να ορίσει ακριβή ώρα ειδοποίησης για την εργασία.",
       alertEnabled: "Ενεργό",
       alertAt: "Ώρα alert",
-      checklistsTitle: "Λίστες εργασίας",
+      checklistsTitle: "Ενότητες εκτέλεσης εργασίας",
       sendCleaningChecklist: "Αποστολή λίστας καθαριότητας",
       sendSuppliesChecklist: "Αποστολή λίστας αναλωσίμων",
+      sendIssuesChecklist: "Αποστολή λίστας βλαβών και ζημιών",
       titlePlaceholder: "Αν μείνει κενό, θα χρησιμοποιηθεί προτεινόμενος τίτλος",
       descriptionPlaceholder: "Προαιρετική περιγραφή",
       notesPlaceholder: "Εσωτερικές σημειώσεις για την εργασία",
@@ -364,7 +366,7 @@ export function getBookingsModuleTexts(language: AppLanguage) {
       propertyCard: "Ακίνητο",
       linkedTasksCard: "Συνδεδεμένες εργασίες",
       syncHistoryCard: "Ιστορικό συγχρονισμού",
-      createTaskCard: "Νέα εργασία από κράτηση",
+      createTaskCard: "Ελεγχόμενη εργασία από κράτηση",
       noTasks: "Δεν υπάρχουν ακόμη εργασίες από αυτή την κράτηση.",
       noHistory: "Δεν υπάρχει ιστορικό ακόμη.",
       noProperty: "Η κράτηση δεν έχει αντιστοιχιστεί ακόμη με ακίνητο.",
@@ -498,7 +500,7 @@ export function getAiAssistantTexts(language: AppLanguage) {
           items: [
             "How do I create a task from a booking?",
             "How does task assignment work?",
-            "How do cleaning checklist and supplies checklist work?",
+            "How do the cleaning list, supplies list and issues list work?",
             "What does alert mean in OPS?",
           ],
         },
@@ -558,7 +560,7 @@ export function getAiAssistantTexts(language: AppLanguage) {
         items: [
           "Πώς δημιουργώ εργασία από κράτηση;",
           "Πώς λειτουργεί η ανάθεση σε συνεργάτη;",
-          "Πώς λειτουργεί η λίστα καθαριότητας και η λίστα αναλωσίμων;",
+          "Πώς λειτουργούν η λίστα καθαριότητας, η λίστα αναλωσίμων και η λίστα βλαβών και ζημιών;",
           "Τι σημαίνει ειδοποίηση στο OPS;",
         ],
       },
@@ -1468,13 +1470,16 @@ export function getTaskDetailsPageTexts(language: AppLanguage) {
       lists: {
         sectionTitle: "Task lists",
         sectionHelp:
-          "Here you can see which lists apply to this task. Cleaning can be customized only for this task, while supplies come from the property's active supplies.",
+          "Here you can see the three execution sections of this task. Cleaning and issues can be customized only for this task, while supplies always come from the active property supplies.",
         cleaningListTitle: "Cleaning list",
         suppliesListTitle: "Supplies list",
+        issuesListTitle: "Issues and damages list",
         cleaningCardHelp:
           "This section concerns only the cleaning list of this task.",
         suppliesCardHelp:
           "This section concerns only the supplies list of this task.",
+        issuesCardHelp:
+          "This section concerns only the issues and damages list of this task.",
         statusBadgeHelp:
           "Shows the current state of the list: active/inactive and whether it has been submitted.",
         sentAfterAcceptance: "Sent after acceptance",
@@ -1486,6 +1491,7 @@ export function getTaskDetailsPageTexts(language: AppLanguage) {
         submissionTimeHelp: "The time when the list was submitted by the partner.",
         cleaningDefaultTitle: "Cleaning list",
         suppliesDefaultTitle: "Supplies list",
+        issuesDefaultTitle: "Issues and damages list",
         previewEditThisTask: "Edit for this task",
         previewEditHint: "Changes will apply only to this specific task.",
         suppliesManageLink: "Manage supplies",
@@ -1494,6 +1500,8 @@ export function getTaskDetailsPageTexts(language: AppLanguage) {
         modalCleaningPreviewDescription: "The list is shown as it is sent to the partner.",
         modalSuppliesPreviewTitle: "Supplies list preview",
         modalSuppliesPreviewDescription: "The list is shown as it is sent to the partner.",
+        modalIssuesPreviewTitle: "Issues and damages list preview",
+        modalIssuesPreviewDescription: "The list is shown as it is sent to the partner.",
         listItemRequired: "Required",
         listItemRequiresPhoto: "Requires photo",
         hiddenSystemSupplyNote:
@@ -1517,7 +1525,7 @@ export function getTaskDetailsPageTexts(language: AppLanguage) {
         answerType: "Answer type",
         category: "Category",
         options: "Options",
-        optionsHelp: "Used only for choice and select fields.",
+        optionsHelp: "Used only for choice/select fields.",
         moveUp: "Move up",
         moveDown: "Move down",
         remove: "Remove",
@@ -1556,10 +1564,14 @@ export function getTaskDetailsPageTexts(language: AppLanguage) {
           "Shows whether the partner has submitted the cleaning list for this task.",
         suppliesSubmissionHelp:
           "Shows whether the partner has submitted the supplies list for this task.",
+        issuesSubmissionHelp:
+          "Shows whether the partner has submitted the issues and damages list for this task.",
         cleaningSubmittedTitle: "Submitted cleaning list",
         suppliesSubmittedTitle: "Submitted supplies list",
+        issuesSubmittedTitle: "Submitted issues and damages list",
         noCleaningSubmission: "There is no submission yet for the cleaning list.",
         noSuppliesSubmission: "There is no submission yet for the supplies list.",
+        noIssuesSubmission: "There is no submission yet for the issues and damages list.",
         viewSubmission: "View submission",
         responsesCount: "Responses",
         modalCleaningAnswersTitle: "Submitted cleaning list",
@@ -1568,6 +1580,9 @@ export function getTaskDetailsPageTexts(language: AppLanguage) {
         modalSuppliesAnswersTitle: "Submitted supplies list",
         modalSuppliesAnswersDescription:
           "See what the partner submitted for the supplies list of this task.",
+        modalIssuesAnswersTitle: "Submitted issues and damages list",
+        modalIssuesAnswersDescription:
+          "See what the partner submitted for the issues and damages list of this task.",
         submittedBanner: "Submitted",
         submittedAtLabel: "Submission time",
         noAnswersReturned:
@@ -1739,13 +1754,16 @@ export function getTaskDetailsPageTexts(language: AppLanguage) {
     lists: {
       sectionTitle: "Λίστες εργασίας",
       sectionHelp:
-        "Από εδώ βλέπετε ποιες λίστες ισχύουν για τη συγκεκριμένη εργασία. Η καθαριότητα μπορεί να προσαρμοστεί μόνο για αυτή την εργασία, ενώ τα αναλώσιμα προέρχονται από τα ενεργά αναλώσιμα του ακινήτου.",
+        "Από εδώ βλέπετε τις τρεις ενότητες εκτέλεσης της συγκεκριμένης εργασίας. Η καθαριότητα και η λίστα βλαβών/ζημιών μπορούν να προσαρμοστούν μόνο για αυτή την εργασία, ενώ τα αναλώσιμα προέρχονται πάντα από τα ενεργά αναλώσιμα του ακινήτου.",
       cleaningListTitle: "Λίστα καθαριότητας",
       suppliesListTitle: "Λίστα αναλωσίμων",
+      issuesListTitle: "Λίστα βλαβών και ζημιών",
       cleaningCardHelp:
         "Αυτή η ενότητα αφορά μόνο τη λίστα καθαριότητας της συγκεκριμένης εργασίας.",
       suppliesCardHelp:
         "Αυτή η ενότητα αφορά μόνο τη λίστα αναλωσίμων της συγκεκριμένης εργασίας.",
+      issuesCardHelp:
+        "Αυτή η ενότητα αφορά μόνο τη λίστα βλαβών και ζημιών της συγκεκριμένης εργασίας.",
       statusBadgeHelp:
         "Δείχνει την τρέχουσα κατάσταση της λίστας: αν είναι ενεργή και αν έχει υποβληθεί.",
       sentAfterAcceptance: "Αποστολή μετά την αποδοχή",
@@ -1757,6 +1775,7 @@ export function getTaskDetailsPageTexts(language: AppLanguage) {
       submissionTimeHelp: "Η στιγμή που υποβλήθηκε η λίστα από τον συνεργάτη.",
       cleaningDefaultTitle: "Λίστα καθαριότητας",
       suppliesDefaultTitle: "Λίστα αναλωσίμων",
+      issuesDefaultTitle: "Λίστα βλαβών και ζημιών",
       previewEditThisTask: "Επεξεργασία για αυτή την εργασία",
       previewEditHint: "Οι αλλαγές θα ισχύσουν μόνο για τη συγκεκριμένη εργασία.",
       suppliesManageLink: "Διαχείριση αναλωσίμων",
@@ -1765,6 +1784,8 @@ export function getTaskDetailsPageTexts(language: AppLanguage) {
       modalCleaningPreviewDescription: "Η λίστα εμφανίζεται όπως στέλνεται στον συνεργάτη.",
       modalSuppliesPreviewTitle: "Προβολή λίστας αναλωσίμων",
       modalSuppliesPreviewDescription: "Η λίστα εμφανίζεται όπως στέλνεται στον συνεργάτη.",
+      modalIssuesPreviewTitle: "Προβολή λίστας βλαβών και ζημιών",
+      modalIssuesPreviewDescription: "Η λίστα εμφανίζεται όπως στέλνεται στον συνεργάτη.",
       listItemRequired: "Υποχρεωτικό",
       listItemRequiresPhoto: "Απαιτεί φωτογραφία",
       hiddenSystemSupplyNote:
@@ -1827,10 +1848,14 @@ export function getTaskDetailsPageTexts(language: AppLanguage) {
         "Δείχνει αν ο συνεργάτης έχει υποβάλει τη λίστα καθαριότητας για αυτή την εργασία.",
       suppliesSubmissionHelp:
         "Δείχνει αν ο συνεργάτης έχει υποβάλει τη λίστα αναλωσίμων για αυτή την εργασία.",
+      issuesSubmissionHelp:
+        "Δείχνει αν ο συνεργάτης έχει υποβάλει τη λίστα βλαβών και ζημιών για αυτή την εργασία.",
       cleaningSubmittedTitle: "Λίστα καθαριότητας που υποβλήθηκε",
       suppliesSubmittedTitle: "Λίστα αναλωσίμων που υποβλήθηκε",
+      issuesSubmittedTitle: "Λίστα βλαβών και ζημιών που υποβλήθηκε",
       noCleaningSubmission: "Δεν υπάρχει ακόμη υποβολή για τη λίστα καθαριότητας.",
       noSuppliesSubmission: "Δεν υπάρχει ακόμη υποβολή για τη λίστα αναλωσίμων.",
+      noIssuesSubmission: "Δεν υπάρχει ακόμη υποβολή για τη λίστα βλαβών και ζημιών.",
       viewSubmission: "Προβολή υποβολής",
       responsesCount: "Απαντήσεις",
       modalCleaningAnswersTitle: "Υποβλημένη λίστα καθαριότητας",
@@ -1839,6 +1864,9 @@ export function getTaskDetailsPageTexts(language: AppLanguage) {
       modalSuppliesAnswersTitle: "Υποβλημένη λίστα αναλωσίμων",
       modalSuppliesAnswersDescription:
         "Δείτε τι έχει υποβάλει ο συνεργάτης για τη λίστα αναλωσίμων της συγκεκριμένης εργασίας.",
+      modalIssuesAnswersTitle: "Υποβλημένη λίστα βλαβών και ζημιών",
+      modalIssuesAnswersDescription:
+        "Δείτε τι έχει υποβάλει ο συνεργάτης για τη λίστα βλαβών και ζημιών της συγκεκριμένης εργασίας.",
       submittedBanner: "Υποβλήθηκε",
       submittedAtLabel: "Χρόνος υποβολής",
       noAnswersReturned:
@@ -1928,7 +1956,7 @@ export function getPropertyChecklistManagementTexts(language: AppLanguage) {
       pageEyebrow: "Property list management",
       pageTitleFallback: "Property lists",
       pageSubtitle:
-        "Each property has only two lists: one main cleaning list and one supplies list built automatically from the active property supplies.",
+        "Each property has three core execution sections: one main cleaning list, one dynamic supplies list built automatically from the active property supplies, and one main issues / damages reporting list.",
       backToProperty: "Back to property",
       backToChecklists: "Back to checklists",
       loading: "Loading...",
@@ -1940,6 +1968,7 @@ export function getPropertyChecklistManagementTexts(language: AppLanguage) {
       summaryTitle: "Summary",
       cleaningSummary: "Cleaning list",
       suppliesSummary: "Supplies list",
+      issuesSummary: "Issues / damages list",
       configured: "Configured",
       missing: "Missing",
       activeSupplies: "Active supplies",
@@ -1968,6 +1997,16 @@ export function getPropertyChecklistManagementTexts(language: AppLanguage) {
         "Go to the supplies page and activate the items you want to participate in the task supplies list.",
       activeSuppliesCount: "Active supplies",
       sampleItems: "Example active items",
+      issuesSectionTitle: "Main issues / damages reporting list",
+      issuesSectionSubtitle:
+        "This section holds the structured issue and damage reporting list used when the task enables issue reporting.",
+      noIssuesTitle: "No main issues / damages reporting list has been defined yet",
+      noIssuesSubtitle:
+        "Create the single main issues / damages reporting list for this property now.",
+      createIssuesChecklist: "Create issues list",
+      editIssuesChecklist: "View / edit issues list",
+      issuesItemsCount: "Issue items",
+      issuesStatus: "Status",
       formTitle: "New main cleaning list",
       formSubtitle:
         "You define one unique main list for the property. We do not create support templates in this flow.",
@@ -2029,7 +2068,7 @@ export function getPropertyChecklistManagementTexts(language: AppLanguage) {
       supplyModeFlagLow: "Mark as low",
       optionsHelp: "Used only for choice/select fields.",
       editorConsistencyNote:
-        "This page and the task cleaning list editor should remain visually and structurally aligned.",
+        "This page and the task list editors should remain visually and structurally aligned.",
     }
   }
 
@@ -2037,7 +2076,7 @@ export function getPropertyChecklistManagementTexts(language: AppLanguage) {
     pageEyebrow: "Διαχείριση λιστών ακινήτου",
     pageTitleFallback: "Λίστες ακινήτου",
     pageSubtitle:
-      "Για κάθε ακίνητο υπάρχουν μόνο δύο λίστες: μία βασική λίστα καθαριότητας και μία λίστα αναλωσίμων που χτίζεται αυτόματα από τα ενεργά αναλώσιμα του ακινήτου.",
+      "Για κάθε ακίνητο υπάρχουν τρεις βασικές ενότητες εκτέλεσης: μία βασική λίστα καθαριότητας, μία λίστα αναλωσίμων που χτίζεται αυτόματα από τα ενεργά αναλώσιμα του ακινήτου και μία βασική λίστα αναφοράς βλαβών / ζημιών.",
     backToProperty: "Επιστροφή στο ακίνητο",
     backToChecklists: "Επιστροφή στα checklists",
     loading: "Φόρτωση...",
@@ -2049,6 +2088,7 @@ export function getPropertyChecklistManagementTexts(language: AppLanguage) {
     summaryTitle: "Σύνοψη",
     cleaningSummary: "Λίστα καθαριότητας",
     suppliesSummary: "Λίστα αναλωσίμων",
+    issuesSummary: "Λίστα βλαβών / ζημιών",
     configured: "Ρυθμισμένη",
     missing: "Δεν έχει οριστεί",
     activeSupplies: "Ενεργά αναλώσιμα",
@@ -2077,6 +2117,16 @@ export function getPropertyChecklistManagementTexts(language: AppLanguage) {
       "Πήγαινε στη σελίδα αναλωσίμων και ενεργοποίησε όσα θέλεις να συμμετέχουν στη λίστα αναλωσίμων των εργασιών.",
     activeSuppliesCount: "Ενεργά αναλώσιμα",
     sampleItems: "Ενδεικτικά ενεργά στοιχεία",
+    issuesSectionTitle: "Βασική λίστα αναφοράς βλαβών / ζημιών",
+    issuesSectionSubtitle:
+      "Αυτή η ενότητα κρατά τη δομημένη λίστα αναφοράς βλαβών και ζημιών που χρησιμοποιείται όταν η εργασία ενεργοποιεί αναφορά θεμάτων.",
+    noIssuesTitle: "Δεν έχει οριστεί ακόμη βασική λίστα αναφοράς βλαβών / ζημιών",
+    noIssuesSubtitle:
+      "Δημιούργησε τώρα τη μοναδική βασική λίστα βλαβών / ζημιών του ακινήτου.",
+    createIssuesChecklist: "Δημιουργία λίστας βλαβών / ζημιών",
+    editIssuesChecklist: "Προβολή / επεξεργασία λίστας βλαβών / ζημιών",
+    issuesItemsCount: "Στοιχεία λίστας βλαβών / ζημιών",
+    issuesStatus: "Κατάσταση",
     formTitle: "Νέα βασική λίστα καθαριότητας",
     formSubtitle:
       "Ορίζεις μία μοναδική βασική λίστα για το ακίνητο. Δεν δημιουργούμε βοηθητικά πρότυπα σε αυτή τη ροή.",
@@ -2139,7 +2189,7 @@ export function getPropertyChecklistManagementTexts(language: AppLanguage) {
     supplyModeFlagLow: "Σήμανση χαμηλού",
     optionsHelp: "Χρησιμοποιείται μόνο σε πεδία επιλογής.",
     editorConsistencyNote:
-      "Αυτή η σελίδα και ο επεξεργαστής λίστας καθαριότητας της εργασίας πρέπει να παραμένουν οπτικά και δομικά ευθυγραμμισμένοι.",
+      "Αυτή η σελίδα και οι επεξεργαστές λιστών της εργασίας πρέπει να παραμένουν οπτικά και δομικά ευθυγραμμισμένοι.",
   }
 }
 

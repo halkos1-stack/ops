@@ -68,6 +68,24 @@ type SuppliesRunLite = {
   }>
 }
 
+type IssueRunLite = {
+  id: string
+  status: string
+  startedAt?: string | null
+  completedAt?: string | null
+  template?: {
+    id: string
+    title: string
+    isPrimary?: boolean
+  } | null
+  answers?: Array<{
+    id: string
+    title?: string | null
+    reportType?: string | null
+    createdIssueId?: string | null
+  }>
+}
+
 type PropertyDetail = {
   id: string
   code: string
@@ -117,6 +135,7 @@ type PropertyDetail = {
     alertAt?: string | null
     sendCleaningChecklist?: boolean
     sendSuppliesChecklist?: boolean
+    sendIssuesChecklist?: boolean
     notes?: string | null
     resultNotes?: string | null
     createdAt?: string
@@ -150,8 +169,10 @@ type PropertyDetail = {
     } | null
     cleaningChecklistRun?: ChecklistRunLite | null
     suppliesChecklistRun?: SuppliesRunLite | null
+    issuesChecklistRun?: IssueRunLite | null
     checklistRun?: ChecklistRunLite | null
     supplyRun?: SuppliesRunLite | null
+    issueRun?: IssueRunLite | null
   }>
 
   issues?: Array<{
@@ -195,6 +216,33 @@ type PropertyDetail = {
       optionsText?: string | null
     }>
   }>
+
+  propertyIssueTemplate?: {
+    id: string
+    title: string
+    description?: string | null
+    isPrimary: boolean
+    isActive: boolean
+    createdAt: string
+    updatedAt: string
+    items?: Array<{
+      id: string
+      label: string
+      labelEn?: string | null
+      description?: string | null
+      sortOrder: number
+      itemType: string
+      isRequired: boolean
+      allowsIssue?: boolean
+      allowsDamage?: boolean
+      defaultIssueType?: string | null
+      defaultSeverity?: string | null
+      requiresPhoto?: boolean
+      affectsHostingByDefault?: boolean
+      urgentByDefault?: boolean
+      locationHint?: string | null
+    }>
+  } | null
 
   propertySupplies?: Array<{
     id: string
@@ -515,6 +563,11 @@ function getPrimaryCleaningChecklist(property: PropertyDetail | null) {
   )
 }
 
+function getIssuesTemplate(property: PropertyDetail | null) {
+  if (!property) return null
+  return property.propertyIssueTemplate || null
+}
+
 function getCleaningRun(task: NonNullable<PropertyDetail["tasks"]>[number]) {
   if (task.cleaningChecklistRun) return task.cleaningChecklistRun
   if (task.checklistRun) return task.checklistRun
@@ -527,7 +580,13 @@ function getSuppliesRun(task: NonNullable<PropertyDetail["tasks"]>[number]) {
   return null
 }
 
-function isRunSubmitted(run?: ChecklistRunLite | SuppliesRunLite | null) {
+function getIssuesRun(task: NonNullable<PropertyDetail["tasks"]>[number]) {
+  if (task.issuesChecklistRun) return task.issuesChecklistRun
+  if (task.issueRun) return task.issueRun
+  return null
+}
+
+function isRunSubmitted(run?: ChecklistRunLite | SuppliesRunLite | IssueRunLite | null) {
   if (!run) return false
 
   const normalized = normalizeChecklistStatus(run.status, {
@@ -899,6 +958,25 @@ export default function PropertyTasksPage() {
   const { language } = useAppLanguage()
   const texts = getPropertyDetailTexts(language)
 
+  const issuesChecklistTitle =
+    language === "en"
+      ? "Primary issues and damages checklist"
+      : "Βασική λίστα βλαβών και ζημιών"
+  const issuesChecklistSubtitle =
+    language === "en"
+      ? "The property's main issues and damages checklist used when this execution section is sent in tasks."
+      : "Η κύρια λίστα βλαβών και ζημιών του ακινήτου που χρησιμοποιείται όταν στέλνεται αυτή η ενότητα στις εργασίες."
+  const noIssuesChecklist =
+    language === "en"
+      ? "No primary issues and damages checklist has been defined."
+      : "Δεν έχει οριστεί βασική λίστα βλαβών και ζημιών."
+  const issuesSectionLabel =
+    language === "en" ? "Issues checklist" : "Λίστα βλαβών και ζημιών"
+  const issuesAutoFromProperty =
+    language === "en"
+      ? "From primary issues template"
+      : "Από τη βασική λίστα βλαβών και ζημιών"
+
   const [property, setProperty] = useState<PropertyDetail | null>(null)
   const [partners, setPartners] = useState<PartnerOption[]>([])
   const [loading, setLoading] = useState(true)
@@ -1098,6 +1176,10 @@ export default function PropertyTasksPage() {
 
   const primaryCleaningChecklist = useMemo(() => {
     return getPrimaryCleaningChecklist(property)
+  }, [property])
+
+  const primaryIssuesChecklist = useMemo(() => {
+    return getIssuesTemplate(property)
   }, [property])
 
   const readiness = useMemo(
@@ -1464,10 +1546,13 @@ export default function PropertyTasksPage() {
                   const activeAlert = isTaskAlertActive(task)
                   const cleaningEnabled = Boolean(task.sendCleaningChecklist)
                   const suppliesEnabled = Boolean(task.sendSuppliesChecklist)
+                  const issuesEnabled = Boolean(task.sendIssuesChecklist)
                   const cleaningRun = getCleaningRun(task)
                   const suppliesRun = getSuppliesRun(task)
+                  const issuesRun = getIssuesRun(task)
                   const cleaningSubmitted = isRunSubmitted(cleaningRun)
                   const suppliesSubmitted = isRunSubmitted(suppliesRun)
+                  const issuesSubmitted = isRunSubmitted(issuesRun)
 
                   const normalizedTaskStatus = normalizeTaskStatus(task.status)
                   const showNormalBadge =
@@ -1573,7 +1658,7 @@ export default function PropertyTasksPage() {
                         <InfoChip label={texts.partner} value={partnerValue} />
                       </div>
 
-                      <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                      <div className="mt-3 grid gap-3 sm:grid-cols-4">
                         <InfoChip
                           label={texts.cleaningSection}
                           value={
@@ -1595,6 +1680,19 @@ export default function PropertyTasksPage() {
                                   language,
                                   true,
                                   suppliesSubmitted
+                                )}`
+                              : texts.notEnabled
+                          }
+                        />
+
+                        <InfoChip
+                          label={issuesSectionLabel}
+                          value={
+                            issuesEnabled
+                              ? `${issuesRun?.template?.title || issuesAutoFromProperty} · ${getChecklistSectionStateLabel(
+                                  language,
+                                  true,
+                                  issuesSubmitted
                                 )}`
                               : texts.notEnabled
                           }
@@ -1674,6 +1772,24 @@ export default function PropertyTasksPage() {
                     ? primaryCleaningChecklist.title
                     : texts.noCleaningChecklist}
                 </div>
+              </div>
+
+              <div className="rounded-2xl bg-slate-50 p-3">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  {issuesChecklistTitle}
+                </div>
+                <div className="mt-1 text-sm font-medium text-slate-900">
+                  {primaryIssuesChecklist
+                    ? primaryIssuesChecklist.title
+                    : noIssuesChecklist}
+                </div>
+                {primaryIssuesChecklist ? (
+                  <div className="mt-1 text-xs text-slate-500">
+                    {language === "en"
+                      ? `Items: ${safeArray(primaryIssuesChecklist.items).length}`
+                      : `Στοιχεία: ${safeArray(primaryIssuesChecklist.items).length}`}
+                  </div>
+                ) : null}
               </div>
 
               <div className="rounded-2xl bg-slate-50 p-3">
@@ -1846,7 +1962,7 @@ export default function PropertyTasksPage() {
               </button>
             </div>
 
-            <div className="mt-3">
+            <div className="mt-3 space-y-3">
               {primaryCleaningChecklist ? (
                 <div className="grid gap-2 md:grid-cols-2">
                   <InfoChip
@@ -1863,10 +1979,26 @@ export default function PropertyTasksPage() {
                   {texts.noCleaningChecklist}
                 </div>
               )}
-            </div>
 
-            <div className="mt-4 rounded-2xl bg-slate-50 p-3 text-sm text-slate-600">
-              {texts.suppliesFlowInfo}
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  {issuesChecklistTitle}
+                </div>
+                <div className="mt-1 text-sm font-medium text-slate-900">
+                  {primaryIssuesChecklist
+                    ? primaryIssuesChecklist.title
+                    : noIssuesChecklist}
+                </div>
+                <div className="mt-1 text-xs text-slate-500">
+                  {primaryIssuesChecklist
+                    ? `${language === "en" ? "Items" : "Στοιχεία"}: ${safeArray(primaryIssuesChecklist.items).length}`
+                    : issuesChecklistSubtitle}
+                </div>
+              </div>
+
+              <div className="mt-1 rounded-2xl bg-slate-50 p-3 text-sm text-slate-600">
+                {texts.suppliesFlowInfo}
+              </div>
             </div>
           </div>
         </section>
@@ -2219,6 +2351,22 @@ export default function PropertyTasksPage() {
               </div>
             ) : null}
 
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {issuesChecklistTitle}
+              </div>
+              <div className="mt-1 text-sm font-medium text-slate-900">
+                {primaryIssuesChecklist
+                  ? primaryIssuesChecklist.title
+                  : noIssuesChecklist}
+              </div>
+              <div className="mt-1 text-sm text-slate-600">
+                {primaryIssuesChecklist
+                  ? `${language === "en" ? "Items" : "Στοιχεία"}: ${safeArray(primaryIssuesChecklist.items).length}`
+                  : issuesChecklistSubtitle}
+              </div>
+            </div>
+
             <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
               {texts.suppliesFlowInfo}
             </div>
@@ -2243,6 +2391,11 @@ export default function PropertyTasksPage() {
           <div className="space-y-4">
             <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">
               {texts.noCleaningChecklist}
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+              <div className="font-medium text-slate-900">{issuesChecklistTitle}</div>
+              <div className="mt-1">{primaryIssuesChecklist ? primaryIssuesChecklist.title : noIssuesChecklist}</div>
             </div>
 
             <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-600">
@@ -2317,52 +2470,26 @@ export default function PropertyTasksPage() {
         onClose={() => setActiveModal(null)}
         closeLabel={texts.close}
       >
-        {openIssues.length === 0 ? (
-          <div className="space-y-4">
-            <div className="text-sm text-slate-500">{texts.noIssues}</div>
-            <Link
-              href="/issues"
-              className="inline-flex items-center rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
-            >
-              {texts.openIssuesPage}
-            </Link>
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              {issuesChecklistTitle}
+            </div>
+            <div className="mt-1 text-sm font-medium text-slate-900">
+              {primaryIssuesChecklist
+                ? primaryIssuesChecklist.title
+                : noIssuesChecklist}
+            </div>
+            <div className="mt-1 text-sm text-slate-600">
+              {primaryIssuesChecklist
+                ? `${language === "en" ? "Items" : "Στοιχεία"}: ${safeArray(primaryIssuesChecklist.items).length}`
+                : issuesChecklistSubtitle}
+            </div>
           </div>
-        ) : (
-          <div className="space-y-4">
-            {openIssues.map((issue) => (
-              <div key={issue.id} className="rounded-2xl border border-slate-200 p-4">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <div className="font-medium text-slate-900">{issue.title}</div>
 
-                      <span className={badgeClasses(issue.status)}>
-                        {getIssueStatusLabel(language, issue.status)}
-                      </span>
-
-                      <span className={badgeClasses(issue.severity)}>
-                        {getIssuePriorityLabel(language, issue.severity)}
-                      </span>
-                    </div>
-
-                    {issue.description ? (
-                      <div className="mt-2 text-sm text-slate-700">
-                        {issue.description}
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <Link
-                    href={`/issues/${issue.id}`}
-                    className="inline-flex items-center justify-center rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                  >
-                    {texts.viewIssue}
-                  </Link>
-                </div>
-              </div>
-            ))}
-
-            <div className="pt-2">
+          {openIssues.length === 0 ? (
+            <div className="space-y-4">
+              <div className="text-sm text-slate-500">{texts.noIssues}</div>
               <Link
                 href="/issues"
                 className="inline-flex items-center rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
@@ -2370,8 +2497,52 @@ export default function PropertyTasksPage() {
                 {texts.openIssuesPage}
               </Link>
             </div>
-          </div>
-        )}
+          ) : (
+            <>
+              {openIssues.map((issue) => (
+                <div key={issue.id} className="rounded-2xl border border-slate-200 p-4">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="font-medium text-slate-900">{issue.title}</div>
+
+                        <span className={badgeClasses(issue.status)}>
+                          {getIssueStatusLabel(language, issue.status)}
+                        </span>
+
+                        <span className={badgeClasses(issue.severity)}>
+                          {getIssuePriorityLabel(language, issue.severity)}
+                        </span>
+                      </div>
+
+                      {issue.description ? (
+                        <div className="mt-2 text-sm text-slate-700">
+                          {issue.description}
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <Link
+                      href={`/issues/${issue.id}`}
+                      className="inline-flex items-center justify-center rounded-2xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      {texts.viewIssue}
+                    </Link>
+                  </div>
+                </div>
+              ))}
+
+              <div className="pt-2">
+                <Link
+                  href="/issues"
+                  className="inline-flex items-center rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
+                >
+                  {texts.openIssuesPage}
+                </Link>
+              </div>
+            </>
+          )}
+        </div>
       </Modal>
     </>
   )
