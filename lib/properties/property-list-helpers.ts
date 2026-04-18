@@ -281,7 +281,36 @@ export function getReadinessExplanation(
 
 // ─── Booking selectors ────────────────────────────────────────────────────────
 
+function resolveBookingByStoredNextCheckIn(property: PropertyListItem) {
+  const canonicalNextCheckInAt = normalizeDate(property.nextCheckInAt)
+  if (!canonicalNextCheckInAt) return null
+
+  const candidates = safeArray(property.bookings)
+    .map((booking) => ({
+      ...booking,
+      checkInAt: combineCheckInDateTime(booking.checkInDate, booking.checkInTime ?? null),
+    }))
+    .filter((booking) => {
+      const status = normalizeBookingStatus(booking.status)
+      return (
+        booking.checkInAt &&
+        booking.checkInAt.getTime() >= canonicalNextCheckInAt.getTime() &&
+        (status === "CONFIRMED" || status === "PENDING")
+      )
+    })
+    .sort(
+      (a, b) =>
+        (a.checkInAt?.getTime() ?? Number.MAX_SAFE_INTEGER) -
+        (b.checkInAt?.getTime() ?? Number.MAX_SAFE_INTEGER)
+    )
+
+  return candidates[0] ?? null
+}
+
 export function getNextUpcomingBooking(property: PropertyListItem) {
+  const canonicalMatch = resolveBookingByStoredNextCheckIn(property)
+  if (canonicalMatch) return canonicalMatch
+
   const now = Date.now()
 
   return safeArray(property.bookings)
