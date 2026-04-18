@@ -471,6 +471,14 @@ const taskAssignmentWithChecklistArgs =
               completedAt: true,
             },
           },
+          issueRun: {
+            select: {
+              id: true,
+              status: true,
+              startedAt: true,
+              completedAt: true,
+            },
+          },
         },
       },
     },
@@ -741,13 +749,19 @@ export async function POST(req: NextRequest, context: RouteContext) {
       const supplyRunStatus = String(
         latestAssignment.task.supplyRun?.status || ""
       ).toLowerCase()
+      const issueRunStatus = String(
+        latestAssignment.task.issueRun?.status || ""
+      ).toLowerCase()
 
       const taskNeedsSupplies = Boolean(latestAssignment.task.sendSuppliesChecklist)
+      const taskNeedsIssues = Boolean(latestAssignment.task.sendIssuesChecklist)
       const suppliesAlreadyCompleted = supplyRunStatus === "completed"
+      const issuesAlreadyCompleted = issueRunStatus === "completed"
 
       const shouldCompleteWholeTask =
         mode === "submit" &&
-        (!taskNeedsSupplies || suppliesAlreadyCompleted)
+        (!taskNeedsSupplies || suppliesAlreadyCompleted) &&
+        (!taskNeedsIssues || issuesAlreadyCompleted)
 
       await tx.taskAssignment.update({
         where: {
@@ -1086,7 +1100,9 @@ export async function POST(req: NextRequest, context: RouteContext) {
             mode,
             answersCount: incomingAnswers.length,
             sendSuppliesChecklist: latestAssignment.task.sendSuppliesChecklist,
+            sendIssuesChecklist: latestAssignment.task.sendIssuesChecklist,
             supplyRunStatus: latestAssignment.task.supplyRun?.status || null,
+            issueRunStatus: latestAssignment.task.issueRun?.status || null,
             taskCompleted: shouldCompleteWholeTask,
           },
         },
